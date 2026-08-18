@@ -1,0 +1,63 @@
+name: DeepSeek PR Review
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
+          # Cap diff size so it fits in the model's context window
+          head -c 60000 pr.diff > pr_trimmed.diff
+
+      - name: Run DeepSeek review
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          jq -n --arg diff "$(cat pr_trimmed.diff)" '{
+            model: "deepseek-ai/deepseek-v4-pro",
+            messages: [{
+              role: "user",
+              content: ("Review the following pull request diff for correctness bugs, security issues, and simplification opportunities. Be concise and specific, referencing file names where possible.\n\n" + $diff)
+            }],
+            temperature: 0.3,
+            top_p: 0.95,
+            max_tokens: 4096,
+            chat_template_kwargs: {thinking: false},
+            stream: false
+          }' > payload.json
+
+          curl -sS \
+            --request POST \
+            --url 'https://integrate.api.nvidia.com/v1/chat/completions' \
+            --header "Authorization: Bearer ${NVIDIA_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data @payload.json > response.json
+
+          if ! jq -e '.choices[0].message.content' response.json > /dev/null 2>&1; then
+            echo "DeepSeek API call failed:"
+            cat response.json
+            exit 1
+          fi
+
+          jq -r '.choices[0].message.content' response.json > review.md
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file review.md

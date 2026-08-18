@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]>=2.0
+asyncpg
+pydantic-settings
+pydantic[email]
+pyjwt[crypto]
+httpx
+pypdf>=5.0
+cryptography
+qrcode[pil]
