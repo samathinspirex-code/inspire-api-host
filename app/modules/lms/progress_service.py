@@ -14,7 +14,6 @@ from app.modules.lms.schemas import (
     StudentCourseProgressResponse,
 )
 
-VIDEO_COMPLETION_PERCENT = 99
 MAX_HEARTBEAT_SECONDS = 30
 FIRST_HEARTBEAT_ALLOWANCE_SECONDS = 15
 
@@ -51,6 +50,28 @@ def continuous_watched_seconds(
         duration,
         max(previous_watched, min(requested_position, furthest_allowed)),
     )
+
+
+def video_completion_state(
+    watched_seconds: int,
+    duration_seconds: int,
+    event: str,
+    previously_completed: bool = False,
+) -> tuple[int, float, bool]:
+    """Return a stable video completion state for storage and display.
+
+    A valid Vimeo ``ended`` event is only accepted when the server has already
+    observed playback to within two seconds of the end. Once completed, the
+    stored watched time and percentage are normalized to the exact duration and
+    100 percent so a later heartbeat cannot leave the UI at 99 percent.
+    """
+    percent = completion_percent(watched_seconds, duration_seconds)
+    completed = previously_completed or (
+        event == "ended" and watched_seconds >= max(0, duration_seconds - 2)
+    )
+    if completed:
+        return duration_seconds, 100.0, True
+    return watched_seconds, percent, False
 
 
 async def record_progress(
@@ -103,11 +124,13 @@ async def record_progress(
             accepted_delta,
             duration,
         )
-        percent = completion_percent(watched, duration)
-        completed = previous_completed or percent >= VIDEO_COMPLETION_PERCENT or (
-            payload.event == "ended" and watched >= max(0, duration - 2)
+        watched, percent, completed = video_completion_state(
+            watched,
+            duration,
+            payload.event,
+            previous_completed,
         )
-        position = min(payload.position_seconds, watched)
+        position = duration if completed else min(payload.position_seconds, watched)
     else:
         watched = previous_watched
         percent = 100.0 if previous_completed or payload.event == "complete" else 0.0
