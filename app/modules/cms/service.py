@@ -33,6 +33,7 @@ from app.modules.cms.schemas import (
     NewsEventUpdate,
     PublicNewsEventListResponse,
 )
+from app.modules.cms import media_service
 
 
 async def list_programs(
@@ -56,7 +57,9 @@ async def list_programs(
 
 async def create_program(db: AsyncSession, payload: ProgramCreate) -> ProgramDetail:
     repo = ProgramRepository(db)
-    program = await repo.create(payload.model_dump())
+    data = payload.model_dump()
+    data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
+    program = await repo.create(data)
     return ProgramDetail.model_validate(program)
 
 
@@ -87,7 +90,9 @@ async def update_program(db: AsyncSession, program_id: int, payload: ProgramUpda
     if program is None:
         raise NotFoundError(f"Program {program_id} not found")
 
-    program = await repo.update(program, payload.model_dump())
+    data = payload.model_dump()
+    data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
+    program = await repo.update(program, data)
     return ProgramDetail.model_validate(program)
 
 
@@ -269,6 +274,7 @@ async def create_news_event(db: AsyncSession, payload: NewsEventCreate) -> NewsE
     if await repo.get_by_slug(payload.slug):
         raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
+    data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
     if data["status"] == "Published" and data["published_on"] is None:
         data["published_on"] = date.today()
     item = await repo.create(data)
@@ -293,6 +299,7 @@ async def update_news_event(
     if slug_owner is not None and slug_owner.news_event_id != news_event_id:
         raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
+    data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
     if data["status"] == "Published" and data["published_on"] is None:
         data["published_on"] = date.today()
     item = await repo.update(item, data)

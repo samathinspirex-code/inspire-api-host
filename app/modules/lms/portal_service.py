@@ -25,6 +25,7 @@ def _course_item(row, role: str) -> PortalCourseItem:
         code=course.code,
         title=course.title,
         description=course.description,
+        takeaways=course.takeaways,
         cover_image_url=course.cover_image_url,
         status=course.status,
         created_at=course.created_at,
@@ -106,6 +107,7 @@ async def update_my_course_presentation(
         raise NotFoundError("This course is not assigned to your lecturer profile")
     course = row[0]
     course.description = payload.description.strip() if payload.description else None
+    course.takeaways = payload.takeaways.strip() if payload.takeaways else None
     course.cover_image_url = payload.cover_image_url.strip() if payload.cover_image_url else None
     await db.commit()
     await db.refresh(course)

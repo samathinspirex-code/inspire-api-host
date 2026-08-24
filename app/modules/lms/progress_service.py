@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.lms import content_service
-from app.modules.lms.models import CourseEnrollment
+from app.modules.lms.models import CourseEnrollment, LmsLectureQuizAttempt
+from sqlalchemy import select
 from app.modules.lms.repository import ContentRepository, ModuleRepository, ProgressRepository
 from app.modules.lms.schemas import (
     LearningProgressResponse,
@@ -109,10 +110,14 @@ async def record_progress(
         )
         position = min(payload.position_seconds, watched)
     else:
-        watched = previous_watched
+        # Non-video resources use an explicit completion state only. Do not
+        # retain or infer duration, position, or watched-time data for PDFs,
+        # text lessons, links, assignments, or quizzes.
+        watched = 0
+        duration = None
         percent = 100.0 if previous_completed or payload.event == "complete" else 0.0
         completed = previous_completed or payload.event == "complete"
-        position = payload.position_seconds
+        position = 0
 
     progress = await repo.save(
         item_id,
@@ -152,6 +157,22 @@ async def get_course_progress(
         course_id, student_user_id
     )
     content_repo = ContentRepository(db)
+    all_items = [
+        item
+        for module in modules
+        for item in await content_repo.list_items(module.module_id)
+        if item.status == "published"
+    ]
+    item_ids = [item.learning_item_id for item in all_items]
+    attempts_by_item: dict[int, list[LmsLectureQuizAttempt]] = {}
+    if item_ids:
+        attempts = (await db.execute(select(LmsLectureQuizAttempt).where(
+            LmsLectureQuizAttempt.learning_item_id.in_(item_ids),
+            LmsLectureQuizAttempt.student_user_id == student_user_id,
+            LmsLectureQuizAttempt.submitted_at.is_not(None),
+        ).order_by(LmsLectureQuizAttempt.created_at, LmsLectureQuizAttempt.attempt_id))).scalars().all()
+        for attempt in attempts:
+            attempts_by_item.setdefault(attempt.learning_item_id, []).append(attempt)
     sections = []
     total_items = 0
     completed_items = 0
@@ -172,6 +193,11 @@ async def get_course_progress(
                 section_completed += 1
             if progress and (last_activity_at is None or progress.last_activity_at > last_activity_at):
                 last_activity_at = progress.last_activity_at
+            quiz_attempts = attempts_by_item.get(item.learning_item_id, [])
+            quiz_percentages = [
+                round((attempt.score or 0) * 100 / attempt.total_questions, 2)
+                for attempt in quiz_attempts if attempt.total_questions
+            ]
             response_items.append(
                 ProgressLearningItem(
                     learning_item_id=item.learning_item_id,
@@ -180,6 +206,9 @@ async def get_course_progress(
                     position=item.position,
                     is_required=item.is_required,
                     progress=progress_response,
+                    quiz_attempt_count=len(quiz_attempts),
+                    quiz_first_attempt_percent=quiz_percentages[0] if quiz_percentages else None,
+                    quiz_best_attempt_percent=max(quiz_percentages) if quiz_percentages else None,
                 )
             )
         total_items += len(items)

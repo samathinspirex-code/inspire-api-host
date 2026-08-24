@@ -42,6 +42,37 @@ def _user_access_keys(user: User) -> list[str]:
     return [ual.access_level.access_key for ual in user.access_levels if ual.access_level.is_active]
 
 
+CMS_PORTAL_ACCESS_KEYS = frozenset({"CMS", "USER_MANAGEMENT"})
+LMS_PORTAL_ROLE_KEYS = frozenset({"SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"})
+
+
+def resolve_authenticator_invitation_portals(
+    access_keys: list[str] | set[str],
+) -> tuple[str, dict[str, str]]:
+    access = set(access_keys)
+    has_lms_access = "LMS" in access and bool(access.intersection(LMS_PORTAL_ROLE_KEYS))
+    has_cms_access = bool(access.intersection(CMS_PORTAL_ACCESS_KEYS))
+
+    portal_urls: dict[str, str] = {}
+    if has_lms_access:
+        portal_urls["Inspire LMS"] = settings.LMS_UI_URL.rstrip("/")
+    if has_cms_access:
+        portal_urls["Course Studio CMS"] = settings.CMS_UI_URL.rstrip("/")
+    if not portal_urls:
+        raise APIError(
+            400,
+            "PORTAL_ACCESS_REQUIRED",
+            "Assign LMS with an LMS role, CMS, or User Management before sending an Authenticator invitation.",
+        )
+
+    setup_ui_url = (
+        settings.LMS_UI_URL.rstrip("/")
+        if has_lms_access
+        else settings.CMS_UI_URL.rstrip("/")
+    )
+    return setup_ui_url, portal_urls
+
+
 async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
     access = _user_access_keys(user)
     access_token, expires_in = create_access_token(user.user_id, user.email, access)
@@ -155,10 +186,15 @@ async def issue_authenticator_setup_invitation(
     created_by: int | None,
     setup_ui_url: str | None = None,
 ) -> AuthenticatorInvitationResponse:
-    setup = await issue_authenticator_setup_token(db, user_id, created_by)
     user = await UserRepository(db).get(user_id)
+    if user is None or not user.is_active:
+        raise APIError(404, "NOT_FOUND", "Active user not found.")
+    automatic_setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
+        _user_access_keys(user)
+    )
+    setup = await issue_authenticator_setup_token(db, user_id, created_by)
     setup_url = build_authenticator_setup_url(
-        setup.email, setup.setup_token, setup_ui_url
+        setup.email, setup.setup_token, setup_ui_url or automatic_setup_ui_url
     )
     delivery = await send_authenticator_invitation(
         setup.email,
@@ -166,6 +202,7 @@ async def issue_authenticator_setup_invitation(
         setup_url,
         setup.expires_at,
         f"authenticator-setup-{user_id}-{hash_value(setup.setup_token)[:20]}",
+        portal_urls,
     )
     return AuthenticatorInvitationResponse(
         **setup.model_dump(),

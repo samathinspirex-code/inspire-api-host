@@ -95,6 +95,19 @@ class LmsCourseAssistantSettings(Base):
     )
 
 
+class LmsCourseAssistantSystemSettings(Base):
+    __tablename__ = "lms_course_assistant_system_settings"
+
+    settings_id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    automation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    auto_generate_questions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    questions_per_video: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class LmsCourseKnowledgeSource(Base):
     __tablename__ = "lms_course_knowledge_sources"
     __table_args__ = (
@@ -145,3 +158,74 @@ class LmsCourseKnowledgeChunk(Base):
     start_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     end_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LmsLectureQuestion(Base):
+    __tablename__ = "lms_lecture_questions"
+    __table_args__ = (
+        Index("idx_lms_lecture_questions_item_status", "learning_item_id", "status"),
+        Index("idx_lms_lecture_questions_course", "course_id"),
+    )
+
+    question_id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_courses.course_id", ondelete="CASCADE"), nullable=False
+    )
+    learning_item_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_learning_items.learning_item_id", ondelete="CASCADE"), nullable=False
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    option_a: Mapped[str] = mapped_column(Text, nullable=False)
+    option_b: Mapped[str] = mapped_column(Text, nullable=False)
+    option_c: Mapped[str] = mapped_column(Text, nullable=False)
+    option_d: Mapped[str] = mapped_column(Text, nullable=False)
+    correct_option: Mapped[str] = mapped_column(String(1), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    difficulty: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
+    topic: Mapped[str] = mapped_column(String(120), nullable=False, default="General")
+    source_locator: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="generated")
+    generated_by_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LmsLectureQuizAttempt(Base):
+    __tablename__ = "lms_lecture_quiz_attempts"
+    __table_args__ = (
+        Index("idx_lms_lecture_quiz_attempts_student_item", "student_user_id", "learning_item_id"),
+    )
+
+    attempt_id: Mapped[int] = mapped_column(primary_key=True)
+    learning_item_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_learning_items.learning_item_id", ondelete="CASCADE"), nullable=False
+    )
+    student_user_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_student_profiles.user_id", ondelete="CASCADE"), nullable=False
+    )
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_questions: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LmsLectureQuizAttemptQuestion(Base):
+    __tablename__ = "lms_lecture_quiz_attempt_questions"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "question_id", name="uq_lms_attempt_question"),
+        UniqueConstraint("attempt_id", "position", name="uq_lms_attempt_question_position"),
+    )
+
+    attempt_question_id: Mapped[int] = mapped_column(primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_lecture_quiz_attempts.attempt_id", ondelete="CASCADE"), nullable=False
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_lecture_questions.question_id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_option: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

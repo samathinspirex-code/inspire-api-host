@@ -2,6 +2,7 @@ import html
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Mapping
 
 import httpx
 
@@ -19,33 +20,62 @@ class EmailDeliveryResult:
     error: str | None = None
 
 
-def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime) -> str:
+def _portal_links_html(portal_urls: Mapping[str, str] | None) -> str:
+    if not portal_urls:
+        return ""
+    links = "".join(
+        f'<li><a href="{html.escape(url, quote=True)}">{html.escape(label)}</a></li>'
+        for label, url in portal_urls.items()
+    )
+    return f"<p>After setup, use the portal links assigned to your account:</p><ul>{links}</ul>"
+
+
+def _portal_links_text(portal_urls: Mapping[str, str] | None) -> str:
+    if not portal_urls:
+        return ""
+    links = "\n".join(f"- {label}: {url}" for label, url in portal_urls.items())
+    return f"\n\nAfter setup, use the portal links assigned to your account:\n{links}"
+
+
+def build_invitation_html(
+    full_name: str,
+    setup_url: str,
+    expires_at: datetime,
+    portal_urls: Mapping[str, str] | None = None,
+) -> str:
     safe_name = html.escape(full_name or "Inspire user")
     safe_url = html.escape(setup_url, quote=True)
     safe_expiry = html.escape(expires_at.strftime("%d %B %Y at %H:%M UTC"))
     return f"""
     <div style="font-family:Arial,sans-serif;line-height:1.55;color:#202124;max-width:560px">
       <p>Hello {safe_name},</p>
-      <p>An administrator created an Inspire LMS account for this email address.</p>
+      <p>An administrator created an Inspire College account for this email address.</p>
       <p>Open the following secure link to connect Google Authenticator:</p>
       <p><a href="{safe_url}">Complete Authenticator setup</a></p>
+      {_portal_links_html(portal_urls)}
       <p>The single-use link expires on {safe_expiry}.</p>
-      <p>If you did not expect this account, contact your LMS administrator. Do not forward this message or share its setup link.</p>
-      <p>Inspire College LMS</p>
+      <p>If you did not expect this account, contact your administrator. Do not forward this message or share its setup link.</p>
+      <p>Inspire College</p>
     </div>
     """.strip()
 
 
-def build_invitation_text(full_name: str, setup_url: str, expires_at: datetime) -> str:
+def build_invitation_text(
+    full_name: str,
+    setup_url: str,
+    expires_at: datetime,
+    portal_urls: Mapping[str, str] | None = None,
+) -> str:
     return (
         f"Hello {full_name or 'Inspire user'},\n\n"
-        "An administrator created an Inspire LMS account for this email address.\n\n"
+        "An administrator created an Inspire College account for this email address.\n\n"
         "Open this secure link to connect Google Authenticator:\n"
-        f"{setup_url}\n\n"
+        f"{setup_url}"
+        f"{_portal_links_text(portal_urls)}\n\n"
         f"This single-use link expires on {expires_at.strftime('%d %B %Y at %H:%M UTC')}.\n\n"
-        "If you did not expect this account, contact your LMS administrator. "
+        "If you did not expect this account, contact your administrator. "
         "Do not forward this message or share its setup link.\n\n"
-        "Inspire College LMS"
+        "Inspire College"
     )
 
 
@@ -55,6 +85,7 @@ def build_mailjet_payload(
     setup_url: str,
     expires_at: datetime,
     custom_id: str,
+    portal_urls: Mapping[str, str] | None = None,
 ) -> dict:
     return {
         "Messages": [
@@ -65,8 +96,8 @@ def build_mailjet_payload(
                 },
                 "To": [{"Email": to_email, "Name": full_name}],
                 "Subject": settings.AUTHENTICATOR_INVITATION_SUBJECT,
-                "TextPart": build_invitation_text(full_name, setup_url, expires_at),
-                "HTMLPart": build_invitation_html(full_name, setup_url, expires_at),
+                "TextPart": build_invitation_text(full_name, setup_url, expires_at, portal_urls),
+                "HTMLPart": build_invitation_html(full_name, setup_url, expires_at, portal_urls),
                 "CustomID": custom_id,
                 "TrackOpens": "disabled",
                 "TrackClicks": "disabled",
@@ -81,6 +112,7 @@ async def send_authenticator_invitation(
     setup_url: str,
     expires_at: datetime,
     idempotency_key: str,
+    portal_urls: Mapping[str, str] | None = None,
 ) -> EmailDeliveryResult:
     if not settings.MAILJET_API_KEY.strip() or not settings.MAILJET_SECRET_KEY.strip():
         return EmailDeliveryResult(False, error="The Mailjet API credentials are not configured.")
@@ -88,7 +120,7 @@ async def send_authenticator_invitation(
         return EmailDeliveryResult(False, error="The Mailjet sender email is not configured.")
 
     payload = build_mailjet_payload(
-        to_email, full_name, setup_url, expires_at, idempotency_key
+        to_email, full_name, setup_url, expires_at, idempotency_key, portal_urls
     )
     try:
         async with httpx.AsyncClient(timeout=15) as client:

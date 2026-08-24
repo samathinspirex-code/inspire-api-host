@@ -13,6 +13,7 @@ def _student_item(user, profile, relation, status: str) -> AssignmentPersonItem:
         email=user.email,
         reference_number=profile.student_number,
         secondary_label=profile.phone,
+        profile_image_url=profile.profile_image_url,
         status=status,
         assigned_at=assigned_at,
     )
@@ -25,6 +26,7 @@ def _lecturer_item(user, profile, relation) -> AssignmentPersonItem:
         email=user.email,
         reference_number=profile.staff_number,
         secondary_label=profile.job_title,
+        profile_image_url=profile.profile_image_url,
         status="assigned",
         assigned_at=relation.assigned_at,
     )

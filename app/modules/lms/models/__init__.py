@@ -17,9 +17,13 @@ from app.modules.lms.models.assignment import (
 )
 from app.modules.lms.models.content import (
     LmsCourseAssistantSettings,
+    LmsCourseAssistantSystemSettings,
     LmsCourseDiscussion,
     LmsCourseKnowledgeSource,
     LmsCourseKnowledgeChunk,
+    LmsLectureQuestion,
+    LmsLectureQuizAttempt,
+    LmsLectureQuizAttemptQuestion,
     LmsLearningItem,
     LmsModuleAccess,
 )
@@ -45,7 +49,11 @@ __all__ = [
     "LmsModuleAccess",
     "LmsCourseDiscussion",
     "LmsCourseAssistantSettings",
+    "LmsCourseAssistantSystemSettings",
     "LmsCourseKnowledgeSource",
     "LmsCourseKnowledgeChunk",
+    "LmsLectureQuestion",
+    "LmsLectureQuizAttempt",
+    "LmsLectureQuizAttemptQuestion",
     "LmsLearningProgress",
 ]

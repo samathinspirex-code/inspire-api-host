@@ -6,10 +6,14 @@ from urllib.parse import parse_qs, urlparse
 from app.core.config import settings
 from app.modules.auth.invitation_email import (
     build_invitation_html,
+    build_invitation_text,
     build_mailjet_payload,
     send_authenticator_invitation,
 )
-from app.modules.auth.service import build_authenticator_setup_url
+from app.modules.auth.service import (
+    build_authenticator_setup_url,
+    resolve_authenticator_invitation_portals,
+)
 
 
 class AuthenticatorInvitationTests(unittest.TestCase):
@@ -36,6 +40,66 @@ class AuthenticatorInvitationTests(unittest.TestCase):
         self.assertNotIn("<script>", result)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", result)
         self.assertIn("&quot;unsafe&quot;&amp;email=", result)
+
+    def test_lms_user_receives_lms_setup_and_portal_link(self):
+        with (
+            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
+            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
+        ):
+            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
+                ["LMS", "STUDENT"]
+            )
+
+        self.assertEqual(setup_ui_url, "https://lms.example.com")
+        self.assertEqual(portal_urls, {"Inspire LMS": "https://lms.example.com"})
+
+    def test_mixed_access_user_receives_both_portal_links(self):
+        with (
+            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
+            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
+        ):
+            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
+                ["LMS", "ADMIN", "CMS", "USER_MANAGEMENT"]
+            )
+
+        self.assertEqual(setup_ui_url, "https://lms.example.com")
+        self.assertEqual(
+            portal_urls,
+            {
+                "Inspire LMS": "https://lms.example.com",
+                "Course Studio CMS": "https://cms.example.com",
+            },
+        )
+
+    def test_cms_only_user_receives_cms_setup_and_portal_link(self):
+        with (
+            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
+            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
+        ):
+            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
+                ["USER_MANAGEMENT"]
+            )
+
+        self.assertEqual(setup_ui_url, "https://cms.example.com")
+        self.assertEqual(
+            portal_urls, {"Course Studio CMS": "https://cms.example.com"}
+        )
+
+    def test_email_lists_only_assigned_portals(self):
+        portal_urls = {"Inspire LMS": "https://lms.example.com"}
+        expires_at = datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc)
+
+        html_result = build_invitation_html(
+            "Example Student", "https://lms.example.com/setup", expires_at, portal_urls
+        )
+        text_result = build_invitation_text(
+            "Example Student", "https://lms.example.com/setup", expires_at, portal_urls
+        )
+
+        self.assertIn("Inspire LMS", html_result)
+        self.assertIn("https://lms.example.com", html_result)
+        self.assertNotIn("Course Studio CMS", html_result)
+        self.assertIn("- Inspire LMS: https://lms.example.com", text_result)
 
     def test_mailjet_payload_uses_transactional_v31_format(self):
         expires_at = datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc)

@@ -1,6 +1,9 @@
 ALTER TABLE lms_courses
     ADD COLUMN IF NOT EXISTS cover_image_url TEXT;
 
+ALTER TABLE lms_courses
+    ADD COLUMN IF NOT EXISTS takeaways TEXT;
+
 CREATE TABLE IF NOT EXISTS lms_learning_items (
     learning_item_id BIGSERIAL PRIMARY KEY,
     module_id BIGINT NOT NULL REFERENCES lms_modules(module_id) ON DELETE CASCADE,

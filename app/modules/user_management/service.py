@@ -1,7 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
-from app.core.config import settings
 from app.modules.auth.models import User
 from app.modules.auth import service as auth_service
 from app.modules.auth.repository import AuthenticatorRepository
@@ -74,7 +73,7 @@ async def create_authenticator_setup_token(
     db: AsyncSession, user_id: int, created_by: int
 ) -> AuthenticatorInvitationResponse:
     return await auth_service.issue_authenticator_setup_invitation(
-        db, user_id, created_by, settings.CMS_UI_URL
+        db, user_id, created_by
     )
 
 

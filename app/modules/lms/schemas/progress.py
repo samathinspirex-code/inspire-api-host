@@ -35,6 +35,9 @@ class ProgressLearningItem(BaseModel):
     position: int
     is_required: bool
     progress: LearningProgressResponse | None = None
+    quiz_attempt_count: int = 0
+    quiz_first_attempt_percent: float | None = None
+    quiz_best_attempt_percent: float | None = None
 
 
 class ProgressSection(BaseModel):

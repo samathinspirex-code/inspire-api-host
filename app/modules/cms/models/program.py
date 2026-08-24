@@ -25,6 +25,7 @@ class Program(Base):
     tag: Mapped[Optional[str]] = mapped_column(String(100))
     icon: Mapped[str] = mapped_column(String(100), nullable=False)
     image_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    image_url: Mapped[Optional[str]] = mapped_column(Text)
     blurb: Mapped[str] = mapped_column(Text, nullable=False)
     popularity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

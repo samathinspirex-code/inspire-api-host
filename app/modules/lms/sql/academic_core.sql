@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS lms_courses (
     code        VARCHAR(100) NOT NULL UNIQUE,
     title       VARCHAR(255) NOT NULL,
     description TEXT,
+    takeaways   TEXT,
     cover_image_url TEXT,
     status      VARCHAR(20) NOT NULL DEFAULT 'draft'
                 CHECK (status IN ('draft', 'active', 'archived')),

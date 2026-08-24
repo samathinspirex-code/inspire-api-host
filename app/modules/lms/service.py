@@ -155,6 +155,7 @@ def _to_course_item(course, program_title: str, program_code: str) -> CourseItem
         code=course.code,
         title=course.title,
         description=course.description,
+        takeaways=course.takeaways,
         cover_image_url=course.cover_image_url,
         status=course.status,
         created_at=course.created_at,
@@ -198,6 +199,7 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
             "code": code,
             "title": payload.title.strip(),
             "description": payload.description.strip() if payload.description else None,
+            "takeaways": payload.takeaways.strip() if payload.takeaways else None,
             "created_by": user_id,
         }
     )
@@ -225,6 +227,7 @@ async def update_course(db: AsyncSession, course_id: int, payload: CourseUpdate)
             "code": code,
             "title": payload.title.strip(),
             "description": payload.description.strip() if payload.description else None,
+            "takeaways": payload.takeaways.strip() if payload.takeaways else None,
         },
     )
     return _to_course_item(course, programme.title, programme.code)
@@ -432,6 +435,7 @@ def _student_item(
         email=user.email,
         student_number=profile.student_number,
         phone=profile.phone,
+        profile_image_url=profile.profile_image_url,
         notes=profile.notes,
         is_active=user.is_active,
         created_at=user.created_at,
@@ -453,6 +457,7 @@ def _lecturer_item(
         staff_number=profile.staff_number,
         job_title=profile.job_title,
         phone=profile.phone,
+        profile_image_url=profile.profile_image_url,
         expertise=profile.expertise,
         is_active=user.is_active,
         created_at=user.created_at,
@@ -492,7 +497,7 @@ async def create_student(db: AsyncSession, payload: StudentCreate, created_by: i
         raise ValidationError("LMS and STUDENT access levels must be seeded before creating students")
     user, profile = await repo.create_student(
         {"full_name": payload.full_name.strip(), "email": email, "created_by": created_by},
-        {"student_number": number, "phone": _clean_optional(payload.phone), "notes": _clean_optional(payload.notes)},
+        {"student_number": number, "phone": _clean_optional(payload.phone), "profile_image_url": _clean_optional(payload.profile_image_url), "notes": _clean_optional(payload.notes)},
         access,
     )
     return _student_item(user, profile)
@@ -514,7 +519,7 @@ async def update_student(db: AsyncSession, user_id: int, payload: StudentUpdate)
         user,
         profile,
         {"full_name": payload.full_name.strip(), "email": email},
-        {"student_number": number, "phone": _clean_optional(payload.phone), "notes": _clean_optional(payload.notes)},
+        {"student_number": number, "phone": _clean_optional(payload.phone), "profile_image_url": _clean_optional(payload.profile_image_url), "notes": _clean_optional(payload.notes)},
     )
     return _student_item(user, profile)
 
@@ -561,6 +566,7 @@ async def create_lecturer(db: AsyncSession, payload: LecturerCreate, created_by:
             "staff_number": number,
             "job_title": _clean_optional(payload.job_title),
             "phone": _clean_optional(payload.phone),
+            "profile_image_url": _clean_optional(payload.profile_image_url),
             "expertise": _clean_optional(payload.expertise),
         },
         access,
@@ -588,6 +594,7 @@ async def update_lecturer(db: AsyncSession, user_id: int, payload: LecturerUpdat
             "staff_number": number,
             "job_title": _clean_optional(payload.job_title),
             "phone": _clean_optional(payload.phone),
+            "profile_image_url": _clean_optional(payload.profile_image_url),
             "expertise": _clean_optional(payload.expertise),
         },
     )
