@@ -25,6 +25,7 @@ class CourseCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=100)
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=5000)
+    takeaways: str | None = Field(None, max_length=12000)
     cover_image_url: str | None = Field(None, max_length=5000)
     status: CourseStatus = "draft"
 
@@ -35,6 +36,7 @@ class CourseUpdate(CourseCreate):
 
 class CoursePresentationUpdate(BaseModel):
     description: str | None = Field(None, max_length=5000)
+    takeaways: str | None = Field(None, max_length=12000)
     cover_image_url: str | None = Field(None, max_length=5000)
 
 
@@ -48,6 +50,7 @@ class CourseItem(BaseModel):
     code: str
     title: str
     description: str | None
+    takeaways: str | None
     cover_image_url: str | None
     status: CourseStatus
     created_at: datetime

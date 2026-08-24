@@ -19,6 +19,7 @@ class ProgramCreate(BaseModel):
     tag: Optional[str] = Field(None, max_length=100)
     icon: str = Field(..., min_length=1, max_length=100)
     image_label: str = Field(..., min_length=1, max_length=100)
+    image_url: Optional[str] = None
     blurb: str = Field(..., min_length=1)
     popularity: int = 0
 
@@ -42,6 +43,7 @@ class ProgramListItem(BaseModel):
     tag: Optional[str]
     icon: str
     image_label: str
+    image_url: Optional[str]
     blurb: str
     popularity: int
 

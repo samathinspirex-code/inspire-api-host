@@ -84,6 +84,18 @@ Run the LMS SQL scripts against the existing Inspire PostgreSQL database in this
 
 The scripts are under `app/modules/lms/sql`. They are idempotent and can be run through the Supabase SQL Editor. Existing installations adding automatic attendance need to run only `attendance.sql` after pulling this version.
 
+## CMS media storage
+
+The Media Library uses S3-compatible object storage. Configure the `MEDIA_*`
+environment values, install the updated requirements, then run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\apply_media_storage_migration.py
+```
+
+On AWS, prefer an IAM role limited to the selected bucket rather than storing
+permanent AWS access keys in `.env`.
+
 Google Meet attendance identity matching also requires the **Google People API** to be enabled in the same Google Cloud project as the Meet and Calendar APIs.
 
 For existing Course Studio installations, apply student learning progress with:

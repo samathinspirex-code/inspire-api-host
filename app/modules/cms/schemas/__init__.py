@@ -29,6 +29,13 @@ from app.modules.cms.schemas.news_event import (
     NewsEventUpdate,
     PublicNewsEventListResponse,
 )
+from app.modules.cms.schemas.media_asset import (
+    MediaAssetUpdate,
+    MediaAssetListResponse,
+    MediaAssetResponse,
+    MediaUploadRequest,
+    MediaUploadTicket,
+)
 
 __all__ = [
     "Pagination",
@@ -54,4 +61,9 @@ __all__ = [
     "NewsEventListResponse",
     "NewsEventUpdate",
     "PublicNewsEventListResponse",
+    "MediaAssetUpdate",
+    "MediaAssetListResponse",
+    "MediaAssetResponse",
+    "MediaUploadRequest",
+    "MediaUploadTicket",
 ]

@@ -129,6 +129,17 @@ class CourseAssistantSettingsResponse(CourseAssistantSettingsUpdate):
     course_id: int
 
 
+class CourseAssistantSystemSettingsUpdate(BaseModel):
+    automation_enabled: bool = True
+    auto_generate_questions: bool = True
+    questions_per_video: int = Field(20, ge=4, le=50)
+
+
+class CourseAssistantSystemSettingsResponse(CourseAssistantSystemSettingsUpdate):
+    openai_configured: bool
+    model: str
+
+
 class CourseKnowledgeSourceCreate(BaseModel):
     learning_item_id: int | None = Field(None, gt=0)
     source_type: KnowledgeSourceType
@@ -168,7 +179,7 @@ class CourseAssistantAdminResponse(BaseModel):
     course_code: str
     course_title: str
     program_title: str
-    settings: CourseAssistantSettingsResponse
+    ai_generation_enabled: bool = False
     sources: list[CourseKnowledgeSourceResponse] = Field(default_factory=list)
 
 
@@ -228,3 +239,86 @@ class CourseAssistantIngestionResponse(BaseModel):
     sources_indexed: int
     chunks_created: int
     failures: list[CourseAssistantIngestionFailure] = Field(default_factory=list)
+
+
+QuestionOption = Literal["A", "B", "C", "D"]
+QuestionDifficulty = Literal["easy", "medium", "hard"]
+QuestionStatus = Literal["generated", "approved", "rejected"]
+
+
+class LectureQuestionUpsert(BaseModel):
+    learning_item_id: int = Field(..., gt=0)
+    question: str = Field(..., min_length=5, max_length=2000)
+    option_a: str = Field(..., min_length=1, max_length=1000)
+    option_b: str = Field(..., min_length=1, max_length=1000)
+    option_c: str = Field(..., min_length=1, max_length=1000)
+    option_d: str = Field(..., min_length=1, max_length=1000)
+    correct_option: QuestionOption
+    explanation: str = Field(..., min_length=1, max_length=3000)
+    difficulty: QuestionDifficulty = "medium"
+    topic: str = Field("General", min_length=1, max_length=120)
+    source_locator: str | None = Field(None, max_length=120)
+    status: QuestionStatus = "generated"
+
+
+class LectureQuestionResponse(LectureQuestionUpsert):
+    model_config = ConfigDict(from_attributes=True)
+
+    question_id: int
+    course_id: int
+    generated_by_ai: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class LectureQuestionListResponse(BaseModel):
+    data: list[LectureQuestionResponse] = Field(default_factory=list)
+
+
+class LectureQuestionGenerateRequest(BaseModel):
+    learning_item_id: int = Field(..., gt=0)
+    count: int = Field(30, ge=5, le=30)
+
+
+class LectureQuizOption(BaseModel):
+    key: QuestionOption
+    text: str
+
+
+class LectureQuizQuestion(BaseModel):
+    question_id: int
+    question: str
+    options: list[LectureQuizOption]
+
+
+class LectureQuizAttemptResponse(BaseModel):
+    available: bool
+    reason: str | None = None
+    attempt_id: int | None = None
+    attempt_number: int = 0
+    questions: list[LectureQuizQuestion] = Field(default_factory=list)
+
+
+class LectureQuizAnswer(BaseModel):
+    question_id: int = Field(..., gt=0)
+    selected_option: QuestionOption
+
+
+class LectureQuizSubmitRequest(BaseModel):
+    attempt_id: int = Field(..., gt=0)
+    answers: list[LectureQuizAnswer] = Field(..., min_length=1, max_length=10)
+
+
+class LectureQuizAnswerResult(BaseModel):
+    question_id: int
+    selected_option: QuestionOption
+    correct_option: QuestionOption
+    is_correct: bool
+    explanation: str
+
+
+class LectureQuizResultResponse(BaseModel):
+    attempt_id: int
+    score: int
+    total_questions: int
+    results: list[LectureQuizAnswerResult]

@@ -3,7 +3,7 @@ from typing import Literal
 
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,10 @@ from app.modules.lms import attendance_service
 from app.modules.lms import content_service
 from app.modules.lms import progress_service
 from app.modules.lms import assistant_service
+from app.modules.cms import media_service
+from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
 from app.modules.lms.dependencies import require_lms_roles
+from app.modules.lms.models import LmsModule
 from app.modules.lms.schemas import (
     CourseCreate,
     CourseItem,
@@ -85,6 +88,11 @@ from app.modules.lms.schemas import (
     CourseAssistantAnswer,
     CourseAssistantPublicResponse,
     CourseAssistantQuestion,
+    CourseAssistantSettingsResponse,
+    CourseAssistantSettingsUpdate,
+    LectureQuizAttemptResponse,
+    LectureQuizResultResponse,
+    LectureQuizSubmitRequest,
 )
 
 router = APIRouter(prefix="/api/v1/lms", tags=["lms"])
@@ -105,6 +113,7 @@ super_admin_access = require_lms_roles("SUPER_ADMIN")
 lecturer_access = require_lms_roles("LECTURER")
 student_access = require_lms_roles("STUDENT")
 attendance_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
+media_upload_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 
 
 def _google_ui_redirect(status: str, message: str = "") -> str:
@@ -219,14 +228,40 @@ async def get_my_course_studio(
     return await content_service.get_course_studio(db, course_id, current_user.user_id, role)
 
 
+@router.post("/studio/media/uploads", response_model=MediaUploadTicket, status_code=201)
+async def request_course_media_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(media_upload_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    return await media_service.request_upload(db, payload, current_user.user_id)
+
+
+@router.post("/studio/media/{asset_id}/complete", response_model=MediaAssetResponse)
+async def complete_course_media_upload(
+    asset_id: int,
+    current_user: CurrentUser = Depends(media_upload_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAssetResponse:
+    return await media_service.complete_upload(db, asset_id)
+
+
 @router.get("/my/courses/{course_id}/assistant", response_model=CourseAssistantPublicResponse)
 async def get_my_course_assistant(
     course_id: int,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(portal_access),
     db: AsyncSession = Depends(get_db),
 ) -> CourseAssistantPublicResponse:
     role = service.resolve_role(current_user.access)
-    return await assistant_service.get_public_settings(db, course_id, current_user.user_id, role)
+    response = await assistant_service.get_public_settings(db, course_id, current_user.user_id, role)
+    background_tasks.add_task(
+        assistant_service.automate_course_intelligence,
+        course_id,
+        current_user.user_id,
+        ingest=False,
+    )
+    return response
 
 
 @router.post("/my/courses/{course_id}/assistant/ask", response_model=CourseAssistantAnswer)
@@ -240,6 +275,60 @@ async def ask_my_course_assistant(
     return await assistant_service.answer_question(
         db, course_id, payload.question.strip(), current_user.user_id, role
     )
+
+
+@router.get(
+    "/studio/courses/{course_id}/assistant-settings",
+    response_model=CourseAssistantSettingsResponse,
+)
+async def get_studio_assistant_settings(
+    course_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseAssistantSettingsResponse:
+    return await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+
+
+@router.put(
+    "/studio/courses/{course_id}/assistant-settings",
+    response_model=CourseAssistantSettingsResponse,
+)
+async def update_studio_assistant_settings(
+    course_id: int,
+    payload: CourseAssistantSettingsUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseAssistantSettingsResponse:
+    response = await assistant_service.update_manager_settings(
+        db, course_id, payload, current_user.user_id
+    )
+    if response.is_enabled:
+        background_tasks.add_task(
+            assistant_service.automate_course_intelligence,
+            course_id,
+            current_user.user_id,
+        )
+    return response
+
+
+@router.get("/my/learning-items/{item_id}/lecture-quiz", response_model=LectureQuizAttemptResponse)
+async def get_my_lecture_quiz(
+    item_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuizAttemptResponse:
+    return await assistant_service.get_or_create_quiz_attempt(db, item_id, current_user.user_id)
+
+
+@router.post("/my/learning-items/{item_id}/lecture-quiz/submit", response_model=LectureQuizResultResponse)
+async def submit_my_lecture_quiz(
+    item_id: int,
+    payload: LectureQuizSubmitRequest,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuizResultResponse:
+    return await assistant_service.submit_quiz_attempt(db, item_id, payload, current_user.user_id)
 
 
 @router.post(
@@ -368,20 +457,34 @@ async def reorder_studio_sections(
 async def create_studio_item(
     module_id: int,
     payload: LearningItemCreate,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> LearningItemResponse:
-    return await content_service.create_learning_item(db, module_id, payload, current_user.user_id)
+    item = await content_service.create_learning_item(db, module_id, payload, current_user.user_id)
+    background_tasks.add_task(
+        assistant_service.automate_learning_item_intelligence,
+        item.learning_item_id,
+        current_user.user_id,
+    )
+    return item
 
 
 @router.put("/studio/items/{item_id}", response_model=LearningItemResponse)
 async def update_studio_item(
     item_id: int,
     payload: LearningItemUpdate,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> LearningItemResponse:
-    return await content_service.update_learning_item(db, item_id, payload, current_user.user_id)
+    item = await content_service.update_learning_item(db, item_id, payload, current_user.user_id)
+    background_tasks.add_task(
+        assistant_service.automate_learning_item_intelligence,
+        item.learning_item_id,
+        current_user.user_id,
+    )
+    return item
 
 
 @router.delete("/studio/items/{item_id}", status_code=204)
@@ -407,10 +510,22 @@ async def reorder_studio_items(
 async def update_studio_access(
     module_id: int,
     payload: ModuleAccessUpdate,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> ModuleAccessResponse:
-    return await content_service.update_module_access(db, module_id, payload, current_user.user_id)
+    response = await content_service.update_module_access(db, module_id, payload, current_user.user_id)
+    if payload.is_unlocked:
+        module = await db.get(LmsModule, module_id)
+        if module is not None and await assistant_service.activate_course_assistant(
+            db, module.course_id, current_user.user_id
+        ):
+            background_tasks.add_task(
+                assistant_service.automate_course_intelligence,
+                module.course_id,
+                current_user.user_id,
+            )
+    return response
 
 
 @router.get("/my/classes", response_model=PortalClassListResponse)

@@ -6,17 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.modules.auth.dependencies import require_access
 from app.modules.auth.schemas import CurrentUser
-from app.modules.cms import service
+from app.modules.cms import media_service, service
 from app.modules.lms import assistant_service
 from app.modules.lms.schemas import (
     CourseAssistantAdminResponse,
     CourseAssistantCatalogResponse,
     CourseAssistantIngestionResponse,
-    CourseAssistantSettingsResponse,
-    CourseAssistantSettingsUpdate,
-    CourseKnowledgeSourceCreate,
+    CourseAssistantSystemSettingsResponse,
+    CourseAssistantSystemSettingsUpdate,
     CourseKnowledgeSourceResponse,
     CourseKnowledgeSourceUpdate,
+    LectureQuestionGenerateRequest,
+    LectureQuestionListResponse,
+    LectureQuestionResponse,
+    LectureQuestionUpsert,
 )
 from app.modules.cms.schemas import (
     OutcomeCreate,
@@ -36,9 +39,54 @@ from app.modules.cms.schemas import (
     NewsEventItem,
     NewsEventListResponse,
     NewsEventUpdate,
+    MediaAssetListResponse,
+    MediaAssetResponse,
+    MediaAssetUpdate,
+    MediaUploadRequest,
+    MediaUploadTicket,
 )
 
 router = APIRouter(prefix="/api/v1/cms", tags=["cms"], dependencies=[Depends(require_access("CMS"))])
+
+
+@router.get("/media", response_model=MediaAssetListResponse)
+async def list_media_assets(
+    kind: str | None = Query(None), db: AsyncSession = Depends(get_db)
+) -> MediaAssetListResponse:
+    return await media_service.list_assets(db, kind)
+
+
+@router.post("/media/uploads", response_model=MediaUploadTicket, status_code=201)
+async def request_media_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(require_access("CMS")),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    return await media_service.request_upload(db, payload, current_user.user_id)
+
+
+@router.get("/media/by-name/{name}", response_model=MediaAssetResponse)
+async def get_media_asset_by_name(name: str, db: AsyncSession = Depends(get_db)) -> MediaAssetResponse:
+    return await media_service.get_asset_by_name(db, name)
+
+
+@router.post("/media/{asset_id}/complete", response_model=MediaAssetResponse)
+async def complete_media_upload(
+    asset_id: int, db: AsyncSession = Depends(get_db)
+) -> MediaAssetResponse:
+    return await media_service.complete_upload(db, asset_id)
+
+
+@router.patch("/media/{asset_id}", response_model=MediaAssetResponse)
+async def update_media_asset(
+    asset_id: int, payload: MediaAssetUpdate, db: AsyncSession = Depends(get_db)
+) -> MediaAssetResponse:
+    return await media_service.update_asset(db, asset_id, payload)
+
+
+@router.delete("/media/{asset_id}", status_code=204)
+async def delete_media_asset(asset_id: int, db: AsyncSession = Depends(get_db)) -> None:
+    await media_service.delete_asset(db, asset_id)
 
 
 @router.get("/programs", response_model=ProgramListResponse)
@@ -179,33 +227,31 @@ async def list_course_assistants(db: AsyncSession = Depends(get_db)) -> CourseAs
     return await assistant_service.list_admin_courses(db)
 
 
+@router.get(
+    "/course-assistant-config",
+    response_model=CourseAssistantSystemSettingsResponse,
+)
+async def get_course_assistant_config(
+    db: AsyncSession = Depends(get_db),
+) -> CourseAssistantSystemSettingsResponse:
+    return await assistant_service.get_system_settings(db)
+
+
+@router.put(
+    "/course-assistant-config",
+    response_model=CourseAssistantSystemSettingsResponse,
+)
+async def update_course_assistant_config(
+    payload: CourseAssistantSystemSettingsUpdate,
+    current_user: CurrentUser = Depends(require_access("CMS")),
+    db: AsyncSession = Depends(get_db),
+) -> CourseAssistantSystemSettingsResponse:
+    return await assistant_service.update_system_settings(db, payload, current_user.user_id)
+
+
 @router.get("/course-assistants/{course_id}", response_model=CourseAssistantAdminResponse)
 async def get_course_assistant(course_id: int, db: AsyncSession = Depends(get_db)) -> CourseAssistantAdminResponse:
     return await assistant_service.get_admin_course(db, course_id)
-
-
-@router.put("/course-assistants/{course_id}/settings", response_model=CourseAssistantSettingsResponse)
-async def update_course_assistant_settings(
-    course_id: int,
-    payload: CourseAssistantSettingsUpdate,
-    current_user: CurrentUser = Depends(require_access("CMS")),
-    db: AsyncSession = Depends(get_db),
-) -> CourseAssistantSettingsResponse:
-    return await assistant_service.update_settings(db, course_id, payload, current_user.user_id)
-
-
-@router.post(
-    "/course-assistants/{course_id}/sources",
-    response_model=CourseKnowledgeSourceResponse,
-    status_code=201,
-)
-async def create_course_assistant_source(
-    course_id: int,
-    payload: CourseKnowledgeSourceCreate,
-    current_user: CurrentUser = Depends(require_access("CMS")),
-    db: AsyncSession = Depends(get_db),
-) -> CourseKnowledgeSourceResponse:
-    return await assistant_service.create_source(db, course_id, payload, current_user.user_id)
 
 
 @router.post("/course-assistants/{course_id}/ingest", response_model=CourseAssistantIngestionResponse)
@@ -226,6 +272,42 @@ async def update_course_assistant_source(
     return await assistant_service.update_source(db, source_id, payload)
 
 
-@router.delete("/course-assistant-sources/{source_id}", status_code=204)
-async def delete_course_assistant_source(source_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    await assistant_service.delete_source(db, source_id)
+@router.get("/course-assistants/{course_id}/questions", response_model=LectureQuestionListResponse)
+async def list_course_questions(
+    course_id: int, db: AsyncSession = Depends(get_db)
+) -> LectureQuestionListResponse:
+    return await assistant_service.list_questions(db, course_id)
+
+
+@router.post("/course-assistants/{course_id}/questions/generate", response_model=LectureQuestionListResponse)
+async def generate_course_questions(
+    course_id: int,
+    payload: LectureQuestionGenerateRequest,
+    current_user: CurrentUser = Depends(require_access("CMS")),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionListResponse:
+    return await assistant_service.generate_questions(db, course_id, payload, current_user.user_id)
+
+
+@router.post("/course-assistants/{course_id}/questions", response_model=LectureQuestionResponse, status_code=201)
+async def create_course_question(
+    course_id: int,
+    payload: LectureQuestionUpsert,
+    current_user: CurrentUser = Depends(require_access("CMS")),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionResponse:
+    return await assistant_service.create_question(db, course_id, payload, current_user.user_id)
+
+
+@router.put("/course-question-bank/{question_id}", response_model=LectureQuestionResponse)
+async def update_course_question(
+    question_id: int,
+    payload: LectureQuestionUpsert,
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionResponse:
+    return await assistant_service.update_question(db, question_id, payload)
+
+
+@router.delete("/course-question-bank/{question_id}", status_code=204)
+async def delete_course_question(question_id: int, db: AsyncSession = Depends(get_db)) -> None:
+    await assistant_service.delete_question(db, question_id)

@@ -13,6 +13,7 @@ class AssignmentPersonItem(BaseModel):
     email: str
     reference_number: str
     secondary_label: str | None
+    profile_image_url: str | None = None
     status: str
     assigned_at: datetime
 

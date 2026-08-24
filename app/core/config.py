@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     APP_NAME: str = "Inspire API"
     ENVIRONMENT: str = "development"
 
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:5174"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ]
 
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -52,7 +57,17 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-5.6-luna"
+    OPENAI_TIMEOUT_SECONDS: int = 45
+    OPENAI_MAX_OUTPUT_TOKENS: int = 700
     COURSE_ASSISTANT_MAX_PDF_MB: int = 25
+
+    MEDIA_BUCKET: str = ""
+    MEDIA_REGION: str = "ap-northeast-1"
+    MEDIA_ENDPOINT_URL: str = ""
+    MEDIA_PUBLIC_BASE_URL: str = ""
+    MEDIA_ACCESS_KEY_ID: str = ""
+    MEDIA_SECRET_ACCESS_KEY: str = ""
+    MEDIA_UPLOAD_EXPIRE_SECONDS: int = 900
 
 
 settings = Settings()

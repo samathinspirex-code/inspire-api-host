@@ -9,3 +9,5 @@ httpx
 pypdf>=5.0
 cryptography
 qrcode[pil]
+boto3>=1.35
+pip-system-certs>=5.3; sys_platform == "win32"
