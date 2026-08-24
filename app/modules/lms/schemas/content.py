@@ -53,6 +53,8 @@ class LearningItemResponse(BaseModel):
     duration_seconds: int | None = None
     last_position_seconds: int = 0
     download_allowed: bool = True
+    is_accessible: bool = True
+    item_locked_reason: str | None = None
 
 
 class LearningItemReorderRequest(BaseModel):

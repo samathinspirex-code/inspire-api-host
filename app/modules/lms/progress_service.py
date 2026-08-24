@@ -76,6 +76,16 @@ async def record_progress(
     )
     if not unlocked:
         raise ForbiddenError("This learning item has not been released to you")
+    studio = await content_service.get_course_studio(
+        db, module.course_id, student_user_id, "STUDENT"
+    )
+    accessible = any(
+        candidate.learning_item_id == item_id and candidate.is_accessible
+        for section in studio.sections
+        for candidate in section.items
+    )
+    if not accessible:
+        raise ForbiddenError("Complete the previous video knowledge check first")
 
     repo = ProgressRepository(db)
     existing = await repo.get(item_id, student_user_id)

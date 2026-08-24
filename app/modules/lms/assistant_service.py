@@ -10,6 +10,7 @@ import math
 import re
 import socket
 import ssl
+from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
@@ -87,6 +88,7 @@ TOKEN_ALIASES = {
 }
 MAX_CHUNK_CHARS = 1400
 CHUNK_OVERLAP_CHARS = 180
+VIDEO_QUIZ_QUESTION_COUNT = 4
 logger = logging.getLogger(__name__)
 
 QUESTION_META_PATTERNS = (
@@ -551,12 +553,25 @@ async def _synced_source(db: AsyncSession, course_id: int, item, source_type: st
 async def ingest_course_content(db: AsyncSession, course_id: int, user_id: int) -> CourseAssistantIngestionResponse:
     if await db.get(LmsCourse, course_id) is None:
         raise NotFoundError(f"Course {course_id} not found")
-    items = list((await db.execute(
+    item_rows = list((await db.execute(
         select(LmsLearningItem).join(LmsModule).where(
             LmsModule.course_id == course_id,
             LmsLearningItem.item_type.in_(["pdf", "text", "video"]),
         ).order_by(LmsModule.position, LmsLearningItem.position)
     )).scalars().all())
+    # A failed extraction rolls back the session and expires ORM instances.
+    # Keep immutable snapshots so one unavailable transcript cannot prevent the
+    # remaining PDFs, text lessons, or videos from being synchronized.
+    items = [
+        SimpleNamespace(
+            learning_item_id=item.learning_item_id,
+            title=item.title,
+            item_type=item.item_type,
+            resource_url=item.resource_url,
+            text_content=item.text_content,
+        )
+        for item in item_rows
+    ]
     sync_keys = [f"learning-item:{item.learning_item_id}" for item in items]
     # Course Studio is the source of truth. Remove legacy manual entries and
     # synchronized entries whose learning item was removed or changed to an
@@ -1007,11 +1022,11 @@ async def _question_item(db: AsyncSession, course_id: int, item_id: int) -> LmsL
         select(LmsLearningItem).join(LmsModule).where(
             LmsLearningItem.learning_item_id == item_id,
             LmsModule.course_id == course_id,
-            LmsLearningItem.item_type.in_(["video", "pdf", "text"]),
+            LmsLearningItem.item_type == "video",
         )
     )).scalar_one_or_none()
     if item is None:
-        raise ValidationError("Select a video, PDF, or text lesson from this course")
+        raise ValidationError("Question banks are available only for video learning items")
     return item
 
 
@@ -1286,7 +1301,10 @@ async def _student_item(db: AsyncSession, item_id: int, student_id: int):
         raise NotFoundError("Course section not found")
     studio = await content_service.get_course_studio(db, module.course_id, student_id, "STUDENT")
     visible = any(
-        section.is_unlocked and any(candidate.learning_item_id == item_id for candidate in section.items)
+        section.is_unlocked and any(
+            candidate.learning_item_id == item_id and candidate.is_accessible
+            for candidate in section.items
+        )
         for section in studio.sections
     )
     if not visible or item.status != "published":
@@ -1352,9 +1370,9 @@ async def get_or_create_quiz_attempt(
         LmsLectureQuestion.learning_item_id == item_id,
         LmsLectureQuestion.status == "approved",
         LmsLectureQuestion.question_id.not_in(seen_ids),
-    ).order_by(func.random()).limit(4))).scalars().all())
+    ).order_by(func.random()).limit(VIDEO_QUIZ_QUESTION_COUNT))).scalars().all())
     selected = unseen
-    if len(selected) < 4:
+    if len(selected) < VIDEO_QUIZ_QUESTION_COUNT:
         selected_ids = [row.question_id for row in selected]
         supplement = select(LmsLectureQuestion).where(
             LmsLectureQuestion.learning_item_id == item_id,
@@ -1362,10 +1380,13 @@ async def get_or_create_quiz_attempt(
         )
         if selected_ids:
             supplement = supplement.where(LmsLectureQuestion.question_id.not_in(selected_ids))
-        selected += list((await db.execute(supplement.order_by(func.random()).limit(4 - len(selected)))).scalars().all())
-    if len(selected) < 3:
+        selected += list((await db.execute(
+            supplement.order_by(func.random()).limit(VIDEO_QUIZ_QUESTION_COUNT - len(selected))
+        )).scalars().all())
+    if len(selected) < VIDEO_QUIZ_QUESTION_COUNT:
         return LectureQuizAttemptResponse(
-            available=False, reason="The lecturer has not approved enough questions for this video yet"
+            available=False,
+            reason="Four quality-approved questions are not available for this video yet",
         )
     attempt = LmsLectureQuizAttempt(
         learning_item_id=item_id, student_user_id=student_id, total_questions=len(selected)

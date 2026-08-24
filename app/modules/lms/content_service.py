@@ -1,12 +1,19 @@
 from datetime import datetime, timezone
 import re
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
-from app.modules.lms.models import ClassStudent, CourseEnrollment, CourseLecturer, LmsClass
+from app.modules.lms.models import (
+    ClassStudent,
+    CourseEnrollment,
+    CourseLecturer,
+    LmsClass,
+    LmsLectureQuestion,
+    LmsLectureQuizAttempt,
+)
 from app.modules.lms.repository import ContentRepository, CourseRepository, ModuleRepository, ProgressRepository
 from app.modules.lms.schemas import (
     CourseStudioResponse,
@@ -109,7 +116,12 @@ def _student_stream_url(item) -> str | None:
 
 
 def _item_response(
-    item, expose_resource: bool = True, progress=None, allow_download: bool = True
+    item,
+    expose_resource: bool = True,
+    progress=None,
+    allow_download: bool = True,
+    accessible: bool = True,
+    locked_reason: str | None = None,
 ) -> LearningItemResponse:
     data = LearningItemResponse.model_validate(item)
     updates = {}
@@ -125,6 +137,7 @@ def _item_response(
             duration_seconds=progress.duration_seconds,
             last_position_seconds=progress.last_position_seconds,
         )
+    updates.update(is_accessible=accessible, item_locked_reason=locked_reason)
     return data.model_copy(update=updates) if updates else data
 
 
@@ -140,6 +153,22 @@ async def get_course_studio(
         await ProgressRepository(db).list_course_progress(course_id, user_id)
         if role == "STUDENT" else {}
     )
+    quiz_video_ids: set[int] = set()
+    submitted_quiz_ids: set[int] = set()
+    if role == "STUDENT":
+        quiz_video_ids = set((await db.execute(
+            select(LmsLectureQuestion.learning_item_id)
+            .where(LmsLectureQuestion.status == "approved")
+            .group_by(LmsLectureQuestion.learning_item_id)
+            .having(func.count(LmsLectureQuestion.question_id) >= 4)
+        )).scalars().all())
+        submitted_quiz_ids = set((await db.execute(
+            select(LmsLectureQuizAttempt.learning_item_id).where(
+                LmsLectureQuizAttempt.student_user_id == user_id,
+                LmsLectureQuizAttempt.submitted_at.is_not(None),
+            )
+        )).scalars().all())
+    blocked_by_video: str | None = None
     for module in modules:
         if role == "STUDENT" and module.status != "active":
             continue
@@ -148,6 +177,29 @@ async def get_course_studio(
         items = await repo.list_items(module.module_id)
         if role == "STUDENT":
             items = [item for item in items if item.status == "published"]
+        item_responses = []
+        for item in items:
+            accessible = unlocked and blocked_by_video is None
+            item_reason = reason if not unlocked else (
+                f"Complete the knowledge check for {blocked_by_video} first."
+                if blocked_by_video else None
+            )
+            item_responses.append(_item_response(
+                item,
+                accessible or role == "LECTURER",
+                progress_by_item.get(item.learning_item_id),
+                role == "LECTURER",
+                accessible=accessible or role == "LECTURER",
+                locked_reason=item_reason,
+            ))
+            if (
+                role == "STUDENT"
+                and accessible
+                and item.item_type == "video"
+                and item.learning_item_id in quiz_video_ids
+                and item.learning_item_id not in submitted_quiz_ids
+            ):
+                blocked_by_video = item.title
         sections.append(
             StudioSectionResponse(
                 module_id=module.module_id,
@@ -158,15 +210,7 @@ async def get_course_studio(
                 status=module.status,
                 is_unlocked=unlocked,
                 locked_reason=reason,
-                items=[
-                    _item_response(
-                        item,
-                        unlocked or role == "LECTURER",
-                        progress_by_item.get(item.learning_item_id),
-                        role == "LECTURER",
-                    )
-                    for item in items
-                ],
+                items=item_responses,
                 access_rules=[ModuleAccessResponse.model_validate(rule) for rule in rules] if role == "LECTURER" else [],
             )
         )
