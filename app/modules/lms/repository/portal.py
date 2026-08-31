@@ -33,7 +33,7 @@ class PortalRepository:
             )
         return ClassStudent, ClassStudent.class_id == LmsClass.class_id, ClassStudent.student_user_id == user_id
 
-    async def list_courses(self, user_id: int, role: str):
+    async def list_courses(self, user_id: int, role: str, course_id: int | None = None):
         relation, join_on, access_filter = self._course_relation(user_id, role)
         module_count = (
             select(func.count(LmsModule.module_id))
@@ -95,11 +95,13 @@ class PortalRepository:
             .where(access_filter)
             .order_by(LmsCourse.title)
         )
+        if course_id is not None:
+            stmt = stmt.where(LmsCourse.course_id == course_id)
         return list((await self.db.execute(stmt)).all())
 
     async def get_course(self, course_id: int, user_id: int, role: str):
-        rows = await self.list_courses(user_id, role)
-        return next((row for row in rows if row[0].course_id == course_id), None)
+        rows = await self.list_courses(user_id, role, course_id=course_id)
+        return rows[0] if rows else None
 
     async def list_classes(self, user_id: int, role: str):
         relation, join_on, access_filter = self._class_relation(user_id, role)

@@ -58,3 +58,13 @@ class StudentCourseProgressResponse(BaseModel):
     completion_percent: float
     last_activity_at: datetime | None
     sections: list[ProgressSection]
+
+
+class StudentProgressSummary(BaseModel):
+    student_user_id: int
+    completion_percent: float
+
+
+class CourseProgressSummaryResponse(BaseModel):
+    course_id: int
+    data: list[StudentProgressSummary]

@@ -1,19 +1,19 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
-from app.core.config import settings
+from app.core.config import Settings, settings
+from app.modules.auth import service
+from app.modules.auth.repository.authenticator import AuthenticatorRepository
 from app.modules.auth.invitation_email import (
     build_invitation_html,
     build_invitation_text,
     build_mailjet_payload,
     send_authenticator_invitation,
 )
-from app.modules.auth.service import (
-    build_authenticator_setup_url,
-    resolve_authenticator_invitation_portals,
-)
+from app.modules.auth.service import build_authenticator_setup_url
 
 
 class AuthenticatorInvitationTests(unittest.TestCase):
@@ -40,66 +40,6 @@ class AuthenticatorInvitationTests(unittest.TestCase):
         self.assertNotIn("<script>", result)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", result)
         self.assertIn("&quot;unsafe&quot;&amp;email=", result)
-
-    def test_lms_user_receives_lms_setup_and_portal_link(self):
-        with (
-            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
-            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
-        ):
-            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
-                ["LMS", "STUDENT"]
-            )
-
-        self.assertEqual(setup_ui_url, "https://lms.example.com")
-        self.assertEqual(portal_urls, {"Inspire LMS": "https://lms.example.com"})
-
-    def test_mixed_access_user_receives_both_portal_links(self):
-        with (
-            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
-            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
-        ):
-            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
-                ["LMS", "ADMIN", "CMS", "USER_MANAGEMENT"]
-            )
-
-        self.assertEqual(setup_ui_url, "https://lms.example.com")
-        self.assertEqual(
-            portal_urls,
-            {
-                "Inspire LMS": "https://lms.example.com",
-                "Course Studio CMS": "https://cms.example.com",
-            },
-        )
-
-    def test_cms_only_user_receives_cms_setup_and_portal_link(self):
-        with (
-            patch.object(settings, "LMS_UI_URL", "https://lms.example.com/"),
-            patch.object(settings, "CMS_UI_URL", "https://cms.example.com/"),
-        ):
-            setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
-                ["USER_MANAGEMENT"]
-            )
-
-        self.assertEqual(setup_ui_url, "https://cms.example.com")
-        self.assertEqual(
-            portal_urls, {"Course Studio CMS": "https://cms.example.com"}
-        )
-
-    def test_email_lists_only_assigned_portals(self):
-        portal_urls = {"Inspire LMS": "https://lms.example.com"}
-        expires_at = datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc)
-
-        html_result = build_invitation_html(
-            "Example Student", "https://lms.example.com/setup", expires_at, portal_urls
-        )
-        text_result = build_invitation_text(
-            "Example Student", "https://lms.example.com/setup", expires_at, portal_urls
-        )
-
-        self.assertIn("Inspire LMS", html_result)
-        self.assertIn("https://lms.example.com", html_result)
-        self.assertNotIn("Course Studio CMS", html_result)
-        self.assertIn("- Inspire LMS: https://lms.example.com", text_result)
 
     def test_mailjet_payload_uses_transactional_v31_format(self):
         expires_at = datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc)
@@ -138,6 +78,52 @@ class AuthenticatorInvitationTests(unittest.TestCase):
 
 
 class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_invitation_persists_and_emails_two_day_expiry(self):
+        now = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
+        expiry = now + timedelta(days=2)
+        default_minutes = Settings.model_fields["AUTHENTICATOR_SETUP_EXPIRE_MINUTES"].default
+        self.assertEqual(default_minutes, 2880)
+        user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True)
+        users = SimpleNamespace(get=AsyncMock(return_value=user))
+        tokens = SimpleNamespace(create_setup_token=AsyncMock())
+        sessions = SimpleNamespace(revoke_all_for_user=AsyncMock())
+        sender = AsyncMock(return_value=SimpleNamespace(sent=True))
+        with (
+            patch.object(settings, "AUTHENTICATOR_SETUP_EXPIRE_MINUTES", default_minutes),
+            patch.object(service, "datetime") as clock,
+            patch.object(service, "UserRepository", return_value=users),
+            patch.object(service, "AuthenticatorRepository", return_value=tokens),
+            patch.object(service, "RefreshTokenRepository", return_value=sessions),
+            patch.object(service, "send_authenticator_invitation", sender),
+        ):
+            clock.now.return_value = now
+            result = await service.issue_authenticator_setup_invitation(None, 25, 1, "https://lms.example.test")
+        self.assertEqual(result.expires_at, expiry)
+        self.assertEqual(tokens.create_setup_token.await_args.args[2], expiry)
+        self.assertEqual(sender.await_args.args[3], expiry)
+        sessions.revoke_all_for_user.assert_awaited_once_with(25)
+        for render in [build_invitation_html, build_invitation_text]:
+            self.assertIn("02 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
+
+    async def test_setup_link_is_valid_until_two_day_boundary_and_stays_single_use(self):
+        issued = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
+        token = SimpleNamespace(expires_at=issued + timedelta(days=2), used_at=None)
+        user = SimpleNamespace(user_id=25)
+        result = MagicMock()
+        result.one_or_none.return_value = (token, user)
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), rollback=AsyncMock())
+        repo = AuthenticatorRepository(db)
+        with patch("app.modules.auth.repository.authenticator.datetime") as clock:
+            for offset in [timedelta(hours=1), timedelta(hours=24), timedelta(days=2) - timedelta(seconds=1)]:
+                clock.now.return_value = issued + offset
+                self.assertEqual(await repo.get_valid_setup_token("test-hash", "student@example.test"), (token, user))
+            for offset in [timedelta(days=2), timedelta(days=2, seconds=1)]:
+                clock.now.return_value = issued + offset
+                self.assertIsNone(await repo.get_valid_setup_token("test-hash", "student@example.test"))
+            clock.now.return_value = issued + timedelta(hours=1)
+            token.used_at = issued + timedelta(minutes=10)
+            self.assertIsNone(await repo.get_valid_setup_token("test-hash", "student@example.test"))
+
     async def test_missing_mailjet_credentials_returns_manual_fallback(self):
         with (
             patch.object(settings, "MAILJET_API_KEY", ""),

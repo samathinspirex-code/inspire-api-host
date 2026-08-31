@@ -21,10 +21,19 @@ from app.modules.lms import attendance_service
 from app.modules.lms import content_service
 from app.modules.lms import progress_service
 from app.modules.lms import assistant_service
+from app.modules.lms import coursework_service
+from app.modules.lms import gradebook_service
+from app.modules.lms import exam_service
+from app.modules.lms import notification_service
+from app.modules.lms import profile_service
+from app.modules.lms import analytics_service
+from app.modules.lms import dashboard_service
+from app.modules.lms.schemas.dashboard import AdminDashboardResponse
 from app.modules.cms import media_service
 from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
 from app.modules.lms.dependencies import require_lms_roles
 from app.modules.lms.models import LmsModule
+from app.modules.lms.schemas.progress import CourseProgressSummaryResponse
 from app.modules.lms.schemas import (
     CourseCreate,
     CourseItem,
@@ -91,8 +100,42 @@ from app.modules.lms.schemas import (
     CourseAssistantSettingsResponse,
     CourseAssistantSettingsUpdate,
     LectureQuizAttemptResponse,
+    LectureQuizAnswerRequest,
+    LectureQuizAnswerResult,
     LectureQuizResultResponse,
     LectureQuizSubmitRequest,
+    CourseworkAssignmentCreate,
+    CourseworkAssignmentItem,
+    CourseworkAssignmentListResponse,
+    CourseworkDraftUpdate,
+    CourseworkSubmissionListResponse,
+    CourseworkMarkUpdate,
+    GradeReleaseUpdate,
+    LecturerGradebookResponse,
+    StudentGradesResponse,
+    ExamAnswersUpdate,
+    ExamAttemptMarkUpdate,
+    ExamAttemptResponse,
+    ExamAttemptReviewListResponse,
+    ExamCreate,
+    ExamEditorResponse,
+    ExamGradeReleaseUpdate,
+    ExamListResponse,
+    ExamQuestionUpsert,
+    ExamResultResponse,
+    ExamStatusUpdate,
+    AnnouncementCreate,
+    AnnouncementItem,
+    AnnouncementListResponse,
+    AnnouncementStatusUpdate,
+    NotificationDispatchSummary,
+    NotificationListResponse,
+    NotificationReadUpdate,
+    MyProfileResponse,
+    MyProfileUpdate,
+    RecoveryCodesRegenerateRequest,
+    RecoveryCodesResponse,
+    AnalyticsDashboardResponse,
 )
 
 router = APIRouter(prefix="/api/v1/lms", tags=["lms"])
@@ -114,6 +157,22 @@ lecturer_access = require_lms_roles("LECTURER")
 student_access = require_lms_roles("STUDENT")
 attendance_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 media_upload_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
+coursework_access = require_lms_roles("LECTURER", "STUDENT")
+exam_access = require_lms_roles("LECTURER", "STUDENT")
+notification_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
+announcement_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
+profile_access = require_lms_roles("LECTURER", "STUDENT")
+analytics_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
+
+
+@router.get("/admin/dashboard", response_model=AdminDashboardResponse)
+async def get_admin_dashboard(
+    response: Response,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> AdminDashboardResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await dashboard_service.get_admin_dashboard(db)
 
 
 def _google_ui_redirect(status: str, message: str = "") -> str:
@@ -121,6 +180,412 @@ def _google_ui_redirect(status: str, message: str = "") -> str:
     if message:
         params["message"] = message
     return f"{settings.LMS_UI_URL.rstrip('/')}?{urlencode(params)}"
+
+
+@router.get("/profile", response_model=MyProfileResponse)
+async def get_my_profile(
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MyProfileResponse:
+    return await profile_service.get_my_profile(
+        db, current_user.user_id, service.resolve_role(current_user.access)
+    )
+
+
+@router.get("/analytics/dashboard", response_model=AnalyticsDashboardResponse)
+async def get_analytics_dashboard(
+    response: Response,
+    current_user: CurrentUser = Depends(analytics_access),
+    db: AsyncSession = Depends(get_db),
+) -> AnalyticsDashboardResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await analytics_service.get_dashboard(
+        db, current_user.user_id, service.resolve_role(current_user.access)
+    )
+
+
+@router.patch("/profile", response_model=MyProfileResponse)
+async def update_my_profile(
+    payload: MyProfileUpdate,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MyProfileResponse:
+    return await profile_service.update_my_profile(
+        db, current_user.user_id, service.resolve_role(current_user.access), payload
+    )
+
+
+@router.post("/profile/media/uploads", response_model=MediaUploadTicket)
+async def request_profile_photo_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    return await profile_service.request_profile_upload(db, payload, current_user.user_id)
+
+
+@router.post("/profile/media/{asset_id}/complete", response_model=MyProfileResponse)
+async def complete_profile_photo_upload(
+    asset_id: int,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MyProfileResponse:
+    return await profile_service.complete_profile_upload(
+        db, asset_id, current_user.user_id, service.resolve_role(current_user.access)
+    )
+
+
+@router.post("/profile/recovery-codes", response_model=RecoveryCodesResponse)
+async def regenerate_profile_recovery_codes(
+    payload: RecoveryCodesRegenerateRequest,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> RecoveryCodesResponse:
+    return await profile_service.regenerate_recovery_codes(
+        db, current_user.user_id, payload.authenticator_code
+    )
+
+
+@router.get("/coursework/assignments", response_model=CourseworkAssignmentListResponse)
+async def list_coursework_assignments(
+    current_user: CurrentUser = Depends(coursework_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentListResponse:
+    return await coursework_service.list_assignments(
+        db, current_user.user_id, service.resolve_role(current_user.access)
+    )
+
+
+@router.post("/coursework/assignments", response_model=CourseworkAssignmentItem)
+async def create_coursework_assignment(
+    payload: CourseworkAssignmentCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.create_assignment(db, payload, current_user.user_id)
+
+
+@router.post("/coursework/assignments/{assignment_id}/start", response_model=CourseworkAssignmentItem)
+async def start_coursework_assignment(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.start_assignment(db, assignment_id, current_user.user_id)
+
+
+@router.patch("/coursework/assignments/{assignment_id}/draft", response_model=CourseworkAssignmentItem)
+async def save_coursework_assignment_draft(
+    assignment_id: int,
+    payload: CourseworkDraftUpdate,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.save_draft(db, assignment_id, payload, current_user.user_id)
+
+
+@router.post("/coursework/assignments/{assignment_id}/submit", response_model=CourseworkAssignmentItem)
+async def submit_coursework_assignment(
+    assignment_id: int,
+    payload: CourseworkDraftUpdate,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.submit_assignment(db, assignment_id, payload, current_user.user_id)
+
+
+@router.get(
+    "/coursework/assignments/{assignment_id}/submissions",
+    response_model=CourseworkSubmissionListResponse,
+)
+async def list_coursework_submissions(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkSubmissionListResponse:
+    return await coursework_service.list_submissions(db, assignment_id, current_user.user_id)
+
+
+@router.patch(
+    "/coursework/submissions/{submission_id}/mark",
+    response_model=CourseworkSubmissionListResponse,
+)
+async def mark_coursework_submission(
+    submission_id: int,
+    payload: CourseworkMarkUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkSubmissionListResponse:
+    return await coursework_service.mark_submission(db, submission_id, payload, current_user.user_id)
+
+
+@router.post("/coursework/media/uploads", response_model=MediaUploadTicket)
+async def request_coursework_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    assignment_payload = payload.model_copy(update={"folder": "assignment-submissions"})
+    return await media_service.request_upload(db, assignment_payload, current_user.user_id)
+
+
+@router.post("/coursework/media/{asset_id}/complete", response_model=MediaAssetResponse)
+async def complete_coursework_upload(
+    asset_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAssetResponse:
+    return await coursework_service.complete_student_upload(db, asset_id, current_user.user_id)
+
+
+@router.patch(
+    "/coursework/assignments/{assignment_id}/grade-release",
+    response_model=CourseworkAssignmentItem,
+)
+async def update_coursework_grade_release(
+    assignment_id: int,
+    payload: GradeReleaseUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await gradebook_service.set_grade_release(
+        db, assignment_id, payload.grades_released, current_user.user_id
+    )
+
+
+@router.get("/gradebook", response_model=LecturerGradebookResponse)
+async def get_lecturer_gradebook(
+    course_id: int = Query(..., gt=0),
+    class_id: int | None = Query(None, gt=0),
+    assignment_id: int | None = Query(None, gt=0),
+    search: str | None = Query(None, max_length=255),
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> LecturerGradebookResponse:
+    return await gradebook_service.lecturer_gradebook(
+        db, current_user.user_id, course_id, class_id, assignment_id, search
+    )
+
+
+@router.get("/gradebook/export")
+async def export_lecturer_gradebook(
+    course_id: int = Query(..., gt=0),
+    class_id: int | None = Query(None, gt=0),
+    assignment_id: int | None = Query(None, gt=0),
+    search: str | None = Query(None, max_length=255),
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    report = await gradebook_service.lecturer_gradebook(
+        db, current_user.user_id, course_id, class_id, assignment_id, search
+    )
+    content = gradebook_service.build_gradebook_csv(report)
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="gradebook-{report.course_code}-{date.today().isoformat()}.csv"'},
+    )
+
+
+@router.get("/my/grades", response_model=StudentGradesResponse)
+async def get_student_grades(
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentGradesResponse:
+    return await gradebook_service.student_grades(db, current_user.user_id)
+
+
+@router.get("/exams", response_model=ExamListResponse)
+async def list_exams(
+    current_user: CurrentUser = Depends(exam_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamListResponse:
+    return await exam_service.list_exams(db, current_user.user_id, service.resolve_role(current_user.access) or "")
+
+
+@router.post("/exams", response_model=ExamEditorResponse)
+async def create_exam(
+    payload: ExamCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.create_exam(db, payload, current_user.user_id)
+
+
+@router.get("/exams/{exam_id}/editor", response_model=ExamEditorResponse)
+async def get_exam_editor(
+    exam_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.get_editor(db, exam_id, current_user.user_id)
+
+
+@router.post("/exams/{exam_id}/questions", response_model=ExamEditorResponse)
+async def add_exam_question(
+    exam_id: int,
+    payload: ExamQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.add_question(db, exam_id, payload, current_user.user_id)
+
+
+@router.put("/exam-questions/{question_id}", response_model=ExamEditorResponse)
+async def update_exam_question(
+    question_id: int,
+    payload: ExamQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.update_question(db, question_id, payload, current_user.user_id)
+
+
+@router.delete("/exam-questions/{question_id}", response_model=ExamEditorResponse)
+async def delete_exam_question(
+    question_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.delete_question(db, question_id, current_user.user_id)
+
+
+@router.patch("/exams/{exam_id}/status", response_model=ExamEditorResponse)
+async def update_exam_status(
+    exam_id: int,
+    payload: ExamStatusUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.update_status(db, exam_id, payload.status, current_user.user_id)
+
+
+@router.patch("/exams/{exam_id}/grade-release", response_model=ExamEditorResponse)
+async def update_exam_grade_release(
+    exam_id: int,
+    payload: ExamGradeReleaseUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.update_grade_release(db, exam_id, payload.grades_released, current_user.user_id)
+
+
+@router.post("/exams/{exam_id}/start", response_model=ExamAttemptResponse)
+async def start_exam(
+    exam_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamAttemptResponse:
+    return await exam_service.start_exam(db, exam_id, current_user.user_id)
+
+
+@router.patch("/exam-attempts/{attempt_id}/answers", response_model=ExamAttemptResponse)
+async def save_exam_answers(
+    attempt_id: int,
+    payload: ExamAnswersUpdate,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamAttemptResponse:
+    return await exam_service.save_answers(db, attempt_id, payload, current_user.user_id)
+
+
+@router.post("/exam-attempts/{attempt_id}/submit", response_model=ExamAttemptResponse)
+async def submit_exam(
+    attempt_id: int,
+    payload: ExamAnswersUpdate,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamAttemptResponse:
+    return await exam_service.submit_exam(db, attempt_id, payload, current_user.user_id)
+
+
+@router.get("/exams/{exam_id}/attempts", response_model=ExamAttemptReviewListResponse)
+async def list_exam_attempts(
+    exam_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamAttemptReviewListResponse:
+    return await exam_service.list_attempts(db, exam_id, current_user.user_id)
+
+
+@router.patch("/exam-attempts/{attempt_id}/mark", response_model=ExamAttemptReviewListResponse)
+async def mark_exam_attempt(
+    attempt_id: int,
+    payload: ExamAttemptMarkUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamAttemptReviewListResponse:
+    return await exam_service.mark_attempt(db, attempt_id, payload, current_user.user_id)
+
+
+@router.get("/exams/{exam_id}/result", response_model=ExamResultResponse)
+async def get_exam_result(
+    exam_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamResultResponse:
+    return await exam_service.get_result(db, exam_id, current_user.user_id)
+
+
+@router.get("/notifications", response_model=NotificationListResponse)
+async def list_notifications(
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationListResponse:
+    return await notification_service.list_notifications(db, current_user.user_id)
+
+
+@router.patch("/notifications/{notification_id}/read", response_model=NotificationListResponse)
+async def update_notification_read(
+    notification_id: int,
+    payload: NotificationReadUpdate,
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationListResponse:
+    return await notification_service.set_notification_read(db, notification_id, payload.read, current_user.user_id)
+
+
+@router.post("/notifications/read-all", response_model=NotificationListResponse)
+async def mark_all_notifications_read(
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationListResponse:
+    return await notification_service.mark_all_read(db, current_user.user_id)
+
+
+@router.get("/announcements", response_model=AnnouncementListResponse)
+async def list_announcements(
+    current_user: CurrentUser = Depends(announcement_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> AnnouncementListResponse:
+    return await notification_service.list_announcements(db, current_user.user_id, service.resolve_role(current_user.access) or "")
+
+
+@router.post("/announcements", response_model=AnnouncementItem)
+async def create_announcement(
+    payload: AnnouncementCreate,
+    current_user: CurrentUser = Depends(announcement_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> AnnouncementItem:
+    return await notification_service.create_announcement(db, payload, current_user.user_id, service.resolve_role(current_user.access) or "")
+
+
+@router.patch("/announcements/{announcement_id}/status", response_model=AnnouncementItem)
+async def update_announcement_status(
+    announcement_id: int,
+    payload: AnnouncementStatusUpdate,
+    current_user: CurrentUser = Depends(announcement_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> AnnouncementItem:
+    return await notification_service.update_announcement_status(db, announcement_id, payload.status, current_user.user_id, service.resolve_role(current_user.access) or "")
+
+
+@router.post("/notifications/dispatch", response_model=NotificationDispatchSummary)
+async def dispatch_notifications_now(
+    _current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationDispatchSummary:
+    return await notification_service.dispatch_cycle(db)
 
 
 @router.get("/integrations/google", response_model=GoogleIntegrationItem)
@@ -321,6 +786,16 @@ async def get_my_lecture_quiz(
     return await assistant_service.get_or_create_quiz_attempt(db, item_id, current_user.user_id)
 
 
+@router.post("/my/learning-items/{item_id}/lecture-quiz/answer", response_model=LectureQuizAnswerResult)
+async def answer_my_lecture_quiz(
+    item_id: int,
+    payload: LectureQuizAnswerRequest,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuizAnswerResult:
+    return await assistant_service.answer_quiz_question(db, item_id, payload, current_user.user_id)
+
+
 @router.post("/my/learning-items/{item_id}/lecture-quiz/submit", response_model=LectureQuizResultResponse)
 async def submit_my_lecture_quiz(
     item_id: int,
@@ -381,6 +856,15 @@ async def get_student_course_progress(
         current_user.user_id,
         "LECTURER",
     )
+
+
+@router.get("/studio/courses/{course_id}/progress-summary", response_model=CourseProgressSummaryResponse)
+async def get_course_progress_summary(
+    course_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseProgressSummaryResponse:
+    return await progress_service.get_course_progress_summary(db, course_id, current_user.user_id)
 
 
 @router.get("/my/courses/{course_id}/discussions", response_model=CourseDiscussionListResponse)

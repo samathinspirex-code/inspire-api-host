@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.lms import content_service
-from app.modules.lms.models import CourseEnrollment, LmsLectureQuizAttempt
-from sqlalchemy import select
+from app.modules.lms.models import CourseEnrollment, LmsLectureQuizAttempt, LmsLearningItem, LmsLearningProgress, LmsModule
+from sqlalchemy import func, select
+from app.modules.lms.schemas.progress import CourseProgressSummaryResponse, StudentProgressSummary
 from app.modules.lms.repository import ContentRepository, ModuleRepository, ProgressRepository
 from app.modules.lms.schemas import (
     LearningProgressResponse,
@@ -60,32 +61,7 @@ async def record_progress(
     payload: LearningProgressUpdate,
     student_user_id: int,
 ) -> LearningProgressResponse:
-    item = await ContentRepository(db).get_item(item_id)
-    if item is None:
-        raise NotFoundError(f"Learning item {item_id} not found")
-    module = await ModuleRepository(db).get(item.module_id)
-    if module is None:
-        raise NotFoundError(f"Section {item.module_id} not found")
-    await content_service._ensure_course_access(db, module.course_id, student_user_id, "STUDENT")
-    if module.status != "active" or item.status != "published":
-        raise ForbiddenError("This learning item is not published")
-    class_ids = await content_service._student_class_ids(db, module.course_id, student_user_id)
-    rules = await ContentRepository(db).list_access(module.module_id)
-    unlocked, _reason = content_service._student_access(
-        rules, module.course_id, student_user_id, class_ids
-    )
-    if not unlocked:
-        raise ForbiddenError("This learning item has not been released to you")
-    studio = await content_service.get_course_studio(
-        db, module.course_id, student_user_id, "STUDENT"
-    )
-    accessible = any(
-        candidate.learning_item_id == item_id and candidate.is_accessible
-        for section in studio.sections
-        for candidate in section.items
-    )
-    if not accessible:
-        raise ForbiddenError("Complete the previous video knowledge check first")
+    item = await content_service.get_accessible_student_item(db, item_id, student_user_id)
 
     repo = ProgressRepository(db)
     existing = await repo.get(item_id, student_user_id)
@@ -167,10 +143,11 @@ async def get_course_progress(
         course_id, student_user_id
     )
     content_repo = ContentRepository(db)
+    items_by_module = await content_repo.list_items_for_modules([module.module_id for module in modules])
     all_items = [
         item
         for module in modules
-        for item in await content_repo.list_items(module.module_id)
+        for item in items_by_module[module.module_id]
         if item.status == "published"
     ]
     item_ids = [item.learning_item_id for item in all_items]
@@ -190,7 +167,7 @@ async def get_course_progress(
     last_activity_at = None
 
     for module in modules:
-        items = [item for item in await content_repo.list_items(module.module_id) if item.status == "published"]
+        items = [item for item in items_by_module[module.module_id] if item.status == "published"]
         response_items = []
         section_completed = 0
         section_progress_percent = 0.0
@@ -245,3 +222,29 @@ async def get_course_progress(
         last_activity_at=last_activity_at,
         sections=sections,
     )
+
+
+async def get_course_progress_summary(
+    db: AsyncSession, course_id: int, requester_user_id: int,
+) -> CourseProgressSummaryResponse:
+    """Roster percentages in constant queries, without every student's full report."""
+    await content_service._ensure_course_access(db, course_id, requester_user_id, "LECTURER")
+    published_items = select(LmsLearningItem.learning_item_id).join(
+        LmsModule, LmsModule.module_id == LmsLearningItem.module_id,
+    ).where(LmsModule.course_id == course_id, LmsModule.status == "active", LmsLearningItem.status == "published")
+    total_items = await db.scalar(select(func.count()).select_from(published_items.subquery()))
+    totals = select(
+        LmsLearningProgress.student_user_id,
+        func.sum(LmsLearningProgress.completion_percent).label("progress_sum"),
+    ).where(LmsLearningProgress.learning_item_id.in_(published_items)).group_by(
+        LmsLearningProgress.student_user_id,
+    ).subquery()
+    rows = (await db.execute(select(
+        CourseEnrollment.student_user_id, func.coalesce(totals.c.progress_sum, 0),
+    ).outerjoin(totals, totals.c.student_user_id == CourseEnrollment.student_user_id).where(
+        CourseEnrollment.course_id == course_id, CourseEnrollment.status == "enrolled",
+    ).order_by(CourseEnrollment.student_user_id))).all()
+    return CourseProgressSummaryResponse(course_id=course_id, data=[
+        StudentProgressSummary(student_user_id=student_id, completion_percent=round(float(progress_sum) / total_items, 2) if total_items else 0)
+        for student_id, progress_sum in rows
+    ])

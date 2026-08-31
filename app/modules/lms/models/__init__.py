@@ -28,6 +28,9 @@ from app.modules.lms.models.content import (
     LmsModuleAccess,
 )
 from app.modules.lms.models.progress import LmsLearningProgress
+from app.modules.lms.models.coursework import LmsCourseworkAssignment, LmsCourseworkSubmission
+from app.modules.lms.models.exam import LmsExam, LmsExamAnswer, LmsExamAttempt, LmsExamQuestion
+from app.modules.lms.models.notification import LmsAnnouncement, LmsNotification
 
 __all__ = [
     "ClassLecturer",
@@ -56,4 +59,12 @@ __all__ = [
     "LmsLectureQuizAttempt",
     "LmsLectureQuizAttemptQuestion",
     "LmsLearningProgress",
+    "LmsCourseworkAssignment",
+    "LmsCourseworkSubmission",
+    "LmsExam",
+    "LmsExamQuestion",
+    "LmsExamAttempt",
+    "LmsExamAnswer",
+    "LmsAnnouncement",
+    "LmsNotification",
 ]

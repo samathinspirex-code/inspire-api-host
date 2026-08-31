@@ -57,6 +57,13 @@ Mailjet API/secret keys and a validated `MAILJET_FROM_EMAIL` sender first. Add
 SPF and DKIM records for the sender domain before production use. If delivery
 fails, the UI provides the same single-use setup link for manual sharing.
 
+Authenticator setup invitations expire after **2 days (48 hours)** by default.
+Set `AUTHENTICATOR_SETUP_EXPIRE_MINUTES=2880` in the deployed API environment
+if it already overrides this setting, then restart the API. This applies to
+newly issued invitations only; existing links keep their original expiry.
+Resend an invitation to issue a new link and invalidate the previous unused link.
+Authenticator sign-in codes and login session lifetimes are unchanged.
+
 ## Run
 
 ```bash

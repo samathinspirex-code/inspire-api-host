@@ -1,10 +1,11 @@
+from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import User
-from app.modules.lms.models import LmsCourseDiscussion, LmsLearningItem, LmsModuleAccess
+from app.modules.lms.models import CourseLecturer, LmsCourseDiscussion, LmsLearningItem, LmsModuleAccess
 
 
 class ContentRepository:
@@ -14,6 +15,26 @@ class ContentRepository:
     async def list_items(self, module_id: int) -> list[LmsLearningItem]:
         stmt = select(LmsLearningItem).where(LmsLearningItem.module_id == module_id).order_by(LmsLearningItem.position)
         return list((await self.db.execute(stmt)).scalars().all())
+
+    async def list_items_for_modules(self, module_ids: list[int]) -> dict[int, list[LmsLearningItem]]:
+        grouped = defaultdict(list)
+        if module_ids:
+            rows = (await self.db.execute(select(LmsLearningItem).where(
+                LmsLearningItem.module_id.in_(module_ids),
+            ).order_by(LmsLearningItem.position))).scalars().all()
+            for row in rows:
+                grouped[row.module_id].append(row)
+        return grouped
+
+    async def list_access_for_modules(self, module_ids: list[int]) -> dict[int, list[LmsModuleAccess]]:
+        grouped = defaultdict(list)
+        if module_ids:
+            rows = (await self.db.execute(select(LmsModuleAccess).where(
+                LmsModuleAccess.module_id.in_(module_ids),
+            ).order_by(LmsModuleAccess.scope_type))).scalars().all()
+            for row in rows:
+                grouped[row.module_id].append(row)
+        return grouped
 
     async def get_item(self, learning_item_id: int) -> LmsLearningItem | None:
         return await self.db.get(LmsLearningItem, learning_item_id)
@@ -87,13 +108,15 @@ class ContentRepository:
 
     async def list_discussions(self, course_id: int, limit: int = 200):
         stmt = (
-            select(LmsCourseDiscussion, User.full_name, User.email)
+            select(LmsCourseDiscussion, User.full_name, User.email, CourseLecturer.lecturer_user_id)
             .join(User, User.user_id == LmsCourseDiscussion.author_user_id)
+            .outerjoin(CourseLecturer, (CourseLecturer.course_id == LmsCourseDiscussion.course_id)
+                       & (CourseLecturer.lecturer_user_id == LmsCourseDiscussion.author_user_id))
             .where(LmsCourseDiscussion.course_id == course_id)
-            .order_by(LmsCourseDiscussion.created_at.asc(), LmsCourseDiscussion.discussion_id.asc())
+            .order_by(LmsCourseDiscussion.created_at.desc(), LmsCourseDiscussion.discussion_id.desc())
             .limit(limit)
         )
-        return list((await self.db.execute(stmt)).all())
+        return list(reversed((await self.db.execute(stmt)).all()))
 
     async def create_discussion(self, course_id: int, user_id: int, message: str) -> LmsCourseDiscussion:
         item = LmsCourseDiscussion(course_id=course_id, author_user_id=user_id, message=message)

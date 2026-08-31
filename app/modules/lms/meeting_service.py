@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import APIError, NotFoundError, ValidationError
 from app.modules.lms import integration_service
+from app.modules.lms import notification_service
 from app.modules.lms.repository import IntegrationRepository, MeetingRepository
 from app.modules.lms.schemas import MeetingCreate, MeetingItem, MeetingListResponse, MeetingUpdate
 
@@ -166,6 +167,7 @@ async def create_meeting(
             "students_notified": bool(calendar_event and attendee_emails),
         }
     )
+    await notification_service.notify_meeting_change(db, meeting, class_, course, "created")
     return _meeting_item((meeting, class_, course, len(attendee_emails)))
 
 
@@ -249,6 +251,7 @@ async def update_meeting(
             "students_notified": bool(calendar_status == "synced" and attendee_emails),
         },
     )
+    await notification_service.notify_meeting_change(db, meeting, class_, course, "updated")
     return _meeting_item((meeting, class_, course, attendee_count))
 
 
@@ -311,6 +314,7 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, lecturer_user_id: in
             "students_notified": notified,
         },
     )
+    await notification_service.notify_meeting_change(db, meeting, class_, course, "cancelled")
     return _meeting_item((meeting, class_, course, attendee_count))
 
 

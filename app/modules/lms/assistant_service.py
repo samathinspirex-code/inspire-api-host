@@ -56,6 +56,7 @@ from app.modules.lms.schemas import (
     LectureQuestionResponse,
     LectureQuestionUpsert,
     LectureQuizAnswerResult,
+    LectureQuizAnswerRequest,
     LectureQuizAttemptResponse,
     LectureQuizOption,
     LectureQuizQuestion,
@@ -1293,23 +1294,7 @@ async def delete_question(db: AsyncSession, question_id: int) -> None:
 
 
 async def _student_item(db: AsyncSession, item_id: int, student_id: int):
-    item = await db.get(LmsLearningItem, item_id)
-    if item is None:
-        raise NotFoundError(f"Learning item {item_id} not found")
-    module = await db.get(LmsModule, item.module_id)
-    if module is None:
-        raise NotFoundError("Course section not found")
-    studio = await content_service.get_course_studio(db, module.course_id, student_id, "STUDENT")
-    visible = any(
-        section.is_unlocked and any(
-            candidate.learning_item_id == item_id and candidate.is_accessible
-            for candidate in section.items
-        )
-        for section in studio.sections
-    )
-    if not visible or item.status != "published":
-        raise ForbiddenError("This lecture is not available")
-    return item
+    return await content_service.get_accessible_student_item(db, item_id, student_id)
 
 
 def _quiz_question(row: LmsLectureQuestion) -> LectureQuizQuestion:
@@ -1334,30 +1319,28 @@ async def get_or_create_quiz_attempt(
     progress = (await db.execute(select(LmsLearningProgress).where(
         LmsLearningProgress.learning_item_id == item_id,
         LmsLearningProgress.student_user_id == student_id,
-    ))).scalar_one_or_none()
+    ).with_for_update())).scalar_one_or_none()
     if progress is None or not progress.is_completed:
         return LectureQuizAttemptResponse(available=False, reason="Complete the video to unlock the lecture check")
-    existing = (await db.execute(select(LmsLectureQuizAttempt).where(
+    # Serialize creation via the completed progress row so concurrent loads reuse one attempt.
+    latest = (await db.execute(select(LmsLectureQuizAttempt, func.count().over()).where(
         LmsLectureQuizAttempt.learning_item_id == item_id,
         LmsLectureQuizAttempt.student_user_id == student_id,
-        LmsLectureQuizAttempt.submitted_at.is_(None),
-    ).order_by(LmsLectureQuizAttempt.attempt_id.desc()).limit(1))).scalar_one_or_none()
-    if existing:
-        questions = list((await db.execute(
-            select(LmsLectureQuestion).join(
-                LmsLectureQuizAttemptQuestion,
-                LmsLectureQuizAttemptQuestion.question_id == LmsLectureQuestion.question_id,
-            ).where(LmsLectureQuizAttemptQuestion.attempt_id == existing.attempt_id)
-            .order_by(LmsLectureQuizAttemptQuestion.position)
-        )).scalars().all())
-        attempt_number = (await db.execute(select(func.count()).where(
-            LmsLectureQuizAttempt.learning_item_id == item_id,
-            LmsLectureQuizAttempt.student_user_id == student_id,
-        ))).scalar_one()
-        return LectureQuizAttemptResponse(
-            available=True, attempt_id=existing.attempt_id, attempt_number=attempt_number,
-            questions=[_quiz_question(row) for row in questions],
+    ).order_by(LmsLectureQuizAttempt.submitted_at.is_(None).desc(),
+               LmsLectureQuizAttempt.attempt_id.desc()).limit(1))).one_or_none()
+    existing, attempt_count = latest if latest else (None, 0)
+    if existing and existing.submitted_at is None:
+        rows = await _quiz_attempt_rows(db, existing.attempt_id)
+        response = LectureQuizAttemptResponse(
+            available=True, attempt_id=existing.attempt_id, attempt_number=attempt_count,
+            questions=[_quiz_question(question) for _, question in rows],
+            answered_questions=[
+                _quiz_answer_result(saved, question) for saved, question in rows
+                if saved.selected_option is not None
+            ],
         )
+        await db.commit()
+        return response
 
     seen_ids = select(LmsLectureQuizAttemptQuestion.question_id).join(
         LmsLectureQuizAttempt,
@@ -1366,24 +1349,14 @@ async def get_or_create_quiz_attempt(
         LmsLectureQuizAttempt.learning_item_id == item_id,
         LmsLectureQuizAttempt.student_user_id == student_id,
     )
-    unseen = list((await db.execute(select(LmsLectureQuestion).where(
+    # Prefer unseen questions, then randomly fill any remaining slots in the same read.
+    selected = list((await db.execute(select(LmsLectureQuestion).where(
         LmsLectureQuestion.learning_item_id == item_id,
         LmsLectureQuestion.status == "approved",
-        LmsLectureQuestion.question_id.not_in(seen_ids),
-    ).order_by(func.random()).limit(VIDEO_QUIZ_QUESTION_COUNT))).scalars().all())
-    selected = unseen
+    ).order_by(LmsLectureQuestion.question_id.in_(seen_ids), func.random())
+        .limit(VIDEO_QUIZ_QUESTION_COUNT))).scalars().all())
     if len(selected) < VIDEO_QUIZ_QUESTION_COUNT:
-        selected_ids = [row.question_id for row in selected]
-        supplement = select(LmsLectureQuestion).where(
-            LmsLectureQuestion.learning_item_id == item_id,
-            LmsLectureQuestion.status == "approved",
-        )
-        if selected_ids:
-            supplement = supplement.where(LmsLectureQuestion.question_id.not_in(selected_ids))
-        selected += list((await db.execute(
-            supplement.order_by(func.random()).limit(VIDEO_QUIZ_QUESTION_COUNT - len(selected))
-        )).scalars().all())
-    if len(selected) < VIDEO_QUIZ_QUESTION_COUNT:
+        await db.commit()
         return LectureQuizAttemptResponse(
             available=False,
             reason="Four quality-approved questions are not available for this video yet",
@@ -1398,41 +1371,94 @@ async def get_or_create_quiz_attempt(
             attempt_id=attempt.attempt_id, question_id=question.question_id, position=position
         ))
     await db.commit()
-    attempt_number = (await db.execute(select(func.count()).where(
-        LmsLectureQuizAttempt.learning_item_id == item_id,
-        LmsLectureQuizAttempt.student_user_id == student_id,
-    ))).scalar_one()
     return LectureQuizAttemptResponse(
-        available=True, attempt_id=attempt.attempt_id, attempt_number=attempt_number,
+        available=True, attempt_id=attempt.attempt_id, attempt_number=attempt_count + 1,
         questions=[_quiz_question(row) for row in selected],
     )
+
+
+async def _locked_quiz_attempt(db: AsyncSession, item_id: int, attempt_id: int, student_id: int):
+    await _student_item(db, item_id, student_id)
+    # Serialize answer and final-submit requests, including requests from other tabs.
+    attempt = (await db.execute(select(LmsLectureQuizAttempt).where(
+        LmsLectureQuizAttempt.attempt_id == attempt_id,
+    ).with_for_update())).scalar_one_or_none()
+    if attempt is None or attempt.learning_item_id != item_id or attempt.student_user_id != student_id:
+        raise NotFoundError("Quiz attempt not found")
+    return attempt
+
+
+async def _quiz_attempt_rows(db: AsyncSession, attempt_id: int):
+    return list((await db.execute(
+        select(LmsLectureQuizAttemptQuestion, LmsLectureQuestion).join(
+            LmsLectureQuestion,
+            LmsLectureQuestion.question_id == LmsLectureQuizAttemptQuestion.question_id,
+        ).where(LmsLectureQuizAttemptQuestion.attempt_id == attempt_id)
+        .order_by(LmsLectureQuizAttemptQuestion.position)
+    )).all())
+
+
+def _quiz_answer_result(saved, question) -> LectureQuizAnswerResult:
+    return LectureQuizAnswerResult(
+        question_id=question.question_id, selected_option=saved.selected_option,
+        correct_option=question.correct_option, is_correct=saved.is_correct,
+        explanation=question.explanation,
+    )
+
+
+async def answer_quiz_question(
+    db: AsyncSession, item_id: int, payload: LectureQuizAnswerRequest, student_id: int
+) -> LectureQuizAnswerResult:
+    attempt = await _locked_quiz_attempt(db, item_id, payload.attempt_id, student_id)
+    rows = await _quiz_attempt_rows(db, attempt.attempt_id)
+    target = next((row for row in rows if row[1].question_id == payload.question_id), None)
+    if target is None:
+        raise NotFoundError("Question not found in this attempt")
+    saved, question = target
+    if saved.selected_option is not None:
+        if saved.selected_option != payload.selected_option:
+            raise ValidationError("Your answer has already been recorded and cannot be changed")
+        # A retry after a lost response must not count the answer twice.
+        result = _quiz_answer_result(saved, question)
+        await db.commit()
+        return result
+    if attempt.submitted_at is not None:
+        raise ValidationError("This attempt has already been submitted")
+    if any(row.position < saved.position and row.selected_option is None for row, _ in rows):
+        raise ValidationError("Answer the previous question first")
+    saved.selected_option = payload.selected_option
+    saved.is_correct = payload.selected_option == question.correct_option
+    result = _quiz_answer_result(saved, question)
+    await db.commit()
+    return result
 
 
 async def submit_quiz_attempt(
     db: AsyncSession, item_id: int, payload: LectureQuizSubmitRequest, student_id: int
 ) -> LectureQuizResultResponse:
-    await _student_item(db, item_id, student_id)
-    attempt = await db.get(LmsLectureQuizAttempt, payload.attempt_id)
-    if attempt is None or attempt.learning_item_id != item_id or attempt.student_user_id != student_id:
-        raise NotFoundError("Quiz attempt not found")
-    if attempt.submitted_at is not None:
-        raise ValidationError("This attempt has already been submitted")
-    rows = list((await db.execute(
-        select(LmsLectureQuizAttemptQuestion, LmsLectureQuestion).join(
-            LmsLectureQuestion,
-            LmsLectureQuestion.question_id == LmsLectureQuizAttemptQuestion.question_id,
-        ).where(LmsLectureQuizAttemptQuestion.attempt_id == attempt.attempt_id)
-        .order_by(LmsLectureQuizAttemptQuestion.position)
-    )).all())
+    attempt = await _locked_quiz_attempt(db, item_id, payload.attempt_id, student_id)
+    rows = await _quiz_attempt_rows(db, attempt.attempt_id)
     answers = {answer.question_id: answer.selected_option for answer in payload.answers}
     expected_ids = {question.question_id for _, question in rows}
-    if set(answers) != expected_ids:
+    if set(answers) != expected_ids or len(answers) != len(payload.answers):
         raise ValidationError("Answer every question before submitting")
+    if any(saved.selected_option is not None and saved.selected_option != answers[question.question_id]
+           for saved, question in rows):
+        raise ValidationError("Recorded answers cannot be changed")
+    if attempt.submitted_at is not None:
+        result = LectureQuizResultResponse(
+            attempt_id=attempt.attempt_id, score=attempt.score,
+            total_questions=attempt.total_questions,
+            results=[_quiz_answer_result(saved, question) for saved, question in rows],
+        )
+        await db.commit()
+        return result
     results = []
     score = 0
     for attempt_question, question in rows:
         selected_option = answers[question.question_id]
-        correct = selected_option == question.correct_option
+        correct = (attempt_question.is_correct if attempt_question.selected_option is not None
+                   else selected_option == question.correct_option)
         attempt_question.selected_option = selected_option
         attempt_question.is_correct = correct
         score += int(correct)

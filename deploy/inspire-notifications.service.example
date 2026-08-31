@@ -1,0 +1,14 @@
+[Unit]
+Description=Inspire LMS notification and email worker
+After=network.target inspire-api.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inspire-api-host
+EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_notification_worker.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

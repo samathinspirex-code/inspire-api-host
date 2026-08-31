@@ -1,7 +1,8 @@
+from collections import defaultdict
 from datetime import datetime, timezone
 import re
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -11,6 +12,9 @@ from app.modules.lms.models import (
     CourseEnrollment,
     CourseLecturer,
     LmsClass,
+    LmsLearningItem,
+    LmsModule,
+    LmsModuleAccess,
     LmsLectureQuestion,
     LmsLectureQuizAttempt,
 )
@@ -37,12 +41,16 @@ async def _discussion_item(
     author_email: str,
 ) -> CourseDiscussionItem:
     lecturer = await db.get(CourseLecturer, (discussion.course_id, discussion.author_user_id))
+    return _discussion_response(discussion, author_name, author_email, lecturer is not None)
+
+
+def _discussion_response(discussion, author_name, author_email, is_lecturer):
     return CourseDiscussionItem(
         discussion_id=discussion.discussion_id,
         course_id=discussion.course_id,
         author_user_id=discussion.author_user_id,
         author_name=author_name or author_email,
-        author_role="LECTURER" if lecturer is not None else "STUDENT",
+        author_role="LECTURER" if is_lecturer else "STUDENT",
         message=discussion.message,
         created_at=discussion.created_at,
     )
@@ -115,6 +123,72 @@ def _student_stream_url(item) -> str | None:
     )
 
 
+async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id: int):
+    """Check current release/prerequisite rules in three reads, without building a studio."""
+    target = (await db.execute(
+        select(LmsLearningItem, LmsModule, CourseEnrollment.status)
+        .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
+        .outerjoin(CourseEnrollment, and_(
+            CourseEnrollment.course_id == LmsModule.course_id,
+            CourseEnrollment.student_user_id == student_id,
+        ))
+        .where(LmsLearningItem.learning_item_id == item_id)
+    )).one_or_none()
+    if target is None:
+        raise NotFoundError(f"Learning item {item_id} not found")
+    item, module, enrollment_status = target
+    if enrollment_status != "enrolled":
+        raise ForbiddenError("You are not enrolled in this course")
+    if module.status != "active" or item.status != "published":
+        raise ForbiddenError("This learning item is not published")
+
+    student_classes = select(ClassStudent.class_id).join(
+        LmsClass, LmsClass.class_id == ClassStudent.class_id,
+    ).where(LmsClass.course_id == module.course_id, ClassStudent.student_user_id == student_id)
+    # Filter membership in SQL, but retain the same student > class > course precedence.
+    rules = (await db.execute(select(LmsModuleAccess).join(
+        LmsModule, LmsModule.module_id == LmsModuleAccess.module_id,
+    ).where(
+        LmsModule.course_id == module.course_id, LmsModule.status == "active",
+        LmsModule.position <= module.position,
+        or_(
+            and_(LmsModuleAccess.scope_type == "student", LmsModuleAccess.scope_id == student_id),
+            and_(LmsModuleAccess.scope_type == "course", LmsModuleAccess.scope_id == module.course_id),
+            and_(LmsModuleAccess.scope_type == "class", LmsModuleAccess.scope_id.in_(student_classes)),
+        ),
+    ).order_by(LmsModuleAccess.scope_type))).scalars().all()
+    rules_by_module = defaultdict(list)
+    class_ids = {rule.scope_id for rule in rules if rule.scope_type == "class"}
+    for rule in rules:
+        rules_by_module[rule.module_id].append(rule)
+    unlocked, reason = _student_access(rules_by_module[module.module_id], module.course_id, student_id, class_ids)
+    if not unlocked:
+        raise ForbiddenError(reason or "This learning item has not been released to you")
+
+    eligible_videos = select(LmsLectureQuestion.learning_item_id).where(
+        LmsLectureQuestion.course_id == module.course_id,
+        LmsLectureQuestion.status == "approved",
+    ).group_by(LmsLectureQuestion.learning_item_id).having(func.count() >= 4)
+    submitted = select(LmsLectureQuizAttempt.attempt_id).where(
+        LmsLectureQuizAttempt.learning_item_id == LmsLearningItem.learning_item_id,
+        LmsLectureQuizAttempt.student_user_id == student_id,
+        LmsLectureQuizAttempt.submitted_at.is_not(None),
+    ).exists()
+    blocker_modules = (await db.execute(select(LmsLearningItem.module_id).join(
+        LmsModule, LmsModule.module_id == LmsLearningItem.module_id,
+    ).where(
+        LmsModule.course_id == module.course_id, LmsModule.status == "active",
+        LmsLearningItem.status == "published", LmsLearningItem.item_type == "video",
+        or_(LmsModule.position < module.position,
+            and_(LmsModule.module_id == module.module_id, LmsLearningItem.position < item.position)),
+        LmsLearningItem.learning_item_id.in_(eligible_videos), ~submitted,
+    ).distinct())).scalars().all()
+    if any(_student_access(rules_by_module[mid], module.course_id, student_id, class_ids)[0]
+           for mid in blocker_modules):
+        raise ForbiddenError("Complete the previous video knowledge check first")
+    return item
+
+
 def _item_response(
     item,
     expose_resource: bool = True,
@@ -149,6 +223,10 @@ async def get_course_studio(
     class_ids = await _student_class_ids(db, course_id, user_id) if role == "STUDENT" else set()
     sections = []
     repo = ContentRepository(db)
+    visible_modules = [module for module in modules if role != "STUDENT" or module.status == "active"]
+    module_ids = [module.module_id for module in visible_modules]
+    rules_by_module = await repo.list_access_for_modules(module_ids)
+    items_by_module = await repo.list_items_for_modules(module_ids)
     progress_by_item = (
         await ProgressRepository(db).list_course_progress(course_id, user_id)
         if role == "STUDENT" else {}
@@ -158,23 +236,24 @@ async def get_course_studio(
     if role == "STUDENT":
         quiz_video_ids = set((await db.execute(
             select(LmsLectureQuestion.learning_item_id)
-            .where(LmsLectureQuestion.status == "approved")
+            .where(LmsLectureQuestion.course_id == course_id, LmsLectureQuestion.status == "approved")
             .group_by(LmsLectureQuestion.learning_item_id)
             .having(func.count(LmsLectureQuestion.question_id) >= 4)
         )).scalars().all())
         submitted_quiz_ids = set((await db.execute(
-            select(LmsLectureQuizAttempt.learning_item_id).where(
+            select(LmsLectureQuizAttempt.learning_item_id)
+            .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLectureQuizAttempt.learning_item_id)
+            .where(
+                LmsLearningItem.module_id.in_(module_ids),
                 LmsLectureQuizAttempt.student_user_id == user_id,
                 LmsLectureQuizAttempt.submitted_at.is_not(None),
             )
         )).scalars().all())
     blocked_by_video: str | None = None
-    for module in modules:
-        if role == "STUDENT" and module.status != "active":
-            continue
-        rules = await repo.list_access(module.module_id)
+    for module in visible_modules:
+        rules = rules_by_module.get(module.module_id, [])
         unlocked, reason = (True, None) if role == "LECTURER" else _student_access(rules, course_id, user_id, class_ids)
-        items = await repo.list_items(module.module_id)
+        items = items_by_module.get(module.module_id, [])
         if role == "STUDENT":
             items = [item for item in items if item.status == "published"]
         item_responses = []
@@ -296,7 +375,8 @@ async def list_course_discussions(
 ) -> CourseDiscussionListResponse:
     await _ensure_course_access(db, course_id, user_id, role)
     rows = await ContentRepository(db).list_discussions(course_id)
-    data = [await _discussion_item(db, discussion, full_name, email) for discussion, full_name, email in rows]
+    data = [_discussion_response(discussion, full_name, email, lecturer_id is not None)
+            for discussion, full_name, email, lecturer_id in rows]
     return CourseDiscussionListResponse(data=data)
 
 
