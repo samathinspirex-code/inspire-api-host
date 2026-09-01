@@ -37,6 +37,21 @@ async def _audience_user_ids(db: AsyncSession, audience_type: str, audience_id: 
     if audience_type == "all":
         result = await db.execute(select(User.user_id).join(UserAccessLevel, UserAccessLevel.user_id == User.user_id).join(AccessLevel, AccessLevel.access_level_id == UserAccessLevel.access_level_id).where(User.is_active.is_(True), AccessLevel.access_key == "LMS").distinct())
         return list(result.scalars().all())
+    if audience_type in {"admin", "super_admin"}:
+        role_key = "ADMIN" if audience_type == "admin" else "SUPER_ADMIN"
+        def has_access(key: str):
+            return select(UserAccessLevel.user_id).join(
+                AccessLevel, AccessLevel.access_level_id == UserAccessLevel.access_level_id
+            ).where(
+                UserAccessLevel.user_id == User.user_id,
+                AccessLevel.access_key == key,
+                AccessLevel.is_active.is_(True),
+            ).exists()
+        filters = [User.is_active.is_(True), has_access("LMS"), has_access(role_key)]
+        if audience_type == "admin":
+            filters.append(~has_access("SUPER_ADMIN"))
+        result = await db.execute(select(User.user_id).where(*filters))
+        return list(result.scalars().all())
     if audience_type == "course":
         students = (await db.execute(select(CourseEnrollment.student_user_id).where(CourseEnrollment.course_id == audience_id, CourseEnrollment.status == "enrolled"))).scalars().all()
         lecturers = (await db.execute(select(CourseLecturer.lecturer_user_id).where(CourseLecturer.course_id == audience_id))).scalars().all()
@@ -60,6 +75,8 @@ async def _student_audience_user_ids(db: AsyncSession, audience_type: str, audie
 
 async def _audience_label(db: AsyncSession, audience_type: str, audience_id: int | None) -> str:
     if audience_type == "all": return "Everyone in the LMS"
+    if audience_type == "admin": return "LMS Admins"
+    if audience_type == "super_admin": return "LMS Super Admins"
     if audience_type == "course":
         item = await db.get(LmsCourse, audience_id); return f"{item.code} · {item.title}" if item else "Course"
     item = await db.get(LmsClass, audience_id); return f"{item.code} · {item.name}" if item else "Class"

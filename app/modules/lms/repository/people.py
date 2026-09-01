@@ -87,6 +87,27 @@ class PeopleRepository:
         await self.db.refresh(profile)
         return user, profile
 
+    async def student_import_conflicts(self, emails: list[str], numbers: list[str]) -> tuple[set[str], set[str]]:
+        emails_found = await self.db.execute(select(func.lower(User.email)).where(func.lower(User.email).in_(emails)))
+        numbers_found = await self.db.execute(select(func.lower(StudentProfile.student_number)).where(
+            func.lower(StudentProfile.student_number).in_([number.lower() for number in numbers])
+        ))
+        return set(emails_found.scalars()), set(numbers_found.scalars())
+
+    async def create_students_bulk(self, rows, access: list[AccessLevel], created_by: int) -> list[int]:
+        users = []
+        for row in rows:
+            user = User(full_name=row.full_name, email=row.email, created_by=created_by)
+            user.access_levels = [UserAccessLevel(access_level=item, assigned_by=created_by) for item in access]
+            users.append(user)
+        self.db.add_all(users)
+        await self.db.flush()
+        ids = [user.user_id for user in users]
+        self.db.add_all([StudentProfile(user_id=user_id, student_number=row.student_number, phone=row.phone, notes=row.notes)
+                         for row, user_id in zip(rows, ids)])
+        await self.db.commit()
+        return ids
+
     async def create_lecturer(self, user_data: dict[str, Any], profile_data: dict[str, Any], access: list[AccessLevel]) -> tuple[User, LecturerProfile]:
         user = User(**user_data)
         user.access_levels = [UserAccessLevel(access_level=item, assigned_by=user_data.get("created_by")) for item in access]

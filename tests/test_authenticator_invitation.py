@@ -14,9 +14,25 @@ from app.modules.auth.invitation_email import (
     send_authenticator_invitation,
 )
 from app.modules.auth.service import build_authenticator_setup_url
+from app.modules.auth.schemas.auth import AuthenticatorPortalLink, AuthenticatorSetupTokenResponse
 
 
 class AuthenticatorInvitationTests(unittest.TestCase):
+    def test_dual_portal_email_has_separate_links_and_shared_setup_guidance(self):
+        links = [
+            AuthenticatorPortalLink(portal=portal, setup_url=f"https://{portal.lower()}.example.test/?token=shared", login_url=f"https://{portal.lower()}.example.test")
+            for portal in ["CMS", "LMS"]
+        ]
+        payload = build_mailjet_payload("user@example.test", "Example", links[0].setup_url,
+                                       datetime(2026, 9, 2, tzinfo=timezone.utc), "test", links)
+        self.assertEqual(len(payload["Messages"]), 1)
+        for body in [payload["Messages"][0]["TextPart"], payload["Messages"][0]["HTMLPart"]]:
+            for link in links:
+                self.assertIn(link.setup_url, body)
+                self.assertIn(f"Open {link.portal}", body)
+            self.assertIn("set up Authenticator once", body)
+            self.assertIn("both setup links become invalid", body)
+
     def test_setup_url_contains_encoded_email_and_single_use_token(self):
         token = "a" * 64
         result = build_authenticator_setup_url(
@@ -78,12 +94,52 @@ class AuthenticatorInvitationTests(unittest.TestCase):
 
 
 class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_portal_links_follow_active_access_and_share_one_invitation(self):
+        cases = [
+            ([('CMS', True), ('LMS', True)], ['CMS', 'LMS']),
+            ([('CMS', True)], ['CMS']),
+            ([('LMS', True)], ['LMS']),
+            ([('CMS', True), ('LMS', False)], ['CMS']),
+            ([('CMS', False), ('LMS', True)], ['LMS']),
+            ([('USER_MANAGEMENT', True), ('LMS', True)], ['CMS', 'LMS']),
+        ]
+        setup = AuthenticatorSetupTokenResponse(user_id=25, email="user@example.test", setup_token="a" * 64,
+                                               expires_at=datetime(2026, 9, 2, tzinfo=timezone.utc))
+        for grants, expected in cases:
+            with self.subTest(grants=grants):
+                user = SimpleNamespace(full_name="Example", access_levels=[
+                    SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=active))
+                    for key, active in grants
+                ])
+                issue = AsyncMock(return_value=setup)
+                sender = AsyncMock(return_value=SimpleNamespace(sent=True))
+                with (
+                    patch.object(settings, "CMS_UI_URL", "https://cms.example.test/"),
+                    patch.object(settings, "LMS_UI_URL", "https://lms.example.test/"),
+                    patch.object(service, "issue_authenticator_setup_token", issue),
+                    patch.object(service, "UserRepository", return_value=SimpleNamespace(get=AsyncMock(return_value=user))),
+                    patch.object(service, "send_authenticator_invitation", sender),
+                ):
+                    result = await service.issue_authenticator_setup_invitation(None, 25, 1, "https://cms.example.test/")
+                issue.assert_awaited_once_with(None, 25, 1)
+                sender.assert_awaited_once()
+                self.assertEqual([link.portal for link in result.portal_links], expected)
+                self.assertEqual(result.setup_url, result.portal_links[0].setup_url)
+                self.assertEqual(result.expires_at, setup.expires_at)
+                self.assertEqual(sender.await_args.kwargs["portal_links"], result.portal_links)
+                for link in result.portal_links:
+                    self.assertEqual(link.login_url, f"https://{link.portal.lower()}.example.test")
+                    parsed = urlparse(link.setup_url)
+                    self.assertEqual(parsed.netloc, f"{link.portal.lower()}.example.test")
+                    self.assertEqual(parse_qs(parsed.query)["token"], [setup.setup_token])
+                    self.assertEqual(parse_qs(parsed.query)["email"], [setup.email])
+
     async def test_new_invitation_persists_and_emails_two_day_expiry(self):
         now = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
         expiry = now + timedelta(days=2)
         default_minutes = Settings.model_fields["AUTHENTICATOR_SETUP_EXPIRE_MINUTES"].default
         self.assertEqual(default_minutes, 2880)
-        user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True)
+        user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True, access_levels=[])
         users = SimpleNamespace(get=AsyncMock(return_value=user))
         tokens = SimpleNamespace(create_setup_token=AsyncMock())
         sessions = SimpleNamespace(revoke_all_for_user=AsyncMock())
@@ -141,6 +197,7 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mailjet API credentials", result.error)
 
     async def test_successful_mailjet_response_returns_message_id(self):
+        links = [AuthenticatorPortalLink(portal=portal, setup_url=f"https://{portal.lower()}.example.test/setup") for portal in ["CMS", "LMS"]]
         response = MagicMock()
         response.is_error = False
         response.json.return_value = {
@@ -177,11 +234,16 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 "https://lms.example.com/setup",
                 datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc),
                 "authenticator-setup-25",
+                portal_links=links,
             )
 
         self.assertTrue(result.sent)
         self.assertEqual(result.provider_message_id, "123456789")
         client.post.assert_awaited_once()
+        sent_message = client.post.await_args.kwargs["json"]["Messages"][0]
+        for link in links:
+            self.assertIn(link.setup_url, sent_message["HTMLPart"])
+            self.assertIn(link.setup_url, sent_message["TextPart"])
 
 
 if __name__ == "__main__":

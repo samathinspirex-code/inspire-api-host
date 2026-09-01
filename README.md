@@ -64,6 +64,15 @@ newly issued invitations only; existing links keep their original expiry.
 Resend an invitation to issue a new link and invalidate the previous unused link.
 Authenticator sign-in codes and login session lifetimes are unchanged.
 
+Creating a new user in the CMS UI now sends their setup invitation automatically;
+editing a user does not send/reset an invitation. Users with both CMS and LMS
+access receive separately labelled links for both portals in one email, using
+`CMS_UI_URL` and `LMS_UI_URL`. Configure these to the deployed frontend addresses.
+Both setup links share one single-use invitation: complete setup once, then use
+the same Authenticator to sign in to either portal. The email also includes the
+regular portal sign-in addresses for use after setup. If email delivery fails,
+the CMS shows both setup links for manual sharing without recreating the user.
+
 ## Run
 
 ```bash
@@ -144,11 +153,45 @@ must stay server-side and must never be exposed through a `VITE_` variable.
 7. Per-item student learning progress, Vimeo watch-time reporting and lecturer
    progress visibility — completed foundation. Quiz attempts and automatic
    progression rules are the next Course Studio phase.
-8. Bulk student invitations and an invitation audit history — next onboarding
-   improvement.
+8. Bulk student CSV import with optional invitations — implemented. An invitation
+   audit history and bulk invitations for existing accounts remain future work.
 9. Central notification system — planned for a later phase. Add PostgreSQL-backed
    notification jobs, a background worker, retry and delivery tracking, in-app
    notifications, user preferences, and scheduled reminders for assignments,
    meetings, attendance and announcements. Use the current Mailjet delivery
    adapter while keeping the provider replaceable if production volume later
    makes Amazon SES or another provider more economical.
+
+### Bulk student CSV import
+
+LMS admins and super admins can open **Students → Import Excel / CSV** to download
+the template, upload `.xlsx` or UTF-8 CSV, or paste CSV text. In Excel, open the
+template, replace its example row, and use **Save As → Excel Workbook (.xlsx)**.
+Keep phone and student numbers as Text to preserve leading zeros.
+
+- Required columns: `full_name,email,student_number`. Optional: `phone,notes`.
+- Maximum 100 students per batch. CSV is limited to 500 KB; Excel to 2 MB.
+- Excel reads only the first, visible worksheet. Put headers in row 1 and data in
+  rows 2–101, using only columns A–E. Merged cells, formulas, errors, macros,
+  encrypted/protected files and legacy `.xls` are rejected. Save `.xls` or `.xlsm`
+  as a plain `.xlsx` first. Other worksheets are ignored and reported in the UI.
+- Preview validates required fields, email format, column lengths, duplicate rows,
+  and existing emails/student numbers (including accounts outside the LMS).
+- Correct every row before confirming. Confirmation rechecks the database and
+  creates the entire batch in one transaction. Existing accounts are never updated.
+- New accounts receive only active `LMS` and `STUDENT` access. No automatic course
+  or class enrolments are made. Profile photos can be uploaded after import.
+- Optional setup emails use the existing invitation flow and expiry setting
+  (48 hours by default). The browser sends at most two invitations concurrently
+  after account creation. Keep the import dialog open until it finishes.
+- Email errors do not undo accounts. Check each result and use the existing
+  **Send invitation** action as needed. Never re-import just to retry an email.
+  If the browser closes mid-send, inspect invitation statuses in Students before
+  resending; emails are not queued in a durable background job.
+
+API: `POST /api/v1/lms/students/import` accepts `csv_text` and `preview`
+(`true` by default). Preview does not write. Use `preview: false` after review;
+validation failures return row errors with `imported: 0`. Both operations require
+an LMS admin role. `POST /api/v1/lms/students/import/excel?preview=true|false`
+accepts the raw `.xlsx` body with the standard Excel MIME type and uses the same
+atomic importer. Responses are not cached. No database migration is required.

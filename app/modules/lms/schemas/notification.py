@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class AnnouncementCreate(BaseModel):
-    audience_type: Literal["all", "course", "class"]
+    audience_type: Literal["all", "admin", "super_admin", "course", "class"]
     audience_id: int | None = Field(None, gt=0)
     title: str = Field(..., min_length=2, max_length=255)
     message: str = Field(..., min_length=2, max_length=20_000)
@@ -17,8 +17,10 @@ class AnnouncementCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_announcement(self):
-        if self.audience_type != "all" and self.audience_id is None:
+        if self.audience_type in {"course", "class"} and self.audience_id is None:
             raise ValueError("Choose a course or class audience")
+        if self.audience_type not in {"course", "class"} and self.audience_id is not None:
+            raise ValueError("This audience does not use a course or class ID")
         if self.expires_at and self.expires_at <= self.publish_at:
             raise ValueError("Expiry must be after publication")
         return self

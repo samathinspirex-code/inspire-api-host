@@ -6,6 +6,7 @@ from datetime import datetime
 import httpx
 
 from app.core.config import settings
+from app.modules.auth.schemas.auth import AuthenticatorPortalLink
 
 logger = logging.getLogger(__name__)
 
@@ -19,33 +20,54 @@ class EmailDeliveryResult:
     error: str | None = None
 
 
-def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime) -> str:
+def _portal_links(setup_url: str, portal_links: list[AuthenticatorPortalLink] | None):
+    return portal_links or [AuthenticatorPortalLink(portal="Inspire", setup_url=setup_url)]
+
+
+def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime, portal_links: list[AuthenticatorPortalLink] | None = None) -> str:
     safe_name = html.escape(full_name or "Inspire user")
-    safe_url = html.escape(setup_url, quote=True)
     safe_expiry = html.escape(expires_at.strftime("%d %B %Y at %H:%M UTC"))
+    links = _portal_links(setup_url, portal_links)
+    setup_buttons = "".join(
+        f'<p><a href="{html.escape(link.setup_url, quote=True)}">Set up Authenticator — {html.escape(link.portal)}</a></p>'
+        for link in links
+    )
+    logins = " · ".join(
+        f'<a href="{html.escape(link.login_url, quote=True)}">Open {html.escape(link.portal)}</a>'
+        for link in links if link.login_url
+    )
+    guidance = ("Choose either portal link to set up Authenticator once. The same Authenticator works for both CMS and LMS. "
+                "Completing setup uses the shared invitation, so both setup links become invalid.") if len(links) > 1 else "Use the secure link below to connect Google Authenticator."
     return f"""
     <div style="font-family:Arial,sans-serif;line-height:1.55;color:#202124;max-width:560px">
       <p>Hello {safe_name},</p>
-      <p>An administrator created an Inspire LMS account for this email address.</p>
-      <p>Open the following secure link to connect Google Authenticator:</p>
-      <p><a href="{safe_url}">Complete Authenticator setup</a></p>
-      <p>The single-use link expires on {safe_expiry}.</p>
-      <p>If you did not expect this account, contact your LMS administrator. Do not forward this message or share its setup link.</p>
-      <p>Inspire College LMS</p>
+      <p>Your Inspire College account is ready for Authenticator setup.</p>
+      <p>{guidance}</p>
+      {setup_buttons}
+      <p>This single-use invitation expires on {safe_expiry}.</p>
+      {f'<p>After setup, sign in using your Authenticator code: {logins}</p>' if logins else ''}
+      <p>If you did not expect this account, contact your administrator. Do not forward this message or share its setup links.</p>
+      <p>Inspire College</p>
     </div>
     """.strip()
 
 
-def build_invitation_text(full_name: str, setup_url: str, expires_at: datetime) -> str:
+def build_invitation_text(full_name: str, setup_url: str, expires_at: datetime, portal_links: list[AuthenticatorPortalLink] | None = None) -> str:
+    links = _portal_links(setup_url, portal_links)
+    setup_lines = "\n".join(f"{link.portal} — Set up Authenticator: {link.setup_url}" for link in links)
+    logins = "\n".join(f"Open {link.portal}: {link.login_url}" for link in links if link.login_url)
+    login_section = f"After setup, sign in using your Authenticator code:\n{logins}\n\n" if logins else ""
+    guidance = ("Choose either portal link to set up Authenticator once. The same Authenticator works for both CMS and LMS. "
+                "Completing setup uses the shared invitation, so both setup links become invalid.") if len(links) > 1 else "Use the secure link below to connect Google Authenticator."
     return (
         f"Hello {full_name or 'Inspire user'},\n\n"
-        "An administrator created an Inspire LMS account for this email address.\n\n"
-        "Open this secure link to connect Google Authenticator:\n"
-        f"{setup_url}\n\n"
-        f"This single-use link expires on {expires_at.strftime('%d %B %Y at %H:%M UTC')}.\n\n"
-        "If you did not expect this account, contact your LMS administrator. "
-        "Do not forward this message or share its setup link.\n\n"
-        "Inspire College LMS"
+        "Your Inspire College account is ready for Authenticator setup.\n\n"
+        f"{guidance}\n\n{setup_lines}\n\n"
+        f"This single-use invitation expires on {expires_at.strftime('%d %B %Y at %H:%M UTC')}.\n\n"
+        f"{login_section}"
+        "If you did not expect this account, contact your administrator. "
+        "Do not forward this message or share its setup links.\n\n"
+        "Inspire College"
     )
 
 
@@ -55,6 +77,7 @@ def build_mailjet_payload(
     setup_url: str,
     expires_at: datetime,
     custom_id: str,
+    portal_links: list[AuthenticatorPortalLink] | None = None,
 ) -> dict:
     return {
         "Messages": [
@@ -65,8 +88,8 @@ def build_mailjet_payload(
                 },
                 "To": [{"Email": to_email, "Name": full_name}],
                 "Subject": settings.AUTHENTICATOR_INVITATION_SUBJECT,
-                "TextPart": build_invitation_text(full_name, setup_url, expires_at),
-                "HTMLPart": build_invitation_html(full_name, setup_url, expires_at),
+                "TextPart": build_invitation_text(full_name, setup_url, expires_at, portal_links),
+                "HTMLPart": build_invitation_html(full_name, setup_url, expires_at, portal_links),
                 "CustomID": custom_id,
                 "TrackOpens": "disabled",
                 "TrackClicks": "disabled",
@@ -81,6 +104,7 @@ async def send_authenticator_invitation(
     setup_url: str,
     expires_at: datetime,
     idempotency_key: str,
+    portal_links: list[AuthenticatorPortalLink] | None = None,
 ) -> EmailDeliveryResult:
     if not settings.MAILJET_API_KEY.strip() or not settings.MAILJET_SECRET_KEY.strip():
         return EmailDeliveryResult(False, error="The Mailjet API credentials are not configured.")
@@ -88,7 +112,7 @@ async def send_authenticator_invitation(
         return EmailDeliveryResult(False, error="The Mailjet sender email is not configured.")
 
     payload = build_mailjet_payload(
-        to_email, full_name, setup_url, expires_at, idempotency_key
+        to_email, full_name, setup_url, expires_at, idempotency_key, portal_links
     )
     try:
         async with httpx.AsyncClient(timeout=15) as client:

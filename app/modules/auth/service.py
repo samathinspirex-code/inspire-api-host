@@ -27,6 +27,7 @@ from app.modules.auth.schemas import (
     TokenResponse,
     UserOut,
 )
+from app.modules.auth.schemas.auth import AuthenticatorPortalLink
 from app.modules.auth.security import (
     create_access_token,
     generate_recovery_codes,
@@ -157,19 +158,36 @@ async def issue_authenticator_setup_invitation(
 ) -> AuthenticatorInvitationResponse:
     setup = await issue_authenticator_setup_token(db, user_id, created_by)
     user = await UserRepository(db).get(user_id)
-    setup_url = build_authenticator_setup_url(
-        setup.email, setup.setup_token, setup_ui_url
-    )
+    access = set(_user_access_keys(user))
+    destinations = []
+    if access & {"CMS", "USER_MANAGEMENT"}:
+        destinations.append(("CMS", settings.CMS_UI_URL))
+    if "LMS" in access:
+        destinations.append(("LMS", settings.LMS_UI_URL))
+    if not destinations:
+        destinations.append(("Inspire", setup_ui_url or settings.LMS_UI_URL))
+    # One account has one credential. Mint ONE token, then use it in each
+    # authorized portal URL; issuing a second token would invalidate the first.
+    portal_links = [AuthenticatorPortalLink(
+        portal=portal,
+        setup_url=build_authenticator_setup_url(setup.email, setup.setup_token, url),
+        login_url=url.rstrip('/'),
+    ) for portal, url in destinations]
+    preferred_url = (setup_ui_url or settings.LMS_UI_URL).rstrip('/')
+    primary = next((link for link in portal_links if link.login_url == preferred_url), portal_links[0])
+    setup_url = primary.setup_url
     delivery = await send_authenticator_invitation(
         setup.email,
         user.full_name or setup.email,
         setup_url,
         setup.expires_at,
         f"authenticator-setup-{user_id}-{hash_value(setup.setup_token)[:20]}",
+        portal_links=portal_links,
     )
     return AuthenticatorInvitationResponse(
         **setup.model_dump(),
         setup_url=setup_url,
+        portal_links=portal_links,
         email_sent=delivery.sent,
         delivery_message=(
             "Authenticator setup invitation sent by email."

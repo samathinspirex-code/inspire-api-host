@@ -1,8 +1,12 @@
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 
+from pydantic import ValidationError
+
 from app.modules.lms.notification_email import build_notification_payload
-from app.modules.lms.notification_service import local_time, reminder_due
+from app.modules.lms.notification_service import _audience_label, local_time, reminder_due
+from app.modules.lms.schemas import AnnouncementCreate
 
 
 class NotificationTests(unittest.TestCase):
@@ -27,6 +31,21 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", message["HTMLPart"])
         self.assertEqual(message["TrackOpens"], "disabled")
         self.assertEqual(message["CustomID"], "event-1")
+
+    def test_admin_audiences_do_not_require_course_or_class_ids(self):
+        common = {
+            "title": "Staff notice", "message": "Review the latest LMS update.",
+            "publish_at": datetime.now(timezone.utc), "status": "published",
+        }
+        for audience_type in ("admin", "super_admin"):
+            payload = AnnouncementCreate(audience_type=audience_type, **common)
+            self.assertIsNone(payload.audience_id)
+        with self.assertRaises(ValidationError):
+            AnnouncementCreate(audience_type="course", **common)
+
+    def test_admin_audience_labels_are_clear(self):
+        self.assertEqual(asyncio.run(_audience_label(None, "admin", None)), "LMS Admins")
+        self.assertEqual(asyncio.run(_audience_label(None, "super_admin", None)), "LMS Super Admins")
 
 
 if __name__ == "__main__":

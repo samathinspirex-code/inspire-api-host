@@ -3,7 +3,8 @@ from typing import Literal
 
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,9 @@ from app.core.errors import APIError, ForbiddenError
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import AuthenticatorInvitationResponse, CurrentUser
 from app.modules.lms import service
+from app.modules.lms import student_import_service
+from app.modules.lms.student_excel_import import MAX_EXCEL_BYTES, parse_excel_students
+from app.modules.lms.schemas.student_import import StudentImportRequest, StudentImportResponse
 from app.modules.lms import assignment_service
 from app.modules.lms import portal_service
 from app.modules.lms import integration_service
@@ -1366,6 +1370,39 @@ async def create_student(
     db: AsyncSession = Depends(get_db),
 ) -> StudentItem:
     return await service.create_student(db, payload, current_user.user_id)
+
+
+@router.post("/students/import", response_model=StudentImportResponse)
+async def import_students(
+    payload: StudentImportRequest,
+    response: Response,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentImportResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await student_import_service.import_students(db, payload, current_user.user_id)
+
+
+@router.post("/students/import/excel", response_model=StudentImportResponse)
+async def import_students_excel(
+    request: Request,
+    response: Response,
+    preview: bool = Query(True),
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentImportResponse:
+    if request.headers.get("content-type", "").split(";")[0] != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        raise APIError(415, "UNSUPPORTED_FILE", "Upload an Excel .xlsx file.")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > MAX_EXCEL_BYTES:
+            raise APIError(413, "FILE_TOO_LARGE", "Excel files must be at most 2 MB.")
+        data.extend(chunk)
+    rows, sheet_name = await run_in_threadpool(parse_excel_students, bytes(data))
+    result = await student_import_service.import_student_rows(db, rows, preview, current_user.user_id)
+    result.sheet_name = sheet_name
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @router.put("/students/{user_id}", response_model=StudentItem)
