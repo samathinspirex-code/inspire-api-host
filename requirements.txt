@@ -7,6 +7,8 @@ pydantic[email]
 pyjwt[crypto]
 httpx
 pypdf>=5.0
+openpyxl>=3.1.5,<4
+defusedxml>=0.7.1,<1
 cryptography
 qrcode[pil]
 boto3>=1.35

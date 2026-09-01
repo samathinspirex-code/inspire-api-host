@@ -1,12 +1,13 @@
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.auth.dependencies import require_access
 from app.modules.auth.schemas import CurrentUser
-from app.modules.cms import media_service, service
+from app.modules.cms import dashboard_service, media_service, service
+from app.modules.cms.schemas.dashboard import CmsDashboardResponse
 from app.modules.lms import assistant_service
 from app.modules.lms.schemas import (
     CourseAssistantAdminResponse,
@@ -47,6 +48,12 @@ from app.modules.cms.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/cms", tags=["cms"], dependencies=[Depends(require_access("CMS"))])
+
+
+@router.get("/dashboard", response_model=CmsDashboardResponse)
+async def get_dashboard(response: Response, db: AsyncSession = Depends(get_db)) -> CmsDashboardResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await dashboard_service.get_dashboard(db)
 
 
 @router.get("/media", response_model=MediaAssetListResponse)

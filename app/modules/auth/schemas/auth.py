@@ -75,8 +75,15 @@ class AuthenticatorSetupTokenResponse(BaseModel):
     expires_at: datetime
 
 
+class AuthenticatorPortalLink(BaseModel):
+    portal: str
+    setup_url: str
+    login_url: str | None = None
+
+
 class AuthenticatorInvitationResponse(AuthenticatorSetupTokenResponse):
     setup_url: str
+    portal_links: list[AuthenticatorPortalLink] = Field(default_factory=list)
     email_sent: bool
     delivery_message: str
 

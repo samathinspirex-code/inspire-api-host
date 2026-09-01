@@ -27,6 +27,7 @@ from app.modules.auth.schemas import (
     TokenResponse,
     UserOut,
 )
+from app.modules.auth.schemas.auth import AuthenticatorPortalLink
 from app.modules.auth.security import (
     create_access_token,
     generate_recovery_codes,
@@ -40,37 +41,6 @@ from app.modules.auth.security import (
 
 def _user_access_keys(user: User) -> list[str]:
     return [ual.access_level.access_key for ual in user.access_levels if ual.access_level.is_active]
-
-
-CMS_PORTAL_ACCESS_KEYS = frozenset({"CMS", "USER_MANAGEMENT"})
-LMS_PORTAL_ROLE_KEYS = frozenset({"SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"})
-
-
-def resolve_authenticator_invitation_portals(
-    access_keys: list[str] | set[str],
-) -> tuple[str, dict[str, str]]:
-    access = set(access_keys)
-    has_lms_access = "LMS" in access and bool(access.intersection(LMS_PORTAL_ROLE_KEYS))
-    has_cms_access = bool(access.intersection(CMS_PORTAL_ACCESS_KEYS))
-
-    portal_urls: dict[str, str] = {}
-    if has_lms_access:
-        portal_urls["Inspire LMS"] = settings.LMS_UI_URL.rstrip("/")
-    if has_cms_access:
-        portal_urls["Course Studio CMS"] = settings.CMS_UI_URL.rstrip("/")
-    if not portal_urls:
-        raise APIError(
-            400,
-            "PORTAL_ACCESS_REQUIRED",
-            "Assign LMS with an LMS role, CMS, or User Management before sending an Authenticator invitation.",
-        )
-
-    setup_ui_url = (
-        settings.LMS_UI_URL.rstrip("/")
-        if has_lms_access
-        else settings.CMS_UI_URL.rstrip("/")
-    )
-    return setup_ui_url, portal_urls
 
 
 async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
@@ -186,27 +156,38 @@ async def issue_authenticator_setup_invitation(
     created_by: int | None,
     setup_ui_url: str | None = None,
 ) -> AuthenticatorInvitationResponse:
-    user = await UserRepository(db).get(user_id)
-    if user is None or not user.is_active:
-        raise APIError(404, "NOT_FOUND", "Active user not found.")
-    automatic_setup_ui_url, portal_urls = resolve_authenticator_invitation_portals(
-        _user_access_keys(user)
-    )
     setup = await issue_authenticator_setup_token(db, user_id, created_by)
-    setup_url = build_authenticator_setup_url(
-        setup.email, setup.setup_token, setup_ui_url or automatic_setup_ui_url
-    )
+    user = await UserRepository(db).get(user_id)
+    access = set(_user_access_keys(user))
+    destinations = []
+    if access & {"CMS", "USER_MANAGEMENT"}:
+        destinations.append(("CMS", settings.CMS_UI_URL))
+    if "LMS" in access:
+        destinations.append(("LMS", settings.LMS_UI_URL))
+    if not destinations:
+        destinations.append(("Inspire", setup_ui_url or settings.LMS_UI_URL))
+    # One account has one credential. Mint ONE token, then use it in each
+    # authorized portal URL; issuing a second token would invalidate the first.
+    portal_links = [AuthenticatorPortalLink(
+        portal=portal,
+        setup_url=build_authenticator_setup_url(setup.email, setup.setup_token, url),
+        login_url=url.rstrip('/'),
+    ) for portal, url in destinations]
+    preferred_url = (setup_ui_url or settings.LMS_UI_URL).rstrip('/')
+    primary = next((link for link in portal_links if link.login_url == preferred_url), portal_links[0])
+    setup_url = primary.setup_url
     delivery = await send_authenticator_invitation(
         setup.email,
         user.full_name or setup.email,
         setup_url,
         setup.expires_at,
         f"authenticator-setup-{user_id}-{hash_value(setup.setup_token)[:20]}",
-        portal_urls,
+        portal_links=portal_links,
     )
     return AuthenticatorInvitationResponse(
         **setup.model_dump(),
         setup_url=setup_url,
+        portal_links=portal_links,
         email_sent=delivery.sent,
         delivery_message=(
             "Authenticator setup invitation sent by email."
@@ -329,6 +310,27 @@ async def verify_recovery_code(
         raise invalid
     await AuthenticatorRepository(db).consume_recovery_code(item)
     return await _issue_tokens(db, user)
+
+
+async def regenerate_recovery_codes(db: AsyncSession, user_id: int, code: str) -> list[str]:
+    repository = AuthenticatorRepository(db)
+    credential = await repository.get_credential_for_update(user_id)
+    if credential is None or not credential.enabled:
+        raise APIError(400, "AUTHENTICATOR_NOT_CONFIGURED", "Google Authenticator is not configured for this account.")
+    now = datetime.now(timezone.utc)
+    if credential.locked_until and credential.locked_until > now:
+        raise APIError(429, "AUTHENTICATOR_LOCKED", "Too many incorrect codes. Try again later.")
+    used_step = verify_totp(_decrypt_authenticator_secret(credential.encrypted_secret), code, last_used_step=credential.last_used_step)
+    if used_step is None:
+        await repository.record_failed_attempt(credential, settings.AUTHENTICATOR_MAX_ATTEMPTS,
+            now + timedelta(minutes=settings.AUTHENTICATOR_LOCK_MINUTES))
+        raise APIError(401, "AUTHENTICATOR_INVALID", "The Authenticator code is incorrect or expired.")
+    credential.last_used_step = used_step
+    credential.failed_attempts = 0
+    credential.locked_until = None
+    recovery_codes = generate_recovery_codes()
+    await repository.replace_recovery_codes(user_id, [hash_value(normalize_recovery_code(value)) for value in recovery_codes])
+    return recovery_codes
 
 
 async def refresh_tokens(db: AsyncSession, refresh_token_plain: str) -> TokenResponse:

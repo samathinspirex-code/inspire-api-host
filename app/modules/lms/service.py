@@ -20,7 +20,6 @@ from app.modules.lms.schemas import (
     LecturerItem,
     LecturerListResponse,
     LecturerUpdate,
-    DashboardMetric,
     LmsBootstrapResponse,
     NavigationItem,
     ModuleCreate,
@@ -60,6 +59,7 @@ ROLE_NAVIGATION = {
         ("enrolments", "Enrolments", "user-check"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Reports & Exports", "chart"),
+        ("announcements", "Announcements", "megaphone"),
         ("settings", "Settings", "settings"),
     ],
     "ADMIN": [
@@ -71,34 +71,33 @@ ROLE_NAVIGATION = {
         ("enrolments", "Enrolments", "user-check"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Reports", "chart"),
+        ("announcements", "Announcements", "megaphone"),
     ],
     "LECTURER": [
+        ("profile", "My Profile", "user"),
         ("my-courses", "My Courses", "book"),
         ("my-classes", "My Classes", "video"),
         ("assignments", "Assignments", "file"),
+        ("exams", "Exams", "clipboard"),
+        ("grades", "Gradebook", "award"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Attendance Reports", "chart"),
         ("meetings", "Online Meetings", "camera"),
         ("announcements", "Announcements", "megaphone"),
     ],
     "STUDENT": [
+        ("profile", "My Profile", "user"),
         ("my-courses", "My Courses", "book"),
         ("my-classes", "My Classes", "video"),
         ("meetings", "Online Classes", "camera"),
         ("assignments", "Assignments", "file"),
+        ("exams", "Exams", "clipboard"),
         ("attendance", "Attendance", "clipboard"),
         ("grades", "Grades", "award"),
+        ("reports", "My Activity", "chart"),
         ("announcements", "Announcements", "megaphone"),
     ],
 }
-
-ROLE_METRICS = {
-    "SUPER_ADMIN": [("Students", "--", "Ready for student data"), ("Lecturers", "--", "Ready for lecturer data"), ("Active courses", "--", "Course module is next"), ("Today's classes", "--", "Scheduling is coming next")],
-    "ADMIN": [("Students", "--", "Ready for enrolments"), ("Lecturers", "--", "Ready for assignments"), ("Active classes", "--", "Class module is next"), ("Attendance", "--", "Attendance is coming next")],
-    "LECTURER": [("My courses", "--", "No courses assigned yet"), ("Today's classes", "--", "No classes scheduled yet"), ("Pending attendance", "--", "Nothing pending"), ("Assignments", "--", "No submissions yet")],
-    "STUDENT": [("My courses", "--", "No courses enrolled yet"), ("Today's classes", "--", "No classes scheduled yet"), ("Attendance", "--", "No attendance recorded yet"), ("Assignments", "--", "Nothing due")],
-}
-
 
 def resolve_role(access: list[str]) -> str | None:
     return next((role for role in ROLE_PRIORITY if role in access), None)
@@ -117,13 +116,13 @@ def build_bootstrap(current_user: CurrentUser) -> LmsBootstrapResponse:
         NavigationItem(key=key, label=label, icon=icon)
         for key, label, icon in ROLE_NAVIGATION[role]
     ]
-    metrics = [DashboardMetric(label=label, value=value, hint=hint) for label, value, hint in ROLE_METRICS[role]]
 
     return LmsBootstrapResponse(
         role=role,
         role_label=ROLE_LABELS[role],
         navigation=navigation,
-        metrics=metrics,
+        # Dashboard data is loaded independently so navigation stays lightweight.
+        metrics=[],
         enabled_features=[item.key for item in navigation],
     )
 

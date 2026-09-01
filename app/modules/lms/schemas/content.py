@@ -293,12 +293,21 @@ class LectureQuizQuestion(BaseModel):
     options: list[LectureQuizOption]
 
 
+class LectureQuizAnswerResult(BaseModel):
+    question_id: int
+    selected_option: QuestionOption
+    correct_option: QuestionOption
+    is_correct: bool
+    explanation: str
+
+
 class LectureQuizAttemptResponse(BaseModel):
     available: bool
     reason: str | None = None
     attempt_id: int | None = None
     attempt_number: int = 0
     questions: list[LectureQuizQuestion] = Field(default_factory=list)
+    answered_questions: list[LectureQuizAnswerResult] = Field(default_factory=list)
 
 
 class LectureQuizAnswer(BaseModel):
@@ -306,17 +315,13 @@ class LectureQuizAnswer(BaseModel):
     selected_option: QuestionOption
 
 
+class LectureQuizAnswerRequest(LectureQuizAnswer):
+    attempt_id: int = Field(..., gt=0)
+
+
 class LectureQuizSubmitRequest(BaseModel):
     attempt_id: int = Field(..., gt=0)
     answers: list[LectureQuizAnswer] = Field(..., min_length=1, max_length=10)
-
-
-class LectureQuizAnswerResult(BaseModel):
-    question_id: int
-    selected_option: QuestionOption
-    correct_option: QuestionOption
-    is_correct: bool
-    explanation: str
 
 
 class LectureQuizResultResponse(BaseModel):

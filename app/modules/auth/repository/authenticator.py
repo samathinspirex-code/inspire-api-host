@@ -197,3 +197,14 @@ class AuthenticatorRepository:
     async def consume_recovery_code(self, item: AuthenticatorRecoveryCode) -> None:
         item.used_at = datetime.now(timezone.utc)
         await self.db.commit()
+
+    async def count_unused_recovery_codes(self, user_id: int) -> int:
+        return int(await self.db.scalar(select(func.count()).select_from(AuthenticatorRecoveryCode).where(
+            AuthenticatorRecoveryCode.user_id == user_id,
+            AuthenticatorRecoveryCode.used_at.is_(None),
+        )) or 0)
+
+    async def replace_recovery_codes(self, user_id: int, code_hashes: list[str]) -> None:
+        await self.db.execute(delete(AuthenticatorRecoveryCode).where(AuthenticatorRecoveryCode.user_id == user_id))
+        self.db.add_all([AuthenticatorRecoveryCode(user_id=user_id, code_hash=value) for value in code_hashes])
+        await self.db.commit()

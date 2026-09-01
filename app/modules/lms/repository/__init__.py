@@ -9,6 +9,7 @@ from app.modules.lms.repository.meeting import MeetingRepository
 from app.modules.lms.repository.attendance import AttendanceRepository
 from app.modules.lms.repository.assignment import AssignmentRepository
 from app.modules.lms.repository.progress import ProgressRepository
+from app.modules.lms.repository.coursework import CourseworkRepository
 
 __all__ = [
     "AttendanceRepository",
@@ -22,4 +23,5 @@ __all__ = [
     "IntegrationRepository",
     "MeetingRepository",
     "ProgressRepository",
+    "CourseworkRepository",
 ]
