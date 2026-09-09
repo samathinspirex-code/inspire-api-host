@@ -140,6 +140,33 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
             raise NotFoundError(f"Course {course_id} not found")
     for option in payload.study_options:
         await upsert_study_option(db, course_id, option, commit=False)
+    course = (await db.execute(text("""
+        SELECT c.*, p.name AS programme_name, s.name AS school_name,
+          COALESCE((SELECT min(price) FROM academic_course_study_options WHERE course_id=c.course_id AND is_enabled), 0) AS price_from,
+          COALESCE((SELECT duration FROM academic_course_study_options WHERE course_id=c.course_id AND is_enabled ORDER BY study_option_id LIMIT 1), 'To be confirmed') AS duration
+        FROM academic_courses c JOIN academic_programmes p ON p.programme_id=c.programme_id
+        JOIN academic_schools s ON s.school_id=c.school_id WHERE c.course_id=:id
+    """), {"id": course_id})).mappings().one()
+    legacy_values = {
+        "slug": course["slug"], "title": course["title"], "level": course["programme_name"],
+        "school": course["school_name"], "awarding_body": course["awarding_body"],
+        "code": course["code"], "duration": course["duration"], "price_from": course["price_from"],
+        "image_url": course["image_url"], "blurb": course["blurb"], "image_label": course["title"],
+    }
+    if course["legacy_program_id"] is None:
+        legacy_id = await db.scalar(text("""
+            INSERT INTO programs (slug,title,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity)
+            VALUES (:slug,:title,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,0)
+            RETURNING program_id
+        """), legacy_values)
+        await db.execute(text("UPDATE academic_courses SET legacy_program_id=:legacy_id WHERE course_id=:course_id"), {"legacy_id": legacy_id, "course_id": course_id})
+    else:
+        await db.execute(text("""
+            UPDATE programs SET slug=:slug,title=:title,level=:level,school=:school,
+              awarding_body=:awarding_body,code=:code,duration=:duration,price_from=:price_from,
+              image_label=:image_label,image_url=:image_url,blurb=:blurb
+            WHERE program_id=:legacy_id
+        """), {**legacy_values, "legacy_id": course["legacy_program_id"]})
     await db.commit()
     courses = await list_courses(db)
     return next(item for item in courses if item["course_id"] == course_id)
