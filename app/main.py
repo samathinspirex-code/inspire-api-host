@@ -7,6 +7,9 @@ from app.core.activity_audit import record_request_change
 from app.core.config import settings
 from app.core.errors import APIError, api_error_handler, request_validation_handler
 from app.modules.auth.router import router as auth_router
+from app.modules.academic.router import cms_router as academic_cms_router
+from app.modules.academic.router import lms_router as academic_lms_router
+from app.modules.academic.router import public_router as academic_public_router
 from app.modules.cms.router import router as cms_router
 from app.modules.cms.public_router import router as public_cms_router
 from app.modules.cms.public_news_router import router as public_news_router
@@ -34,6 +37,9 @@ app.add_exception_handler(RequestValidationError, request_validation_handler)
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(academic_public_router)
+app.include_router(academic_cms_router)
+app.include_router(academic_lms_router)
 app.include_router(cms_router)
 app.include_router(public_cms_router)
 app.include_router(public_news_router)

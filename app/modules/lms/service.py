@@ -76,6 +76,7 @@ ROLE_NAVIGATION = {
     "LECTURER": [
         ("profile", "My Profile", "user"),
         ("my-courses", "My Courses", "book"),
+        ("course-templates", "Course Templates", "layers"),
         ("my-classes", "My Classes", "video"),
         ("assignments", "Assignments", "file"),
         ("exams", "Exams", "clipboard"),
