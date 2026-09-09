@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timezone
 import re
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +60,8 @@ def _discussion_response(discussion, author_name, author_email, is_lecturer):
 async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, role: str) -> None:
     if await CourseRepository(db).get(course_id) is None:
         raise NotFoundError(f"Course {course_id} not found")
+    if role == "SUPER_ADMIN":
+        return
     if role == "LECTURER":
         relation = await db.get(CourseLecturer, (course_id, user_id))
         if relation is None:
@@ -117,10 +120,18 @@ def _student_stream_url(item) -> str | None:
     match = re.search(r"vimeo\.com/(?:video/)?(\d+)", item.resource_url)
     if not match:
         return item.resource_url
-    return (
-        f"https://player.vimeo.com/video/{match.group(1)}"
-        "?dnt=1&download=0&pip=0&title=0&byline=0&portrait=0"
-    )
+    parsed_url = urlparse(item.resource_url)
+    privacy_hash = parse_qs(parsed_url.query).get("h", [None])[0]
+    # Vimeo returns some unlisted links as /<video-id>/<privacy-hash>, not
+    # only as ?h=<privacy-hash>. Preserve either form for the player URL.
+    if not privacy_hash:
+        path_parts = [part for part in parsed_url.path.split("/") if part]
+        if len(path_parts) >= 2 and path_parts[0] == match.group(1):
+            privacy_hash = path_parts[1]
+    parameters = {"dnt": "1", "download": "0", "pip": "0", "title": "0", "byline": "0", "portrait": "0"}
+    if privacy_hash:
+        parameters = {"h": privacy_hash, **parameters}
+    return f"https://player.vimeo.com/video/{match.group(1)}?{urlencode(parameters)}"
 
 
 async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id: int):
@@ -252,7 +263,8 @@ async def get_course_studio(
     blocked_by_video: str | None = None
     for module in visible_modules:
         rules = rules_by_module.get(module.module_id, [])
-        unlocked, reason = (True, None) if role == "LECTURER" else _student_access(rules, course_id, user_id, class_ids)
+        privileged_viewer = role in {"LECTURER", "SUPER_ADMIN"}
+        unlocked, reason = (True, None) if privileged_viewer else _student_access(rules, course_id, user_id, class_ids)
         items = items_by_module.get(module.module_id, [])
         if role == "STUDENT":
             items = [item for item in items if item.status == "published"]
@@ -265,10 +277,10 @@ async def get_course_studio(
             )
             item_responses.append(_item_response(
                 item,
-                accessible or role == "LECTURER",
+                accessible or privileged_viewer,
                 progress_by_item.get(item.learning_item_id),
                 role == "LECTURER",
-                accessible=accessible or role == "LECTURER",
+                accessible=accessible or privileged_viewer,
                 locked_reason=item_reason,
             ))
             if (
@@ -325,6 +337,21 @@ async def update_learning_item(db: AsyncSession, item_id: int, payload: Learning
         text_content=payload.text_content.strip() if payload.text_content else None,
         resource_url=payload.resource_url.strip() if payload.resource_url else None,
     )
+    # New LMS-managed Vimeo videos retain one source of truth: editing their
+    # Course Studio title or description also edits the Vimeo metadata. A
+    # local change such as Published -> Draft must never depend on Vimeo.
+    vimeo_metadata_changed = (
+        item.title != data["title"] or item.description != data["description"]
+    )
+    if item.item_type == "video" and payload.item_type == "video" and vimeo_metadata_changed:
+        from app.modules.lms import vimeo_service
+
+        video_uri = vimeo_service.video_uri_from_url(item.resource_url)
+        if video_uri and vimeo_service.is_configured():
+            async with vimeo_service.VimeoClient() as vimeo:
+                await vimeo.update_video(video_uri, data["title"], data["description"])
+                video = await vimeo.get_video(video_uri)
+            data["thumbnail_url"] = vimeo_service._thumbnail_url(video) or item.thumbnail_url
     return LearningItemResponse.model_validate(await repo.update_item(item, data))
 
 
@@ -334,6 +361,9 @@ async def delete_learning_item(db: AsyncSession, item_id: int, user_id: int) -> 
     if item is None:
         raise NotFoundError(f"Learning item {item_id} not found")
     await _ensure_module_manager(db, item.module_id, user_id)
+    from app.modules.lms import vimeo_service
+
+    await vimeo_service.delete_learning_item_video(db, item)
     await repo.delete_item(item)
 
 

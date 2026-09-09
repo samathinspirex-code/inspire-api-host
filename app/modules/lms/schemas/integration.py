@@ -30,6 +30,10 @@ class GoogleIntegrationItem(GoogleIntegrationUpdate):
         "disabled", "credentials_required", "security_key_required", "ready_for_account_connection"
     ]
     updated_at: datetime | None
+    central_account_connected: bool = False
+    central_google_email: str | None = None
+    central_connected_at: datetime | None = None
+    central_granted_scopes: list[str] = Field(default_factory=list)
 
 
 class GoogleConnectResponse(BaseModel):
@@ -37,6 +41,15 @@ class GoogleConnectResponse(BaseModel):
 
 
 class GoogleConnectionItem(BaseModel):
+    integration_ready: bool
+    connected: bool
+    google_email: str | None = None
+    granted_scopes: list[str] = Field(default_factory=list)
+    connected_at: datetime | None = None
+    message: str
+
+
+class GoogleCentralConnectionItem(BaseModel):
     integration_ready: bool
     connected: bool
     google_email: str | None = None

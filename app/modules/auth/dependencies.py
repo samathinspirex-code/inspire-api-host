@@ -19,7 +19,16 @@ async def get_current_user(request: Request) -> CurrentUser:
     except jwt.InvalidTokenError:
         raise UnauthorizedError("Invalid or expired token")
 
-    return CurrentUser(user_id=int(claims["sub"]), email=claims["email"], access=claims.get("access", []))
+    access = list(claims.get("access", []))
+    selected_role = request.headers.get("X-LMS-Active-Role", "").strip().upper()
+    lms_roles = {"SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"}
+    if selected_role:
+        if selected_role not in lms_roles or selected_role not in access:
+            raise ForbiddenError("The selected LMS role is not available for this account")
+        # Treat the chosen portal as the active role for this request. Other
+        # assigned roles remain in the token and can be selected again later.
+        access = [value for value in access if value not in lms_roles or value == selected_role]
+    return CurrentUser(user_id=int(claims["sub"]), email=claims["email"], access=access)
 
 
 def require_access(access_key: str) -> Callable:

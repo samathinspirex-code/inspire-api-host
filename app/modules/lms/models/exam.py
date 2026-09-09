@@ -12,6 +12,7 @@ class LmsExam(Base):
     __table_args__ = (Index("idx_lms_exams_course_status", "course_id", "status"),)
 
     exam_id: Mapped[int] = mapped_column(primary_key=True)
+    assessment_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="exam")
     assignment_id: Mapped[int] = mapped_column(
         ForeignKey("lms_coursework_assignments.assignment_id", ondelete="CASCADE"), unique=True, nullable=False
     )
@@ -44,6 +45,7 @@ class LmsExamQuestion(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     options: Mapped[list | None] = mapped_column(JSON)
     correct_option_index: Mapped[int | None] = mapped_column(Integer)
+    correct_option_indices: Mapped[list | None] = mapped_column(JSON)
     accepted_answers: Mapped[list | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

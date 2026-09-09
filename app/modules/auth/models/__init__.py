@@ -5,6 +5,7 @@ from app.modules.auth.models.authenticator import (
     AuthenticatorSetupToken,
 )
 from app.modules.auth.models.refresh_token import RefreshToken
+from app.modules.auth.models.password import PasswordCredential
 from app.modules.auth.models.sso_ticket import SsoTicket
 from app.modules.auth.models.user import User
 from app.modules.auth.models.user_access_level import UserAccessLevel
@@ -14,6 +15,7 @@ __all__ = [
     "AccessLevel",
     "UserAccessLevel",
     "RefreshToken",
+    "PasswordCredential",
     "SsoTicket",
     "AuthenticatorCredential",
     "AuthenticatorRecoveryCode",

@@ -260,6 +260,33 @@ async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, 
 
 
 async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> NotificationDispatchSummary:
+    # The dispatcher is called by the existing recurring notification job.  Keeping
+    # attendance here means a completed class is collected without a lecturer click.
+    from app.modules.lms import attendance_service
+    from app.modules.lms.repository import AttendanceRepository, IntegrationRepository
+
+    current_time = now or utc_now()
+    integration = await IntegrationRepository(db).get_google_settings()
+    if integration and integration.enabled and integration.attendance_sync_enabled:
+        for meeting in await AttendanceRepository(db).list_due_automatic_syncs(current_time):
+            try:
+                await attendance_service.sync_meeting_attendance(
+                    db, meeting.meeting_id, meeting.lecturer_user_id
+                )
+            except Exception:
+                # Google can take several minutes to publish a conference record.
+                # sync_meeting_attendance records the safe error and this dispatcher retries later.
+                pass
+    # This worker is also the durable retry point for Vimeo's asynchronous
+    # transcoding thumbnails. It makes newly uploaded lecture previews appear
+    # even when the first upload response arrived before Vimeo was ready.
+    try:
+        from app.modules.lms import vimeo_service
+
+        await vimeo_service.refresh_pending_learning_item_thumbnails(db)
+    except Exception:
+        # Thumbnail processing must never delay notification delivery.
+        pass
     created, published = await generate_reminders(db, now)
     sent, failed = await deliver_pending_emails(db, now)
     return NotificationDispatchSummary(reminders_created=created, announcements_published=published, emails_sent=sent, emails_failed=failed)

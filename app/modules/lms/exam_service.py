@@ -1,4 +1,5 @@
 import secrets
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -21,6 +22,9 @@ from app.modules.lms.models import (
     LmsExamAnswer,
     LmsExamAttempt,
     LmsExamQuestion,
+    LmsLearningItem,
+    LmsModule,
+    LmsModuleAccess,
     StudentProfile,
 )
 from app.modules.lms.schemas import (
@@ -34,6 +38,7 @@ from app.modules.lms.schemas import (
     ExamQuestionEditorItem,
     ExamQuestionUpsert,
     ExamResultResponse,
+    PracticeTestCreate,
 )
 from app.modules.lms.schemas.exam import ExamAttemptQuestion, ExamResultAnswer, ExamReviewAnswerItem
 from app.modules.lms import notification_service
@@ -77,6 +82,7 @@ def _editor_question(item: LmsExamQuestion) -> ExamQuestionEditorItem:
         question_id=item.question_id, exam_id=item.exam_id, question_type=item.question_type,
         prompt=item.prompt, marks=item.marks, position=item.position, options=item.options,
         correct_option_index=item.correct_option_index, accepted_answers=item.accepted_answers,
+        correct_option_indices=item.correct_option_indices,
     )
 
 
@@ -88,7 +94,9 @@ async def _exam_item(db: AsyncSession, context, attempt: LmsExamAttempt | None =
     )).one()
     show_grade = expose_grade or exam.grades_released
     return ExamItem(
-        exam_id=exam.exam_id, assignment_id=exam.assignment_id, course_id=exam.course_id,
+        exam_id=exam.exam_id, assessment_kind=exam.assessment_kind,
+        learning_item_id=assignment.learning_item_id,
+        assignment_id=exam.assignment_id, course_id=exam.course_id,
         course_code=course.code, course_title=course.title, target_type=exam.target_type,
         target_id=exam.target_id, target_label=target_class.name if target_class else "Entire course",
         title=exam.title, instructions=exam.instructions, available_from=exam.available_from,
@@ -120,6 +128,7 @@ async def create_exam(db: AsyncSession, payload: ExamCreate, user_id: int) -> Ex
     db.add(assignment)
     await db.flush()
     exam = LmsExam(
+        assessment_kind="exam",
         assignment_id=assignment.assignment_id, course_id=payload.course_id,
         target_type=payload.target_type, target_id=payload.target_id, title=payload.title,
         instructions=payload.instructions, available_from=payload.available_from, due_at=payload.due_at,
@@ -138,6 +147,7 @@ async def list_exams(db: AsyncSession, user_id: int, role: str) -> ExamListRespo
         .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsExam.assignment_id)
         .join(LmsCourse, LmsCourse.course_id == LmsExam.course_id)
         .outerjoin(LmsClass, and_(LmsExam.target_type == "class", LmsClass.class_id == LmsExam.target_id))
+        .where(LmsExam.assessment_kind == "exam")
     )
     if role == "LECTURER":
         stmt = stmt.join(CourseLecturer, and_(CourseLecturer.course_id == LmsExam.course_id, CourseLecturer.lecturer_user_id == user_id)).outerjoin(
@@ -184,6 +194,8 @@ async def _sync_max_marks(db: AsyncSession, exam: LmsExam) -> None:
 async def add_question(db: AsyncSession, exam_id: int, payload: ExamQuestionUpsert, user_id: int) -> ExamEditorResponse:
     context = await _exam_context(db, exam_id); exam = context[0]
     await _ensure_lecturer_course(db, exam.course_id, user_id); await _ensure_editable(db, exam)
+    if exam.assessment_kind == "practice_test" and payload.question_type not in {"mcq", "multiple_answer"}:
+        raise ValidationError("Practice tests support multiple-choice questions only")
     db.add(LmsExamQuestion(exam_id=exam_id, **payload.model_dump()))
     await db.flush(); await _sync_max_marks(db, exam); await db.commit()
     return await get_editor(db, exam_id, user_id)
@@ -194,6 +206,8 @@ async def update_question(db: AsyncSession, question_id: int, payload: ExamQuest
     if question is None: raise NotFoundError("Exam question not found")
     context = await _exam_context(db, question.exam_id); exam = context[0]
     await _ensure_lecturer_course(db, exam.course_id, user_id); await _ensure_editable(db, exam)
+    if exam.assessment_kind == "practice_test" and payload.question_type not in {"mcq", "multiple_answer"}:
+        raise ValidationError("Practice tests support multiple-choice questions only")
     for key, value in payload.model_dump().items(): setattr(question, key, value)
     await db.flush(); await _sync_max_marks(db, exam); await db.commit()
     return await get_editor(db, exam.exam_id, user_id)
@@ -214,10 +228,126 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
     questions = await _question_rows(db, exam_id)
     if status == "published" and not questions: raise ValidationError("Add at least one question before publishing")
     exam.status = status; assignment.status = status
+    if assignment.learning_item_id:
+        learning_item = await db.get(LmsLearningItem, assignment.learning_item_id)
+        if learning_item is not None:
+            learning_item.status = "draft" if status == "draft" else "published"
     await db.commit()
     if status == "published":
         await notification_service.notify_assessment_published(db, assignment, "exam")
     return await get_editor(db, exam_id, user_id)
+
+
+async def ensure_practice_test_section(db: AsyncSession, course_id: int, user_id: int | None) -> LmsModule:
+    course = await db.get(LmsCourse, course_id)
+    if course is None:
+        raise NotFoundError(f"Course {course_id} not found")
+    section = (await db.execute(
+        select(LmsModule).where(
+            LmsModule.course_id == course_id,
+            func.lower(func.trim(LmsModule.title)) == "practice test",
+        )
+    )).scalar_one_or_none()
+    if section is None:
+        last_position = await db.scalar(select(func.coalesce(func.max(LmsModule.position), 0)).where(LmsModule.course_id == course_id))
+        section = LmsModule(
+            course_id=course_id,
+            title="Practice Test",
+            description="Multiple-choice practice tests added after online classes.",
+            position=int(last_position or 0) + 1,
+            status="active",
+            created_by=user_id,
+        )
+        db.add(section)
+        await db.flush()
+    else:
+        section.status = "active"
+    access = (await db.execute(select(LmsModuleAccess).where(
+        LmsModuleAccess.module_id == section.module_id,
+        LmsModuleAccess.scope_type == "course",
+        LmsModuleAccess.scope_id == course_id,
+    ))).scalar_one_or_none()
+    if access is None:
+        db.add(LmsModuleAccess(
+            module_id=section.module_id, scope_type="course", scope_id=course_id,
+            is_unlocked=True, created_by=user_id,
+        ))
+    else:
+        access.is_unlocked = True
+    await db.commit()
+    await db.refresh(section)
+    return section
+
+
+async def create_practice_test(
+    db: AsyncSession, course_id: int, payload: PracticeTestCreate, user_id: int,
+) -> ExamEditorResponse:
+    await _ensure_lecturer_course(db, course_id, user_id)
+    section = await ensure_practice_test_section(db, course_id, user_id)
+    last_position = await db.scalar(select(func.coalesce(func.max(LmsLearningItem.position), 0)).where(
+        LmsLearningItem.module_id == section.module_id,
+    ))
+    item = LmsLearningItem(
+        module_id=section.module_id, item_type="quiz", title=payload.title.strip(),
+        description=payload.instructions.strip(), duration_minutes=payload.duration_minutes,
+        position=int(last_position or 0) + 1, status="draft", is_required=False, created_by=user_id,
+    )
+    db.add(item)
+    await db.flush()
+    assignment = LmsCourseworkAssignment(
+        learning_item_id=item.learning_item_id, course_id=course_id,
+        target_type="course", target_id=course_id, title=payload.title.strip(),
+        instructions=payload.instructions.strip(), assignment_type="timed",
+        available_from=payload.available_from, due_at=payload.due_at,
+        duration_minutes=payload.duration_minutes, max_marks=Decimal("1"), allow_late=False,
+        grades_released=True, status="draft", created_by=user_id,
+    )
+    db.add(assignment)
+    await db.flush()
+    exam = LmsExam(
+        assessment_kind="practice_test", assignment_id=assignment.assignment_id,
+        course_id=course_id, target_type="course", target_id=course_id,
+        title=payload.title.strip(), instructions=payload.instructions.strip(),
+        available_from=payload.available_from, due_at=payload.due_at,
+        duration_minutes=payload.duration_minutes,
+        randomize_questions=payload.randomize_questions,
+        randomize_options=payload.randomize_options,
+        grades_released=True, status="draft", created_by=user_id,
+    )
+    db.add(exam)
+    await db.flush()
+    item.resource_url = f"practice-test:{exam.exam_id}"
+    await db.commit()
+    return await get_editor(db, exam.exam_id, user_id)
+
+
+async def get_practice_test_for_item(
+    db: AsyncSession, item_id: int, user_id: int, role: str,
+) -> ExamItem:
+    from app.modules.lms import content_service
+
+    context = (await db.execute(
+        select(LmsExam, LmsCourseworkAssignment, LmsCourse, LmsClass)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsExam.assignment_id)
+        .join(LmsCourse, LmsCourse.course_id == LmsExam.course_id)
+        .outerjoin(LmsClass, and_(LmsExam.target_type == "class", LmsClass.class_id == LmsExam.target_id))
+        .where(
+            LmsCourseworkAssignment.learning_item_id == item_id,
+            LmsExam.assessment_kind == "practice_test",
+        )
+    )).one_or_none()
+    if context is None:
+        raise NotFoundError("Practice test not found")
+    exam = context[0]
+    if role == "STUDENT":
+        await content_service.get_accessible_student_item(db, item_id, user_id)
+        await _ensure_student_target(db, exam, user_id)
+        attempt = await _get_attempt(db, exam.exam_id, user_id)
+        return await _exam_item(db, context, attempt, expose_grade=False)
+    if role == "LECTURER":
+        await _ensure_lecturer_course(db, exam.course_id, user_id)
+        return await _exam_item(db, context)
+    raise ForbiddenError("This LMS role cannot access practice tests")
 
 
 async def update_grade_release(db: AsyncSession, exam_id: int, released: bool, user_id: int) -> ExamEditorResponse:
@@ -278,7 +408,9 @@ async def _attempt_response(db: AsyncSession, exam: LmsExam, attempt: LmsExamAtt
         displayed_selection = option_order.index(answer.selected_option_index) if answer and answer.selected_option_index in option_order else None
         items.append(ExamAttemptQuestion(question_id=question.question_id, position=position, question_type=question.question_type,
             prompt=question.prompt, marks=question.marks, options=[question.options[index] for index in option_order] if question.options else None,
-            selected_option_index=displayed_selection, answer_text=answer.answer_text if answer else None))
+            selected_option_index=displayed_selection,
+            selected_option_indices=([option_order.index(index) for index in json.loads(answer.answer_text)] if answer and answer.answer_text and question.question_type == "multiple_answer" else None),
+            answer_text=answer.answer_text if answer else None))
     return ExamAttemptResponse(attempt_id=attempt.attempt_id, exam_id=exam.exam_id, title=exam.title,
         instructions=exam.instructions, status=attempt.status, started_at=attempt.started_at, expires_at=attempt.expires_at,
         submitted_at=attempt.submitted_at, remaining_seconds=remaining_seconds(attempt.expires_at) or 0, questions=items)
@@ -304,6 +436,11 @@ async def save_answers(db: AsyncSession, attempt_id: int, payload, user_id: int)
             if incoming.selected_option_index is not None and incoming.selected_option_index >= len(order): raise ValidationError("Choose a valid option")
             answer.selected_option_index = order[incoming.selected_option_index] if incoming.selected_option_index is not None else None
             answer.answer_text = None
+        elif question.question_type == "multiple_answer":
+            order = attempt.option_orders.get(str(question.question_id), [])
+            selected = sorted(set(incoming.selected_option_indices or []))
+            if any(index >= len(order) for index in selected): raise ValidationError("Choose valid options")
+            answer.answer_text = json.dumps(sorted(order[index] for index in selected)); answer.selected_option_index = None
         else:
             answer.answer_text = (incoming.answer_text or "").strip() or None; answer.selected_option_index = None
     await db.commit(); await db.refresh(attempt)
@@ -321,6 +458,11 @@ async def _finalize_attempt(db: AsyncSession, exam: LmsExam, assignment: LmsCour
             answer = LmsExamAnswer(attempt_id=attempt.attempt_id, question_id=question.question_id); db.add(answer)
         if question.question_type == "mcq":
             answer.is_correct = answer.selected_option_index is not None and answer.selected_option_index == question.correct_option_index
+            answer.auto_marks = question.marks if answer.is_correct else Decimal("0"); auto += Decimal(answer.auto_marks)
+        elif question.question_type == "multiple_answer":
+            try: selected = sorted(json.loads(answer.answer_text or "[]"))
+            except Exception: selected = []
+            answer.is_correct = selected == sorted(question.correct_option_indices or [])
             answer.auto_marks = question.marks if answer.is_correct else Decimal("0"); auto += Decimal(answer.auto_marks)
         else:
             has_written = True; answer.auto_marks = Decimal("0")
@@ -377,7 +519,7 @@ async def mark_attempt(db: AsyncSession, attempt_id: int, payload, user_id: int)
     marks_by_question = {item.question_id: item for item in payload.answers}
     manual = Decimal("0")
     for question in questions.values():
-        if question.question_type == "mcq": continue
+        if question.question_type in {"mcq", "multiple_answer"}: continue
         mark = marks_by_question.get(question.question_id)
         awarded = Decimal(mark.marks_awarded) if mark else Decimal("0")
         if awarded > Decimal(question.marks): raise ValidationError(f"Marks for '{question.prompt[:40]}' cannot exceed {question.marks}")

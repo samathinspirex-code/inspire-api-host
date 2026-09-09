@@ -14,6 +14,17 @@ class AuthenticatorRecoveryRequest(BaseModel):
     recovery_code: str = Field(..., min_length=12, max_length=20)
 
 
+class PasswordLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class PasswordSetupCompleteRequest(BaseModel):
+    email: EmailStr
+    setup_token: str = Field(..., min_length=64, max_length=64)
+    password: str = Field(..., min_length=12, max_length=128)
+
+
 class AuthenticatorSetupStartRequest(BaseModel):
     email: EmailStr
     setup_token: str = Field(..., min_length=64, max_length=64)
@@ -82,6 +93,7 @@ class AuthenticatorPortalLink(BaseModel):
 
 
 class AuthenticatorInvitationResponse(AuthenticatorSetupTokenResponse):
+    setup_method: str = "authenticator"
     setup_url: str
     portal_links: list[AuthenticatorPortalLink] = Field(default_factory=list)
     email_sent: bool

@@ -40,6 +40,7 @@ class LearningItemResponse(BaseModel):
     title: str
     description: str | None
     resource_url: str | None
+    thumbnail_url: str | None = None
     text_content: str | None
     duration_minutes: int | None
     position: int
@@ -243,6 +244,12 @@ class CourseAssistantIngestionResponse(BaseModel):
     failures: list[CourseAssistantIngestionFailure] = Field(default_factory=list)
 
 
+class VideoTranscriptOverride(BaseModel):
+    """Optional lecturer-supplied transcript used instead of Vimeo auto-captions."""
+
+    transcript: str = Field(..., min_length=40, max_length=50000)
+
+
 QuestionOption = Literal["A", "B", "C", "D"]
 QuestionDifficulty = Literal["easy", "medium", "hard"]
 QuestionStatus = Literal["generated", "approved", "rejected"]
@@ -260,7 +267,8 @@ class LectureQuestionUpsert(BaseModel):
     difficulty: QuestionDifficulty = "medium"
     topic: str = Field("General", min_length=1, max_length=120)
     source_locator: str | None = Field(None, max_length=120)
-    status: QuestionStatus = "generated"
+    # Lecturer-created questions should be immediately usable at the end of the video.
+    status: QuestionStatus = "approved"
 
 
 class LectureQuestionResponse(LectureQuestionUpsert):
@@ -306,8 +314,12 @@ class LectureQuizAttemptResponse(BaseModel):
     reason: str | None = None
     attempt_id: int | None = None
     attempt_number: int = 0
+    is_submitted: bool = False
+    score: int | None = None
+    total_questions: int = 0
     questions: list[LectureQuizQuestion] = Field(default_factory=list)
     answered_questions: list[LectureQuizAnswerResult] = Field(default_factory=list)
+    results: list[LectureQuizAnswerResult] = Field(default_factory=list)
 
 
 class LectureQuizAnswer(BaseModel):

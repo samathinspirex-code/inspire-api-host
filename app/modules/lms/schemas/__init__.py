@@ -42,6 +42,7 @@ from app.modules.lms.schemas.portal import (
 )
 from app.modules.lms.schemas.integration import (
     GoogleConnectResponse,
+    GoogleCentralConnectionItem,
     GoogleConnectionItem,
     GoogleIntegrationItem,
     GoogleIntegrationUpdate,
@@ -74,6 +75,7 @@ from app.modules.lms.schemas.content import (
     CourseAssistantSettingsUpdate,
     CourseAssistantSystemSettingsResponse,
     CourseAssistantSystemSettingsUpdate,
+    VideoTranscriptOverride,
     CourseKnowledgeSourceCreate,
     CourseKnowledgeSourceResponse,
     CourseKnowledgeSourceUpdate,
@@ -139,6 +141,7 @@ from app.modules.lms.schemas.exam import (
     ExamListResponse,
     ExamQuestionEditorItem,
     ExamQuestionUpsert,
+    PracticeTestCreate,
     ExamResultResponse,
     ExamStatusUpdate,
 )
@@ -160,6 +163,13 @@ from app.modules.lms.schemas.profile import (
     RecoveryCodesRegenerateRequest,
     RecoveryCodesResponse,
 )
+from app.modules.lms.schemas.vimeo import (
+    VimeoCourseLibraryResponse,
+    VimeoUploadFinalizeRequest,
+    VimeoUploadTicketRequest,
+    VimeoUploadTicketResponse,
+    VimeoWorkspaceResponse,
+)
 from app.modules.lms.schemas.analytics import (
     AnalyticsBreakdownItem,
     AnalyticsCourseInsight,
@@ -177,6 +187,11 @@ __all__ = [
     "CourseListResponse",
     "CoursePresentationUpdate",
     "CourseUpdate",
+    "VimeoCourseLibraryResponse",
+    "VimeoUploadFinalizeRequest",
+    "VimeoUploadTicketRequest",
+    "VimeoUploadTicketResponse",
+    "VimeoWorkspaceResponse",
     "Pagination",
     "ProgrammeListResponse",
     "ProgrammeSummary",
@@ -210,6 +225,7 @@ __all__ = [
     "GoogleIntegrationItem",
     "GoogleIntegrationUpdate",
     "GoogleConnectResponse",
+    "GoogleCentralConnectionItem",
     "GoogleConnectionItem",
     "MeetingCreate",
     "MeetingItem",
@@ -250,6 +266,7 @@ __all__ = [
     "CourseAssistantSettingsUpdate",
     "CourseAssistantSystemSettingsResponse",
     "CourseAssistantSystemSettingsUpdate",
+    "VideoTranscriptOverride",
     "CourseKnowledgeSourceCreate",
     "CourseKnowledgeSourceResponse",
     "CourseKnowledgeSourceUpdate",
@@ -287,6 +304,7 @@ __all__ = [
     "StudentGradesResponse",
     "ExamCreate",
     "ExamQuestionUpsert",
+    "PracticeTestCreate",
     "ExamQuestionEditorItem",
     "ExamItem",
     "ExamListResponse",

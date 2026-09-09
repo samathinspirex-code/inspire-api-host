@@ -26,29 +26,50 @@ class ExamCreate(BaseModel):
         return self
 
 
+class PracticeTestCreate(BaseModel):
+    title: str = Field(..., min_length=2, max_length=255)
+    instructions: str = Field("Answer every question and submit when finished.", min_length=2, max_length=20_000)
+    available_from: datetime | None = None
+    due_at: datetime | None = None
+    duration_minutes: int = Field(30, ge=1, le=1440)
+    randomize_questions: bool = True
+    randomize_options: bool = True
+
+    @model_validator(mode="after")
+    def validate_practice_test(self):
+        if self.available_from and self.due_at and self.due_at <= self.available_from:
+            raise ValueError("Due time must be after the available time")
+        return self
+
+
 class ExamQuestionUpsert(BaseModel):
-    question_type: Literal["mcq", "short_answer", "essay"]
+    question_type: Literal["mcq", "multiple_answer", "short_answer", "essay"]
     prompt: str = Field(..., min_length=2, max_length=20_000)
     marks: Decimal = Field(..., gt=0, le=100_000)
     position: int = Field(1, ge=1)
     options: list[str] | None = None
     correct_option_index: int | None = Field(None, ge=0)
+    correct_option_indices: list[int] | None = None
     accepted_answers: list[str] | None = None
 
     @model_validator(mode="after")
     def validate_answer_configuration(self):
-        if self.question_type == "mcq":
+        if self.question_type in {"mcq", "multiple_answer"}:
             if not self.options or len(self.options) < 2:
                 raise ValueError("MCQ questions need at least two options")
             cleaned = [item.strip() for item in self.options]
             if any(not item for item in cleaned) or len({item.casefold() for item in cleaned}) != len(cleaned):
                 raise ValueError("MCQ options must be non-empty and unique")
-            if self.correct_option_index is None or self.correct_option_index >= len(cleaned):
+            if self.question_type == "mcq" and (self.correct_option_index is None or self.correct_option_index >= len(cleaned)):
                 raise ValueError("Choose a valid correct MCQ option")
+            if self.question_type == "multiple_answer" and (not self.correct_option_indices or any(i < 0 or i >= len(cleaned) for i in self.correct_option_indices)):
+                raise ValueError("Choose at least one valid correct option")
             self.options = cleaned
         else:
             self.options = None
             self.correct_option_index = None
+            self.correct_option_indices = None
+        if self.question_type == "mcq": self.correct_option_indices = None
         if self.question_type == "short_answer" and self.accepted_answers:
             self.accepted_answers = [item.strip() for item in self.accepted_answers if item.strip()]
         else:
@@ -65,11 +86,14 @@ class ExamQuestionEditorItem(BaseModel):
     position: int
     options: list[str] | None
     correct_option_index: int | None
+    correct_option_indices: list[int] | None = None
     accepted_answers: list[str] | None
 
 
 class ExamItem(BaseModel):
     exam_id: int
+    assessment_kind: str = "exam"
+    learning_item_id: int | None = None
     assignment_id: int
     course_id: int
     course_code: str
@@ -123,6 +147,7 @@ class ExamAttemptQuestion(BaseModel):
     marks: Decimal
     options: list[str] | None
     selected_option_index: int | None = None
+    selected_option_indices: list[int] | None = None
     answer_text: str | None = None
 
 
@@ -142,6 +167,7 @@ class ExamAttemptResponse(BaseModel):
 class ExamAnswerUpdate(BaseModel):
     question_id: int = Field(..., gt=0)
     selected_option_index: int | None = Field(None, ge=0)
+    selected_option_indices: list[int] | None = None
     answer_text: str | None = Field(None, max_length=100_000)
 
 

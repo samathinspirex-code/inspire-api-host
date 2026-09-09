@@ -63,10 +63,23 @@ class ContentRepository:
         module_id, deleted_position = item.module_id, item.position
         await self.db.delete(item)
         await self.db.flush()
+        # Positions are unique per module. Move the remaining rows out of the
+        # way first so a single bulk decrement cannot temporarily collide with
+        # the next item's position (for example 2 -> 1 while 1 still exists).
+        offset = 100_000
         await self.db.execute(
             update(LmsLearningItem)
             .where(LmsLearningItem.module_id == module_id, LmsLearningItem.position > deleted_position)
-            .values(position=LmsLearningItem.position - 1)
+            .values(position=LmsLearningItem.position + offset)
+        )
+        await self.db.flush()
+        await self.db.execute(
+            update(LmsLearningItem)
+            .where(
+                LmsLearningItem.module_id == module_id,
+                LmsLearningItem.position > deleted_position + offset,
+            )
+            .values(position=LmsLearningItem.position - offset - 1)
         )
         await self.db.commit()
 

@@ -59,3 +59,37 @@ class GoogleAccountConnection(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class GoogleCentralOAuthState(Base):
+    """One-time OAuth state used only by the Super Admin meeting owner."""
+
+    __tablename__ = "lms_google_central_oauth_states"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    requested_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoogleCentralAccountConnection(Base):
+    """The single Google account that owns LMS-created meetings and calendars."""
+
+    __tablename__ = "lms_google_central_account_connection"
+    __table_args__ = (CheckConstraint("connection_id = 1", name="ck_lms_google_central_singleton"),)
+
+    connection_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+    google_subject: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    google_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_refresh_token: Mapped[str] = mapped_column(Text, nullable=False)
+    granted_scopes: Mapped[str] = mapped_column(Text, nullable=False)
+    connected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

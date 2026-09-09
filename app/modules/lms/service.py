@@ -6,7 +6,7 @@ from app.modules.auth import service as auth_service
 from app.modules.auth.repository import AuthenticatorRepository, RefreshTokenRepository
 from app.modules.cms.models import Program
 from app.modules.cms.repository import ProgramRepository
-from app.modules.lms.repository import ClassRepository, CourseRepository, ModuleRepository, PeopleRepository
+from app.modules.lms.repository import AssignmentRepository, ClassRepository, CourseRepository, ModuleRepository, PeopleRepository
 from app.modules.lms.schemas import (
     CourseCreate,
     CourseItem,
@@ -156,6 +156,7 @@ def _to_course_item(course, program_title: str, program_code: str) -> CourseItem
         description=course.description,
         takeaways=course.takeaways,
         cover_image_url=course.cover_image_url,
+        vimeo_folder_uri=course.vimeo_folder_uri,
         status=course.status,
         created_at=course.created_at,
         updated_at=course.updated_at,
@@ -202,7 +203,24 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
             "created_by": user_id,
         }
     )
+    # Every course receives a dedicated, non-required Practice Test section.
+    from app.modules.lms.exam_service import ensure_practice_test_section
+    await ensure_practice_test_section(db, course.course_id, user_id)
     return _to_course_item(course, programme.title, programme.code)
+
+
+async def create_lecturer_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
+    """Create a draft course and give its creating lecturer immediate ownership."""
+    course = await create_course(db, payload.model_copy(update={"status": "draft"}), user_id)
+    try:
+        await AssignmentRepository(db).assign_course_lecturer(course.course_id, user_id, user_id)
+    except Exception:
+        # Avoid leaving a course that the lecturer cannot reach if their profile is invalid.
+        stored = await CourseRepository(db).get(course.course_id)
+        if stored is not None:
+            await CourseRepository(db).delete(stored)
+        raise
+    return course
 
 
 async def update_course(db: AsyncSession, course_id: int, payload: CourseUpdate) -> CourseItem:
@@ -237,6 +255,9 @@ async def delete_course(db: AsyncSession, course_id: int) -> None:
     course = await repo.get(course_id)
     if course is None:
         raise NotFoundError(f"Course {course_id} not found")
+    from app.modules.lms import vimeo_service
+
+    await vimeo_service.delete_course_workspace(db, course)
     await repo.delete(course)
 
 
@@ -301,6 +322,9 @@ async def delete_module(db: AsyncSession, module_id: int) -> None:
     module = await repo.get(module_id)
     if module is None:
         raise NotFoundError(f"Module {module_id} not found")
+    from app.modules.lms import vimeo_service
+
+    await vimeo_service.delete_module_workspace(db, module)
     await repo.delete_and_renumber(module)
 
 
@@ -618,9 +642,15 @@ async def send_person_authenticator_invitation(
     user = await PeopleRepository(db).get_user(user_id)
     if user is None or not user.is_active:
         raise NotFoundError(f"Active LMS user {user_id} not found")
-    access = {item.access_level.access_key for item in user.access_levels}
+    access = {
+        item.access_level.access_key
+        for item in user.access_levels
+        if item.access_level.is_active
+    }
     if not ({"STUDENT", "LECTURER"} & access):
         raise NotFoundError(f"Student or lecturer {user_id} not found")
-    return await auth_service.issue_authenticator_setup_invitation(
-        db, user_id, created_by
-    )
+    if access == {"LMS", "STUDENT"}:
+        return await auth_service.issue_student_password_setup_invitation(
+            db, user_id, created_by
+        )
+    return await auth_service.issue_authenticator_setup_invitation(db, user_id, created_by)

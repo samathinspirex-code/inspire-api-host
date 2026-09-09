@@ -1,10 +1,15 @@
 import unittest
+from types import SimpleNamespace
 
+from app.core.errors import APIError
+from app.modules.auth import service
 from app.modules.auth.security import (
     _totp_code,
     generate_recovery_codes,
     generate_totp_secret,
+    hash_password,
     normalize_recovery_code,
+    verify_password,
     verify_totp,
 )
 
@@ -34,6 +39,35 @@ class AuthenticatorSecurityTests(unittest.TestCase):
         self.assertEqual(len(set(codes)), 10)
         self.assertTrue(all(len(normalize_recovery_code(code)) == 12 for code in codes))
         self.assertEqual(normalize_recovery_code("abcd-efgh-jklm"), "ABCDEFGHJKLM")
+
+    def test_password_hash_is_salted_and_verifies_without_storing_plaintext(self):
+        first = hash_password("SafeStudentPass123")
+        second = hash_password("SafeStudentPass123")
+
+        self.assertNotEqual(first, second)
+        self.assertNotIn("SafeStudentPass123", first)
+        self.assertTrue(verify_password("SafeStudentPass123", first))
+        self.assertFalse(verify_password("WrongStudentPass123", first))
+        self.assertFalse(verify_password("SafeStudentPass123", "not-a-valid-hash"))
+
+    def test_password_access_is_limited_to_student_only_lms_accounts(self):
+        def user_with(*keys):
+            return SimpleNamespace(access_levels=[
+                SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
+                for key in keys
+            ])
+
+        self.assertTrue(service._student_password_eligible(user_with("LMS", "STUDENT")))
+        self.assertFalse(service._student_password_eligible(user_with("LMS", "STUDENT", "ADMIN")))
+        self.assertFalse(service._student_password_eligible(user_with("LMS", "LECTURER")))
+
+    def test_student_password_strength_rules(self):
+        service._validate_student_password("SafeStudentPass123", "learner@example.test")
+        for password in ("short1", "letterswithoutdigits", "123456789012", "learnerPass123"):
+            with self.subTest(password=password):
+                with self.assertRaises(APIError) as raised:
+                    service._validate_student_password(password, "learner@example.test")
+                self.assertEqual(raised.exception.code, "PASSWORD_WEAK")
 
 
 if __name__ == "__main__":

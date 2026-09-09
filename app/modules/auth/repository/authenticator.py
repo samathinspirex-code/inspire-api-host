@@ -8,6 +8,7 @@ from app.modules.auth.models import (
     AuthenticatorCredential,
     AuthenticatorRecoveryCode,
     AuthenticatorSetupToken,
+    PasswordCredential,
     User,
     UserAccessLevel,
 )
@@ -24,7 +25,12 @@ class AuthenticatorRepository:
             AuthenticatorCredential.user_id.in_(user_ids),
             AuthenticatorCredential.enabled.is_(True),
         )
-        return set((await self.db.execute(stmt)).scalars().all())
+        configured = set((await self.db.execute(stmt)).scalars().all())
+        password_stmt = select(PasswordCredential.user_id).where(
+            PasswordCredential.user_id.in_(user_ids)
+        )
+        configured.update((await self.db.execute(password_stmt)).scalars().all())
+        return configured
 
     async def setup_statuses(
         self, user_ids: list[int]
@@ -81,6 +87,12 @@ class AuthenticatorRepository:
             credential.locked_until = None
         await self.db.execute(
             delete(AuthenticatorRecoveryCode).where(AuthenticatorRecoveryCode.user_id == user_id)
+        )
+        # Issuing a new credential invitation is an administrator reset. Revoke
+        # any existing student password immediately so the old credential cannot
+        # remain usable while the single-use setup link is outstanding.
+        await self.db.execute(
+            delete(PasswordCredential).where(PasswordCredential.user_id == user_id)
         )
         item = AuthenticatorSetupToken(
             user_id=user_id,

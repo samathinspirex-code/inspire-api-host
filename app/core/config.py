@@ -69,5 +69,11 @@ class Settings(BaseSettings):
     MEDIA_SECRET_ACCESS_KEY: str = ""
     MEDIA_UPLOAD_EXPIRE_SECONDS: int = 900
 
+    # Vimeo is intentionally server-only.  Never expose this token to the LMS browser.
+    VIMEO_ACCESS_TOKEN: str = ""
+    VIMEO_ROOT_FOLDER: str = "INSPIRE COLLEGE"
+    VIMEO_EMBED_DOMAINS: list[str] = []
+    VIMEO_MAX_UPLOAD_MB: int = 20480
+
 
 settings = Settings()

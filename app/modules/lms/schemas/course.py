@@ -52,6 +52,7 @@ class CourseItem(BaseModel):
     description: str | None
     takeaways: str | None
     cover_image_url: str | None
+    vimeo_folder_uri: str | None = None
     status: CourseStatus
     created_at: datetime
     updated_at: datetime

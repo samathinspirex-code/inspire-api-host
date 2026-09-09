@@ -1,4 +1,4 @@
-"""Apply the Google Authenticator database migration to configured PostgreSQL."""
+"""Apply the Authenticator and student-password migration to PostgreSQL."""
 
 import asyncio
 import sys
@@ -26,7 +26,7 @@ async def apply_migration() -> None:
             await connection.execute(sql_path.read_text(encoding="utf-8"))
     finally:
         await connection.close()
-    print("Authenticator migration applied successfully.")
+    print("Authentication migration applied successfully.")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.core.config import Settings, settings
 from app.modules.auth import service
+from app.core.errors import APIError
 from app.modules.auth.repository.authenticator import AuthenticatorRepository
 from app.modules.auth.invitation_email import (
     build_invitation_html,
@@ -15,9 +16,31 @@ from app.modules.auth.invitation_email import (
 )
 from app.modules.auth.service import build_authenticator_setup_url
 from app.modules.auth.schemas.auth import AuthenticatorPortalLink, AuthenticatorSetupTokenResponse
+from app.modules.user_management import service as user_management_service
 
 
 class AuthenticatorInvitationTests(unittest.TestCase):
+    def test_password_invitation_explains_student_password_setup(self):
+        expiry = datetime(2026, 9, 4, tzinfo=timezone.utc)
+        links = [AuthenticatorPortalLink(
+            portal="LMS",
+            setup_url="https://lms.example.test/?setup=password",
+            login_url="https://lms.example.test",
+        )]
+        text = build_invitation_text(
+            "Student", "https://lms.example.test/?setup=password", expiry,
+            portal_links=links, setup_method="password",
+        )
+        html = build_invitation_html(
+            "Student", "https://lms.example.test/?setup=password", expiry,
+            portal_links=links, setup_method="password",
+        )
+
+        for body in (text, html):
+            self.assertIn("password setup", body)
+            self.assertIn("email address and password", body)
+            self.assertNotIn("Google Authenticator", body)
+
     def test_dual_portal_email_has_separate_links_and_shared_setup_guidance(self):
         links = [
             AuthenticatorPortalLink(portal=portal, setup_url=f"https://{portal.lower()}.example.test/?token=shared", login_url=f"https://{portal.lower()}.example.test")
@@ -94,6 +117,72 @@ class AuthenticatorInvitationTests(unittest.TestCase):
 
 
 class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cms_created_student_receives_password_setup_not_authenticator(self):
+        user = SimpleNamespace(access_levels=[
+            SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
+            for key in ("LMS", "STUDENT")
+        ])
+        password_invitation = AsyncMock(return_value=SimpleNamespace(setup_method="password"))
+        authenticator_invitation = AsyncMock()
+        with (
+            patch.object(
+                user_management_service,
+                "UserManagementRepository",
+                return_value=SimpleNamespace(get=AsyncMock(return_value=user)),
+            ),
+            patch.object(service, "issue_student_password_setup_invitation", password_invitation),
+            patch.object(service, "issue_authenticator_setup_invitation", authenticator_invitation),
+        ):
+            result = await user_management_service.create_authenticator_setup_token(None, 25, 1)
+
+        self.assertEqual(result.setup_method, "password")
+        password_invitation.assert_awaited_once_with(None, 25, 1)
+        authenticator_invitation.assert_not_awaited()
+
+    async def test_student_password_invitation_is_lms_only(self):
+        user = SimpleNamespace(
+            full_name="Student",
+            access_levels=[
+                SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
+                for key in ("LMS", "STUDENT")
+            ],
+        )
+        setup = AuthenticatorSetupTokenResponse(
+            user_id=25,
+            email="student@example.test",
+            setup_token="a" * 64,
+            expires_at=datetime(2026, 9, 4, tzinfo=timezone.utc),
+        )
+        with (
+            patch.object(settings, "LMS_UI_URL", "https://lms.example.test/"),
+            patch.object(service, "UserRepository", return_value=SimpleNamespace(get=AsyncMock(return_value=user))),
+            patch.object(service, "issue_authenticator_setup_token", AsyncMock(return_value=setup)),
+            patch.object(service, "send_authenticator_invitation", AsyncMock(return_value=SimpleNamespace(sent=True))),
+        ):
+            result = await service.issue_student_password_setup_invitation(None, 25, 1)
+
+        self.assertEqual(result.setup_method, "password")
+        self.assertEqual([link.portal for link in result.portal_links], ["LMS"])
+        self.assertEqual(parse_qs(urlparse(result.setup_url).query)["setup"], ["password"])
+
+    async def test_password_is_denied_when_student_also_has_privileged_access(self):
+        for extra_access in ("LECTURER", "ADMIN", "SUPER_ADMIN", "CMS"):
+            with self.subTest(extra_access=extra_access):
+                user = SimpleNamespace(
+                    access_levels=[
+                        SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
+                        for key in ("LMS", "STUDENT", extra_access)
+                    ]
+                )
+                with patch.object(
+                    service,
+                    "UserRepository",
+                    return_value=SimpleNamespace(get=AsyncMock(return_value=user)),
+                ):
+                    with self.assertRaises(APIError) as raised:
+                        await service.issue_student_password_setup_invitation(None, 25, 1)
+                self.assertEqual(raised.exception.code, "PASSWORD_NOT_ALLOWED")
+
     async def test_portal_links_follow_active_access_and_share_one_invitation(self):
         cases = [
             ([('CMS', True), ('LMS', True)], ['CMS', 'LMS']),

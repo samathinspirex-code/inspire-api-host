@@ -6,6 +6,8 @@ from app.modules.lms.models.attendance import AttendanceRecord, AttendanceSessio
 from app.modules.lms.models.people import LecturerProfile, StudentProfile
 from app.modules.lms.models.integration import (
     GoogleAccountConnection,
+    GoogleCentralAccountConnection,
+    GoogleCentralOAuthState,
     GoogleIntegrationSettings,
     GoogleOAuthState,
 )
@@ -41,6 +43,8 @@ __all__ = [
     "CourseLecturer",
     "LecturerProfile",
     "GoogleAccountConnection",
+    "GoogleCentralAccountConnection",
+    "GoogleCentralOAuthState",
     "GoogleIntegrationSettings",
     "GoogleOAuthState",
     "LmsClass",
