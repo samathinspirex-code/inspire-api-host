@@ -239,7 +239,7 @@ async def sync_meeting_attendance(
     repository = AttendanceRepository(db)
 
     try:
-        access_token = await integration_service.get_google_access_token(db, lecturer_user_id)
+        access_token = await integration_service.get_central_google_access_token(db)
         async with httpx.AsyncClient(timeout=30) as client:
             conferences = await _get_all_pages(
                 client,
@@ -325,14 +325,14 @@ async def sync_meeting_attendance(
 
     students = await repository.list_class_students(meeting.class_id, meeting.end_time)
     roster = {user.email.lower(): (user, profile) for user, profile in students}
-    connection = await IntegrationRepository(db).get_google_connection(lecturer_user_id)
-    lecturer_email = connection.google_email.lower() if connection else ""
+    connection = await IntegrationRepository(db).get_central_google_connection()
+    central_owner_email = connection.google_email.lower() if connection else ""
 
     participation_by_email: dict[str, dict] = {}
     unmatched: list[dict] = []
     for item in participant_data:
         email = item["email"]
-        if email and email == lecturer_email:
+        if email and email == central_owner_email:
             continue
         if email and email in roster:
             bucket = participation_by_email.setdefault(

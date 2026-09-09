@@ -33,9 +33,9 @@ Generate and save a stable Authenticator encryption key in `.env`:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Run the Authenticator migration before starting the updated API. This creates
-Authenticator credentials, setup tokens and recovery codes, and removes the
-retired email OTP table:
+Run the authentication migration before starting the updated API. This creates
+Authenticator credentials, student password credentials, setup tokens and
+recovery codes, and removes the retired email OTP table:
 
 ```bash
 python scripts/apply_authenticator_migration.py
@@ -63,6 +63,13 @@ if it already overrides this setting, then restart the API. This applies to
 newly issued invitations only; existing links keep their original expiry.
 Resend an invitation to issue a new link and invalidate the previous unused link.
 Authenticator sign-in codes and login session lifetimes are unchanged.
+
+Student-only LMS accounts now receive a single-use **Set up password** link and
+sign in with email and password. Passwords require at least 12 characters with
+letters and numbers and are stored as salted scrypt hashes. Lecturers,
+administrators, super administrators, CMS users, and accounts with mixed access
+continue to use Authenticator. Resending a student's setup invitation revokes
+their sessions and previous password immediately.
 
 Creating a new user in the CMS UI now sends their setup invitation automatically;
 editing a user does not send/reset an invitation. Users with both CMS and LMS

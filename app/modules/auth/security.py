@@ -17,6 +17,41 @@ def hash_value(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+PASSWORD_SCRYPT_N = 2**14
+PASSWORD_SCRYPT_R = 8
+PASSWORD_SCRYPT_P = 1
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt,
+        n=PASSWORD_SCRYPT_N, r=PASSWORD_SCRYPT_R, p=PASSWORD_SCRYPT_P, dklen=32,
+    )
+    return "scrypt${}${}${}${}${}".format(
+        PASSWORD_SCRYPT_N, PASSWORD_SCRYPT_R, PASSWORD_SCRYPT_P,
+        base64.urlsafe_b64encode(salt).decode().rstrip("="),
+        base64.urlsafe_b64encode(digest).decode().rstrip("="),
+    )
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, n, r, p, salt_text, digest_text = encoded.split("$", 5)
+        if algorithm != "scrypt":
+            return False
+        def decode(value: str) -> bytes:
+            return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        expected = decode(digest_text)
+        actual = hashlib.scrypt(
+            password.encode("utf-8"), salt=decode(salt_text),
+            n=int(n), r=int(r), p=int(p), dklen=len(expected),
+        )
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError):
+        return False
+
+
 def generate_refresh_token() -> str:
     return secrets.token_hex(32)
 

@@ -43,6 +43,24 @@ class AttendanceRepository:
         stmt = select(AttendanceSession).where(AttendanceSession.meeting_id == meeting_id)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
+    async def list_due_automatic_syncs(self, now: datetime) -> list[OnlineMeeting]:
+        """Finished meetings without a successful attendance import."""
+        stmt = (
+            select(OnlineMeeting)
+            .outerjoin(AttendanceSession, AttendanceSession.meeting_id == OnlineMeeting.meeting_id)
+            .where(
+                OnlineMeeting.status == "scheduled",
+                OnlineMeeting.end_time <= now,
+                or_(
+                    AttendanceSession.attendance_session_id.is_(None),
+                    AttendanceSession.sync_status != "synced",
+                ),
+            )
+            .order_by(OnlineMeeting.end_time.asc())
+            .limit(20)
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def save_failed_sync(
         self, meeting: OnlineMeeting, threshold: int, synced_by: int, message: str
     ) -> AttendanceSession:

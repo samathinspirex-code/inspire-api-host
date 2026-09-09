@@ -105,7 +105,7 @@ async def create_meeting(
     if integration is None or not integration.enabled:
         raise ValidationError("Google Meet integration is not enabled")
 
-    access_token = await integration_service.get_google_access_token(db, lecturer_user_id)
+    access_token = await integration_service.get_central_google_access_token(db)
     space_config = {
         "accessType": integration.default_access_type.upper(),
         "entryPointAccess": "ALL",
@@ -114,6 +114,10 @@ async def create_meeting(
         space_config["attendanceReportGenerationType"] = "GENERATE_REPORT"
 
     attendee_emails = await repository.list_student_emails(payload.class_id)
+    lecturer_email = await repository.get_user_email(lecturer_user_id)
+    if not lecturer_email:
+        raise ValidationError("The lecturer account could not be found")
+    calendar_attendees = list(dict.fromkeys([*attendee_emails, lecturer_email]))
     try:
         async with httpx.AsyncClient(timeout=25) as client:
             space = await _create_meet_space(client, access_token, space_config)
@@ -121,7 +125,7 @@ async def create_meeting(
             calendar_error = None
             if integration.calendar_sync_enabled:
                 event_body = _calendar_event_body(
-                    payload, class_, course, space["meetingUri"], attendee_emails
+                    payload, class_, course, space["meetingUri"], calendar_attendees
                 )
                 calendar_response = await client.post(
                     GOOGLE_CALENDAR_EVENTS_URL,
@@ -183,6 +187,8 @@ async def update_meeting(
         raise ValidationError("Only scheduled meetings can be edited")
 
     attendee_emails = await repository.list_student_emails(meeting.class_id)
+    lecturer_email = await repository.get_user_email(lecturer_user_id)
+    calendar_attendees = list(dict.fromkeys([*attendee_emails, *([lecturer_email] if lecturer_email else [])]))
     integration = await IntegrationRepository(db).get_google_settings()
     calendar_status = "disabled"
     calendar_error = None
@@ -191,9 +197,9 @@ async def update_meeting(
 
     if integration is not None and integration.enabled and integration.calendar_sync_enabled:
         try:
-            access_token = await integration_service.get_google_access_token(db, lecturer_user_id)
+            access_token = await integration_service.get_central_google_access_token(db)
             event_body = _calendar_event_body(
-                payload, class_, course, meeting.google_meeting_uri, attendee_emails
+                payload, class_, course, meeting.google_meeting_uri, calendar_attendees
             )
             headers = {
                 "Authorization": f"Bearer {access_token}",
@@ -279,7 +285,7 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, lecturer_user_id: in
         and meeting.google_calendar_event_id
     ):
         try:
-            access_token = await integration_service.get_google_access_token(db, lecturer_user_id)
+            access_token = await integration_service.get_central_google_access_token(db)
             event_url = (
                 f"{GOOGLE_CALENDAR_EVENTS_URL}/"
                 f"{quote(meeting.google_calendar_event_id, safe='')}"

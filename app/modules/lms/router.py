@@ -32,7 +32,8 @@ from app.modules.lms import notification_service
 from app.modules.lms import profile_service
 from app.modules.lms import analytics_service
 from app.modules.lms import dashboard_service
-from app.modules.lms.schemas.dashboard import AdminDashboardResponse
+from app.modules.lms import vimeo_service
+from app.modules.lms.schemas.dashboard import AdminDashboardResponse, StudentPopulationResponse
 from app.modules.cms import media_service
 from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
 from app.modules.lms.dependencies import require_lms_roles
@@ -74,6 +75,7 @@ from app.modules.lms.schemas import (
     GoogleIntegrationItem,
     GoogleIntegrationUpdate,
     GoogleConnectResponse,
+    GoogleCentralConnectionItem,
     GoogleConnectionItem,
     MeetingCreate,
     MeetingItem,
@@ -103,6 +105,12 @@ from app.modules.lms.schemas import (
     CourseAssistantQuestion,
     CourseAssistantSettingsResponse,
     CourseAssistantSettingsUpdate,
+    CourseKnowledgeSourceResponse,
+    VideoTranscriptOverride,
+    LectureQuestionGenerateRequest,
+    LectureQuestionListResponse,
+    LectureQuestionResponse,
+    LectureQuestionUpsert,
     LectureQuizAttemptResponse,
     LectureQuizAnswerRequest,
     LectureQuizAnswerResult,
@@ -122,7 +130,9 @@ from app.modules.lms.schemas import (
     ExamAttemptResponse,
     ExamAttemptReviewListResponse,
     ExamCreate,
+    PracticeTestCreate,
     ExamEditorResponse,
+    ExamItem,
     ExamGradeReleaseUpdate,
     ExamListResponse,
     ExamQuestionUpsert,
@@ -140,6 +150,11 @@ from app.modules.lms.schemas import (
     RecoveryCodesRegenerateRequest,
     RecoveryCodesResponse,
     AnalyticsDashboardResponse,
+    VimeoCourseLibraryResponse,
+    VimeoUploadFinalizeRequest,
+    VimeoUploadTicketRequest,
+    VimeoUploadTicketResponse,
+    VimeoWorkspaceResponse,
 )
 
 router = APIRouter(prefix="/api/v1/lms", tags=["lms"])
@@ -154,10 +169,13 @@ async def get_bootstrap(current_user: CurrentUser = Depends(get_current_user)) -
 
 
 admin_access = require_lms_roles("SUPER_ADMIN", "ADMIN")
+academic_catalogue_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 portal_access = require_lms_roles("LECTURER", "STUDENT")
+course_preview_access = require_lms_roles("SUPER_ADMIN", "LECTURER", "STUDENT")
 meeting_view_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
 super_admin_access = require_lms_roles("SUPER_ADMIN")
 lecturer_access = require_lms_roles("LECTURER")
+course_manager_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 student_access = require_lms_roles("STUDENT")
 attendance_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 media_upload_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
@@ -179,8 +197,18 @@ async def get_admin_dashboard(
     return await dashboard_service.get_admin_dashboard(db)
 
 
-def _google_ui_redirect(status: str, message: str = "") -> str:
-    params = {"view": "meetings", "google": status}
+@router.get("/admin/student-population", response_model=StudentPopulationResponse)
+async def get_student_population(
+    response: Response,
+    current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentPopulationResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await dashboard_service.get_student_population(db)
+
+
+def _google_ui_redirect(status: str, message: str = "", view: str = "meetings") -> str:
+    params = {"view": view, "google": status}
     if message:
         params["message"] = message
     return f"{settings.LMS_UI_URL.rstrip('/')}?{urlencode(params)}"
@@ -416,6 +444,16 @@ async def create_exam(
     return await exam_service.create_exam(db, payload, current_user.user_id)
 
 
+@router.post("/studio/courses/{course_id}/practice-tests", response_model=ExamEditorResponse, status_code=201)
+async def create_practice_test(
+    course_id: int,
+    payload: PracticeTestCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.create_practice_test(db, course_id, payload, current_user.user_id)
+
+
 @router.get("/exams/{exam_id}/editor", response_model=ExamEditorResponse)
 async def get_exam_editor(
     exam_id: int,
@@ -423,6 +461,17 @@ async def get_exam_editor(
     db: AsyncSession = Depends(get_db),
 ) -> ExamEditorResponse:
     return await exam_service.get_editor(db, exam_id, current_user.user_id)
+
+
+@router.get("/my/learning-items/{item_id}/practice-test", response_model=ExamItem)
+async def get_learning_item_practice_test(
+    item_id: int,
+    current_user: CurrentUser = Depends(exam_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamItem:
+    return await exam_service.get_practice_test_for_item(
+        db, item_id, current_user.user_id, service.resolve_role(current_user.access) or "",
+    )
 
 
 @router.post("/exams/{exam_id}/questions", response_model=ExamEditorResponse)
@@ -608,6 +657,29 @@ async def update_google_integration(
     return await integration_service.update_google_integration(db, payload, current_user.user_id)
 
 
+@router.get("/integrations/google/central-connection", response_model=GoogleCentralConnectionItem)
+async def get_central_google_connection(
+    _current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
+) -> GoogleCentralConnectionItem:
+    return await integration_service.get_central_google_connection(db)
+
+
+@router.post("/integrations/google/central-connection", response_model=GoogleConnectResponse)
+async def connect_central_google_account(
+    current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
+) -> GoogleConnectResponse:
+    return await integration_service.begin_central_google_connection(
+        db, current_user.user_id, current_user.email
+    )
+
+
+@router.delete("/integrations/google/central-connection", status_code=204)
+async def disconnect_central_google_account(
+    _current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
+) -> None:
+    await integration_service.disconnect_central_google_account(db)
+
+
 @router.get("/integrations/google/connection", response_model=GoogleConnectionItem)
 async def get_google_connection(
     current_user: CurrentUser = Depends(lecturer_access),
@@ -644,14 +716,22 @@ async def google_oauth_callback(
     if not state:
         return RedirectResponse(_google_ui_redirect("error", "The Google connection state is missing."))
     try:
+        central_state = await integration_service.is_central_google_connection_state(db, state)
         if error:
+            if central_state:
+                await integration_service.cancel_central_google_connection(db, state)
+                return RedirectResponse(_google_ui_redirect("cancelled", "Central Google account connection was cancelled.", "settings"))
             await integration_service.cancel_google_connection(db, state)
             return RedirectResponse(_google_ui_redirect("cancelled", "Google account connection was cancelled."))
         if not code:
             return RedirectResponse(_google_ui_redirect("error", "Google did not return an authorization code."))
-        google_email = await integration_service.complete_google_connection(db, code, state)
+        google_email = (
+            await integration_service.complete_central_google_connection(db, code, state)
+            if central_state
+            else await integration_service.complete_google_connection(db, code, state)
+        )
         return RedirectResponse(
-            _google_ui_redirect("connected", f"Connected {google_email} successfully.")
+            _google_ui_redirect("connected", f"Connected {google_email} successfully.", "settings" if central_state else "meetings")
         )
     except APIError as exc:
         return RedirectResponse(_google_ui_redirect("error", exc.message))
@@ -690,7 +770,7 @@ async def update_my_course_presentation(
 @router.get("/my/courses/{course_id}/studio", response_model=CourseStudioResponse)
 async def get_my_course_studio(
     course_id: int,
-    current_user: CurrentUser = Depends(portal_access),
+    current_user: CurrentUser = Depends(course_preview_access),
     db: AsyncSession = Depends(get_db),
 ) -> CourseStudioResponse:
     role = service.resolve_role(current_user.access)
@@ -781,13 +861,74 @@ async def update_studio_assistant_settings(
     return response
 
 
+@router.get("/studio/courses/{course_id}/lecture-questions", response_model=LectureQuestionListResponse)
+async def list_studio_lecture_questions(
+    course_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionListResponse:
+    await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+    return await assistant_service.list_questions(db, course_id)
+
+
+@router.post("/studio/courses/{course_id}/lecture-questions/generate", response_model=LectureQuestionListResponse)
+async def regenerate_studio_lecture_questions(
+    course_id: int,
+    payload: LectureQuestionGenerateRequest,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionListResponse:
+    await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+    return await assistant_service.generate_questions(
+        db, course_id, payload, current_user.user_id, auto_approve=True, replace_existing=True,
+    )
+
+
+@router.post("/studio/courses/{course_id}/lecture-questions", response_model=LectureQuestionResponse)
+async def create_studio_lecture_question(
+    course_id: int,
+    payload: LectureQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionResponse:
+    await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+    return await assistant_service.create_question(db, course_id, payload, current_user.user_id)
+
+
+@router.put("/studio/courses/{course_id}/lecture-questions/{question_id}", response_model=LectureQuestionResponse)
+async def update_studio_lecture_question(
+    course_id: int,
+    question_id: int,
+    payload: LectureQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> LectureQuestionResponse:
+    await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+    return await assistant_service.update_question(db, course_id, question_id, payload)
+
+
+@router.delete("/studio/courses/{course_id}/lecture-questions/{question_id}", status_code=204)
+async def delete_studio_lecture_question(
+    course_id: int,
+    question_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await assistant_service.get_manager_settings(db, course_id, current_user.user_id)
+    await assistant_service.delete_question(db, course_id, question_id)
+    return Response(status_code=204)
+
+
 @router.get("/my/learning-items/{item_id}/lecture-quiz", response_model=LectureQuizAttemptResponse)
 async def get_my_lecture_quiz(
     item_id: int,
+    start_new_attempt: bool = Query(False),
     current_user: CurrentUser = Depends(student_access),
     db: AsyncSession = Depends(get_db),
 ) -> LectureQuizAttemptResponse:
-    return await assistant_service.get_or_create_quiz_attempt(db, item_id, current_user.user_id)
+    return await assistant_service.get_or_create_quiz_attempt(
+        db, item_id, current_user.user_id, start_new_attempt=start_new_attempt
+    )
 
 
 @router.post("/my/learning-items/{item_id}/lecture-quiz/answer", response_model=LectureQuizAnswerResult)
@@ -972,7 +1113,31 @@ async def update_studio_item(
         item.learning_item_id,
         current_user.user_id,
     )
+    background_tasks.add_task(vimeo_service.wait_for_learning_item_thumbnail, item.learning_item_id)
     return item
+
+
+@router.put("/studio/items/{item_id}/transcript", response_model=CourseKnowledgeSourceResponse)
+async def save_studio_video_transcript(
+    item_id: int,
+    payload: VideoTranscriptOverride,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseKnowledgeSourceResponse:
+    source = await assistant_service.save_manual_video_transcript(
+        db, item_id, payload, current_user.user_id,
+    )
+    # The supplied transcript is immediately available to the bot and becomes
+    # the source for automatic question generation without waiting for Vimeo.
+    background_tasks.add_task(
+        assistant_service.automate_course_intelligence,
+        source.course_id,
+        current_user.user_id,
+        item_id,
+        ingest=False,
+    )
+    return source
 
 
 @router.delete("/studio/items/{item_id}", status_code=204)
@@ -1210,7 +1375,7 @@ async def export_attendance_report(
 
 @router.get("/programmes", response_model=ProgrammeListResponse)
 async def list_programmes(
-    _current_user: CurrentUser = Depends(admin_access), db: AsyncSession = Depends(get_db)
+    _current_user: CurrentUser = Depends(academic_catalogue_access), db: AsyncSession = Depends(get_db)
 ) -> ProgrammeListResponse:
     return await service.list_programmes(db)
 
@@ -1226,6 +1391,61 @@ async def list_courses(
     db: AsyncSession = Depends(get_db),
 ) -> CourseListResponse:
     return await service.list_courses(db, page, size, search, program_id, status)
+
+
+@router.post("/lecturer/courses", response_model=CourseItem, status_code=201)
+async def create_lecturer_course(
+    payload: CourseCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseItem:
+    return await service.create_lecturer_course(db, payload, current_user.user_id)
+
+
+@router.get("/course-media/courses/{course_id}", response_model=VimeoCourseLibraryResponse)
+async def get_course_video_library(
+    course_id: int,
+    current_user: CurrentUser = Depends(course_manager_access),
+    db: AsyncSession = Depends(get_db),
+) -> VimeoCourseLibraryResponse:
+    return await vimeo_service.get_library(db, course_id, current_user.user_id, current_user.access)
+
+
+@router.post("/course-media/courses/{course_id}/workspace", response_model=VimeoWorkspaceResponse)
+async def initialize_course_video_workspace(
+    course_id: int,
+    current_user: CurrentUser = Depends(course_manager_access),
+    db: AsyncSession = Depends(get_db),
+) -> VimeoWorkspaceResponse:
+    return await vimeo_service.initialize_workspace(db, course_id, current_user.user_id, current_user.access)
+
+
+@router.post("/course-media/courses/{course_id}/uploads", response_model=VimeoUploadTicketResponse)
+async def create_course_video_upload(
+    course_id: int,
+    payload: VimeoUploadTicketRequest,
+    current_user: CurrentUser = Depends(course_manager_access),
+    db: AsyncSession = Depends(get_db),
+) -> VimeoUploadTicketResponse:
+    return await vimeo_service.create_upload_ticket(db, course_id, payload, current_user.user_id, current_user.access)
+
+
+@router.post("/course-media/courses/{course_id}/uploads/finalize", response_model=LearningItemResponse)
+async def finalize_course_video_upload(
+    course_id: int,
+    payload: VimeoUploadFinalizeRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(course_manager_access),
+    db: AsyncSession = Depends(get_db),
+) -> LearningItemResponse:
+    item = await vimeo_service.finalize_upload(db, course_id, payload, current_user.user_id, current_user.access)
+    background_tasks.add_task(
+        assistant_service.automate_learning_item_intelligence,
+        item.learning_item_id,
+        current_user.user_id,
+    )
+    background_tasks.add_task(vimeo_service.wait_for_learning_item_thumbnail, item.learning_item_id)
+    return item
 
 
 @router.post("/courses", response_model=CourseItem, status_code=201)

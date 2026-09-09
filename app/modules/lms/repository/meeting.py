@@ -36,6 +36,9 @@ class MeetingRepository:
         )
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def get_user_email(self, user_id: int) -> str | None:
+        return await self.db.scalar(select(User.email).where(User.user_id == user_id, User.is_active.is_(True)))
+
     async def save(self, data: dict) -> OnlineMeeting:
         item = OnlineMeeting(**data)
         self.db.add(item)

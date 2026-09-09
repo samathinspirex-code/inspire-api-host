@@ -39,3 +39,15 @@ CREATE INDEX IF NOT EXISTS idx_authenticator_recovery_user
 
 -- Email OTP rows contain only short-lived codes and are no longer used.
 DROP TABLE IF EXISTS login_otps;
+
+-- Student-only LMS accounts use a password instead of a second-device Authenticator flow.
+-- Passwords are stored as salted scrypt hashes; staff accounts remain Authenticator-only.
+CREATE TABLE IF NOT EXISTS password_credentials (
+    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    password_hash VARCHAR(255) NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    locked_until TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

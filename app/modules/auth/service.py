@@ -14,6 +14,7 @@ from app.modules.auth.invitation_email import send_authenticator_invitation
 from app.modules.auth.rate_limit import check_ip_rate_limit
 from app.modules.auth.repository import (
     AuthenticatorRepository,
+    PasswordRepository,
     RefreshTokenRepository,
     SsoTicketRepository,
     UserRepository,
@@ -23,6 +24,7 @@ from app.modules.auth.schemas import (
     AuthenticatorInvitationResponse,
     AuthenticatorSetupStartResponse,
     AuthenticatorSetupTokenResponse,
+    PasswordSetupCompleteRequest,
     SsoTicketResponse,
     TokenResponse,
     UserOut,
@@ -34,13 +36,23 @@ from app.modules.auth.security import (
     generate_refresh_token,
     generate_totp_secret,
     hash_value,
+    hash_password,
     normalize_recovery_code,
     verify_totp,
+    verify_password,
 )
+
+
+STUDENT_PASSWORD_ACCESS = {"LMS", "STUDENT"}
+_DUMMY_PASSWORD_HASH = hash_password("invalid-password-timing-value")
 
 
 def _user_access_keys(user: User) -> list[str]:
     return [ual.access_level.access_key for ual in user.access_levels if ual.access_level.is_active]
+
+
+def _student_password_eligible(user: User) -> bool:
+    return set(_user_access_keys(user)) == STUDENT_PASSWORD_ACCESS
 
 
 async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
@@ -148,6 +160,37 @@ def build_authenticator_setup_url(
     )
     base_url = setup_ui_url or settings.LMS_UI_URL
     return f"{base_url.rstrip('/')}?{query}"
+
+
+def build_password_setup_url(email: str, setup_token: str) -> str:
+    query = urlencode({"setup": "password", "email": email, "token": setup_token})
+    return f"{settings.LMS_UI_URL.rstrip('/')}?{query}"
+
+
+async def issue_student_password_setup_invitation(
+    db: AsyncSession, user_id: int, created_by: int | None
+) -> AuthenticatorInvitationResponse:
+    user = await UserRepository(db).get(user_id)
+    if user is None or not _student_password_eligible(user):
+        raise APIError(403, "PASSWORD_NOT_ALLOWED", "Password sign-in is available only to student-only LMS accounts.")
+    setup = await issue_authenticator_setup_token(db, user_id, created_by)
+    setup_url = build_password_setup_url(setup.email, setup.setup_token)
+    portal_links = [AuthenticatorPortalLink(
+        portal="LMS", setup_url=setup_url, login_url=settings.LMS_UI_URL.rstrip("/")
+    )]
+    delivery = await send_authenticator_invitation(
+        setup.email, user.full_name or setup.email, setup_url, setup.expires_at,
+        f"password-setup-{user_id}-{hash_value(setup.setup_token)[:20]}",
+        portal_links=portal_links, setup_method="password",
+    )
+    return AuthenticatorInvitationResponse(
+        **setup.model_dump(), setup_method="password", setup_url=setup_url,
+        portal_links=portal_links, email_sent=delivery.sent,
+        delivery_message=(
+            "Student password setup invitation sent by email."
+            if delivery.sent else f"{delivery.error or 'Email delivery failed'} Copy the setup link and send it manually."
+        ),
+    )
 
 
 async def issue_authenticator_setup_invitation(
@@ -290,6 +333,60 @@ async def verify_authenticator(
         )
         raise invalid
     await repository.record_success(credential, used_step)
+    return await _issue_tokens(db, user)
+
+
+def _validate_student_password(password: str, email: str) -> None:
+    lowered = password.lower()
+    if len(password) < 12 or not any(value.isalpha() for value in password) or not any(value.isdigit() for value in password):
+        raise APIError(422, "PASSWORD_WEAK", "Use at least 12 characters with both letters and numbers.")
+    if email.split("@", 1)[0].lower() in lowered:
+        raise APIError(422, "PASSWORD_WEAK", "Do not include your email name in the password.")
+
+
+async def complete_student_password_setup(
+    db: AsyncSession, payload: PasswordSetupCompleteRequest, client_ip: str
+) -> TokenResponse:
+    check_ip_rate_limit(client_ip)
+    normalized_email = str(payload.email).strip().lower()
+    row = await AuthenticatorRepository(db).get_valid_setup_token(
+        hash_value(payload.setup_token), normalized_email
+    )
+    if row is None:
+        raise APIError(401, "SETUP_TOKEN_INVALID", "The password setup link is invalid or expired.")
+    token, user = row
+    if not _student_password_eligible(user):
+        raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account must use Authenticator sign-in.")
+    _validate_student_password(payload.password, normalized_email)
+    await PasswordRepository(db).complete_setup(token, user.user_id, hash_password(payload.password))
+    return await _issue_tokens(db, user)
+
+
+async def verify_student_password(
+    db: AsyncSession, email: str, password: str, client_ip: str
+) -> TokenResponse:
+    check_ip_rate_limit(client_ip)
+    normalized_email = email.strip().lower()
+    user = await UserRepository(db).get_by_email(normalized_email)
+    invalid = APIError(401, "PASSWORD_INVALID", "The email or password is incorrect.")
+    if user is None or not user.is_active or not _student_password_eligible(user):
+        verify_password(password, _DUMMY_PASSWORD_HASH)
+        raise invalid
+    repository = PasswordRepository(db)
+    credential = await repository.get_for_update(user.user_id)
+    if credential is None:
+        verify_password(password, _DUMMY_PASSWORD_HASH)
+        raise invalid
+    now = datetime.now(timezone.utc)
+    if credential.locked_until and credential.locked_until > now:
+        raise APIError(429, "PASSWORD_LOCKED", "Too many incorrect attempts. Try again later.")
+    if not verify_password(password, credential.password_hash):
+        await repository.record_failed_attempt(
+            credential, settings.AUTHENTICATOR_MAX_ATTEMPTS,
+            now + timedelta(minutes=settings.AUTHENTICATOR_LOCK_MINUTES),
+        )
+        raise invalid
+    await repository.record_success(credential)
     return await _issue_tokens(db, user)
 
 

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -51,6 +51,7 @@ from app.modules.lms.schemas import (
     CourseKnowledgeSourceCreate,
     CourseKnowledgeSourceResponse,
     CourseKnowledgeSourceUpdate,
+    VideoTranscriptOverride,
     LectureQuestionGenerateRequest,
     LectureQuestionListResponse,
     LectureQuestionResponse,
@@ -441,6 +442,18 @@ def _vimeo_id(url: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _vimeo_player_config_url(url: str, video_id: str) -> str:
+    """Keep Vimeo's unlisted-video hash while requesting caption metadata."""
+    parsed = urlparse(url)
+    privacy_hash = parse_qs(parsed.query).get("h", [None])[0]
+    if not privacy_hash:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) >= 2 and path_parts[0] == video_id:
+            privacy_hash = path_parts[1]
+    suffix = f"?h={quote(privacy_hash, safe='')}" if privacy_hash else ""
+    return f"https://player.vimeo.com/video/{video_id}/config{suffix}"
+
+
 def _vtt_seconds(value: str) -> float:
     parts = value.replace(",", ".").split(":")
     if len(parts) == 2:
@@ -489,25 +502,25 @@ async def _download_vimeo_transcript(url: str):
     video_id = _vimeo_id(url)
     if not video_id:
         raise ValidationError("Video transcript sync currently supports Vimeo URLs")
-    config_data = await _download_public_bytes(
-        f"https://player.vimeo.com/video/{video_id}/config",
-        accept="application/json",
-        limit=3 * 1024 * 1024,
-    )
-    try:
-        config = json.loads(config_data)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError("Vimeo did not return readable video metadata") from exc
-    tracks = config.get("request", {}).get("text_tracks") or []
-    tracks = [track for track in tracks if track.get("url")]
+    # Use the authenticated Vimeo API rather than the public player config.
+    # Domain-protected videos correctly reject server-side player requests.
+    from app.modules.lms import vimeo_service
+
+    async with vimeo_service.VimeoClient() as vimeo:
+        track_response = await vimeo.request(
+            "GET", f"/videos/{video_id}/texttracks", action="read the Vimeo transcript",
+            params={"per_page": 100, "fields": "uri,language,active,type,provenance,download_links"},
+        )
+    tracks = [track for track in track_response.get("data", []) if (track.get("download_links") or {}).get("vtt")]
     if not tracks:
         raise ValidationError("This Vimeo video has no captions or transcript to index")
     tracks.sort(key=lambda track: (
-        not str(track.get("lang", "")).lower().startswith("en"),
-        not bool(track.get("default")),
+        str(track.get("provenance", "")) != "autogen_source_audio",
+        not str(track.get("language", "")).lower().startswith("en"),
+        not bool(track.get("active")),
     ))
     caption_data = await _download_public_bytes(
-        tracks[0]["url"], accept="text/vtt,text/plain", limit=10 * 1024 * 1024
+        tracks[0]["download_links"]["vtt"], accept="text/vtt,text/plain", limit=10 * 1024 * 1024
     )
     transcript_chunks = parse_vimeo_vtt(caption_data.decode("utf-8-sig", errors="replace"))
     if not transcript_chunks:
@@ -551,14 +564,19 @@ async def _synced_source(db: AsyncSession, course_id: int, item, source_type: st
     return source
 
 
-async def ingest_course_content(db: AsyncSession, course_id: int, user_id: int) -> CourseAssistantIngestionResponse:
+async def ingest_course_content(
+    db: AsyncSession, course_id: int, user_id: int, target_item_id: int | None = None,
+) -> CourseAssistantIngestionResponse:
     if await db.get(LmsCourse, course_id) is None:
         raise NotFoundError(f"Course {course_id} not found")
+    item_query = select(LmsLearningItem).join(LmsModule).where(
+        LmsModule.course_id == course_id,
+        LmsLearningItem.item_type.in_(["pdf", "text", "video"]),
+    )
+    if target_item_id is not None:
+        item_query = item_query.where(LmsLearningItem.learning_item_id == target_item_id)
     item_rows = list((await db.execute(
-        select(LmsLearningItem).join(LmsModule).where(
-            LmsModule.course_id == course_id,
-            LmsLearningItem.item_type.in_(["pdf", "text", "video"]),
-        ).order_by(LmsModule.position, LmsLearningItem.position)
+        item_query.order_by(LmsModule.position, LmsLearningItem.position)
     )).scalars().all())
     # A failed extraction rolls back the session and expires ORM instances.
     # Keep immutable snapshots so one unavailable transcript cannot prevent the
@@ -574,21 +592,21 @@ async def ingest_course_content(db: AsyncSession, course_id: int, user_id: int) 
         for item in item_rows
     ]
     sync_keys = [f"learning-item:{item.learning_item_id}" for item in items]
-    # Course Studio is the source of truth. Remove legacy manual entries and
-    # synchronized entries whose learning item was removed or changed to an
-    # unsupported type.
-    await db.execute(delete(LmsCourseKnowledgeSource).where(
-        LmsCourseKnowledgeSource.course_id == course_id,
-        LmsCourseKnowledgeSource.sync_key.is_(None),
-    ))
-    stale_sources = delete(LmsCourseKnowledgeSource).where(
-        LmsCourseKnowledgeSource.course_id == course_id,
-        LmsCourseKnowledgeSource.sync_key.is_not(None),
-    )
-    if sync_keys:
-        stale_sources = stale_sources.where(LmsCourseKnowledgeSource.sync_key.not_in(sync_keys))
-    await db.execute(stale_sources)
-    await db.commit()
+    if target_item_id is None:
+        # Course Studio is the source of truth during a full re-index. Remove
+        # entries whose learning item was removed or changed to an unsupported type.
+        await db.execute(delete(LmsCourseKnowledgeSource).where(
+            LmsCourseKnowledgeSource.course_id == course_id,
+            LmsCourseKnowledgeSource.sync_key.is_(None),
+        ))
+        stale_sources = delete(LmsCourseKnowledgeSource).where(
+            LmsCourseKnowledgeSource.course_id == course_id,
+            LmsCourseKnowledgeSource.sync_key.is_not(None),
+        )
+        if sync_keys:
+            stale_sources = stale_sources.where(LmsCourseKnowledgeSource.sync_key.not_in(sync_keys))
+        await db.execute(stale_sources)
+        await db.commit()
     indexed = 0
     chunk_total = 0
     failures: list[CourseAssistantIngestionFailure] = []
@@ -607,6 +625,16 @@ async def ingest_course_content(db: AsyncSession, course_id: int, user_id: int) 
                 "text": "text_lesson",
                 "video": "video_transcript",
             }[item_type]
+            existing_source = (await db.execute(select(LmsCourseKnowledgeSource).where(
+                LmsCourseKnowledgeSource.course_id == course_id,
+                LmsCourseKnowledgeSource.sync_key == f"learning-item:{item_id}",
+            ))).scalar_one_or_none()
+            # A lecturer-provided transcript is an intentional override. Keep
+            # it until the lecturer replaces it, rather than overwriting it
+            # with a later Vimeo caption sync.
+            if existing_source is not None and existing_source.ingestion_status == "manual":
+                indexed += 1
+                continue
             source = await _synced_source(db, course_id, item, source_type, user_id)
             source_id = source.knowledge_source_id
             if item_type == "text":
@@ -672,13 +700,12 @@ async def automate_course_intelligence(
             if not system.automation_enabled:
                 return
             if ingest:
-                await ingest_course_content(db, course_id, user_id)
+                await ingest_course_content(db, course_id, user_id, target_item_id)
             if not settings.OPENAI_API_KEY or not system.auto_generate_questions:
                 return
             stmt = select(LmsLearningItem).join(LmsModule).where(
                 LmsModule.course_id == course_id,
                 LmsLearningItem.item_type == "video",
-                LmsLearningItem.status == "published",
             )
             if target_item_id is not None:
                 stmt = stmt.where(LmsLearningItem.learning_item_id == target_item_id)
@@ -705,7 +732,7 @@ async def automate_course_intelligence(
 
 
 async def automate_learning_item_intelligence(item_id: int, user_id: int) -> None:
-    """Background synchronization invoked after a lecturer saves course content."""
+    """Incrementally synchronize a saved item after Vimeo has its transcript."""
     async with AsyncSessionLocal() as db:
         item = await db.get(LmsLearningItem, item_id)
         if item is None:
@@ -714,7 +741,58 @@ async def automate_learning_item_intelligence(item_id: int, user_id: int) -> Non
         if module is None:
             return
         course_id = module.course_id
+        has_manual_transcript = (await db.execute(select(LmsCourseKnowledgeSource.knowledge_source_id).where(
+            LmsCourseKnowledgeSource.learning_item_id == item_id,
+            LmsCourseKnowledgeSource.ingestion_status == "manual",
+        ))).scalar_one_or_none() is not None
+        item_type = item.item_type
+        resource_url = item.resource_url
+    if item_type == "video" and not has_manual_transcript:
+        from app.modules.lms import vimeo_service
+
+        video_uri = vimeo_service.video_uri_from_url(resource_url)
+        if video_uri:
+            terminal_statuses = {"failed", "no_speech", "language_not_supported", "exceeds_maximum_duration", "blocked"}
+            for attempt in range(40):
+                try:
+                    async with vimeo_service.VimeoClient() as vimeo:
+                        video = await vimeo.get_video(video_uri)
+                    transcript_status = str((video.get("transcript") or {}).get("status") or "unknown")
+                    if transcript_status == "completed":
+                        break
+                    if transcript_status in terminal_statuses:
+                        logger.info("Vimeo transcript unavailable for LMS item %s: %s", item_id, transcript_status)
+                        return
+                except Exception:
+                    logger.warning("Could not check Vimeo transcript status for LMS item %s", item_id, exc_info=True)
+                    return
+                if attempt < 39:
+                    await asyncio.sleep(15)
+            else:
+                logger.info("Vimeo transcript is still processing for LMS item %s; it will retry on the next course sync", item_id)
+                return
     await automate_course_intelligence(course_id, user_id, item_id)
+
+
+async def save_manual_video_transcript(
+    db: AsyncSession, item_id: int, payload: VideoTranscriptOverride, user_id: int,
+) -> CourseKnowledgeSourceResponse:
+    """Use a lecturer transcript immediately when auto-captions are unavailable or need correction."""
+    item = await db.get(LmsLearningItem, item_id)
+    if item is None or item.item_type != "video":
+        raise ValidationError("A manual transcript can be added only to a Vimeo video")
+    await content_service._ensure_module_manager(db, item.module_id, user_id)
+    module = await db.get(LmsModule, item.module_id)
+    if module is None:
+        raise NotFoundError("The video section no longer exists")
+    transcript = " ".join(payload.transcript.split())
+    source = await _synced_source(db, module.course_id, item, "video_transcript", user_id)
+    source.content = transcript[:50000]
+    source.ingestion_status = "manual"
+    source.is_approved = True
+    await _replace_chunks(db, source, [(piece, None, None, None) for piece in chunk_text(transcript)])
+    await db.commit()
+    return await _source_response(db, source)
 
 
 async def get_public_settings(db: AsyncSession, course_id: int, user_id: int, role: str):
@@ -1126,7 +1204,7 @@ async def _review_generated_questions(context: str, item_title: str, candidates:
 
 async def generate_questions(
     db: AsyncSession, course_id: int, payload: LectureQuestionGenerateRequest, user_id: int,
-    *, auto_approve: bool = False,
+    *, auto_approve: bool = False, replace_existing: bool = False,
 ) -> LectureQuestionListResponse:
     item = await _question_item(db, course_id, payload.learning_item_id)
     if not settings.OPENAI_API_KEY:
@@ -1238,10 +1316,22 @@ async def generate_questions(
             "Add a clearer transcript or more course material and try again."
         )
 
-    await db.execute(delete(LmsLectureQuestion).where(
-        LmsLectureQuestion.learning_item_id == item.learning_item_id,
-        LmsLectureQuestion.status.in_(["generated", "rejected"]),
-    ))
+    if replace_existing:
+        # Keep lecturer-written questions and past student attempts intact.  Old AI
+        # questions are retained for audit/history but no longer appear in the bank.
+        await db.execute(update(LmsLectureQuestion).where(
+            LmsLectureQuestion.learning_item_id == item.learning_item_id,
+            LmsLectureQuestion.generated_by_ai.is_(True),
+            LmsLectureQuestion.status.in_(["generated", "approved"]),
+        ).values(status="rejected"))
+    else:
+        await db.execute(delete(LmsLectureQuestion).where(
+            LmsLectureQuestion.learning_item_id == item.learning_item_id,
+            LmsLectureQuestion.status.in_(["generated", "rejected"]),
+            ~select(LmsLectureQuizAttemptQuestion.question_id).where(
+                LmsLectureQuizAttemptQuestion.question_id == LmsLectureQuestion.question_id
+            ).exists(),
+        ))
     for data in generated:
         db.add(LmsLectureQuestion(
             course_id=course_id,
@@ -1272,12 +1362,12 @@ async def create_question(
 
 
 async def update_question(
-    db: AsyncSession, question_id: int, payload: LectureQuestionUpsert
+    db: AsyncSession, course_id: int, question_id: int, payload: LectureQuestionUpsert
 ) -> LectureQuestionResponse:
     row = await db.get(LmsLectureQuestion, question_id)
-    if row is None:
+    if row is None or row.course_id != course_id:
         raise NotFoundError(f"Question {question_id} not found")
-    await _question_item(db, row.course_id, payload.learning_item_id)
+    await _question_item(db, course_id, payload.learning_item_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     await db.commit()
@@ -1285,9 +1375,9 @@ async def update_question(
     return LectureQuestionResponse.model_validate(row)
 
 
-async def delete_question(db: AsyncSession, question_id: int) -> None:
+async def delete_question(db: AsyncSession, course_id: int, question_id: int) -> None:
     row = await db.get(LmsLectureQuestion, question_id)
-    if row is None:
+    if row is None or row.course_id != course_id:
         raise NotFoundError(f"Question {question_id} not found")
     await db.delete(row)
     await db.commit()
@@ -1311,7 +1401,7 @@ def _quiz_question(row: LmsLectureQuestion) -> LectureQuizQuestion:
 
 
 async def get_or_create_quiz_attempt(
-    db: AsyncSession, item_id: int, student_id: int
+    db: AsyncSession, item_id: int, student_id: int, start_new_attempt: bool = False
 ) -> LectureQuizAttemptResponse:
     item = await _student_item(db, item_id, student_id)
     if item.item_type != "video":
@@ -1341,6 +1431,25 @@ async def get_or_create_quiz_attempt(
         )
         await db.commit()
         return response
+
+    # A completed attempt is shown again on later visits. Creating a retry is an
+    # explicit student decision, so simply reopening a completed video never
+    # starts another quiz or replaces the saved result.
+    if existing and existing.submitted_at is not None and not start_new_attempt:
+        rows = await _quiz_attempt_rows(db, existing.attempt_id)
+        results = [_quiz_answer_result(saved, question) for saved, question in rows]
+        await db.commit()
+        return LectureQuizAttemptResponse(
+            available=True,
+            attempt_id=existing.attempt_id,
+            attempt_number=attempt_count,
+            is_submitted=True,
+            score=existing.score,
+            total_questions=existing.total_questions,
+            questions=[_quiz_question(question) for _, question in rows],
+            answered_questions=results,
+            results=results,
+        )
 
     seen_ids = select(LmsLectureQuizAttemptQuestion.question_id).join(
         LmsLectureQuizAttempt,

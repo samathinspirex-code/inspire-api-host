@@ -15,6 +15,11 @@ class LmsCourseworkAssignment(Base):
     )
 
     assignment_id: Mapped[int] = mapped_column(primary_key=True)
+    learning_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lms_learning_items.learning_item_id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
     course_id: Mapped[int] = mapped_column(
         ForeignKey("lms_courses.course_id", ondelete="CASCADE"), nullable=False
     )

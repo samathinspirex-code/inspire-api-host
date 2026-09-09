@@ -14,6 +14,8 @@ from app.modules.auth.schemas import (
     AuthenticatorSetupStartResponse,
     ExchangeSsoTicketRequest,
     LogoutRequest,
+    PasswordLoginRequest,
+    PasswordSetupCompleteRequest,
     RefreshRequest,
     SsoTicketResponse,
     TokenResponse,
@@ -21,6 +23,26 @@ from app.modules.auth.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
+
+
+@router.post("/auth/password/setup/complete", response_model=TokenResponse)
+async def complete_password_setup(
+    payload: PasswordSetupCompleteRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    return await service.complete_student_password_setup(db, payload, client_ip)
+
+
+@router.post("/auth/password/verify", response_model=TokenResponse)
+async def verify_password(
+    payload: PasswordLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    return await service.verify_student_password(db, str(payload.email), payload.password, client_ip)
 
 
 @router.post(
