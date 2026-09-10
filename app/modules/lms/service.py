@@ -75,7 +75,7 @@ ROLE_NAVIGATION = {
     ],
     "LECTURER": [
         ("profile", "My Profile", "user"),
-        ("my-courses", "My Courses", "book"),
+        ("courses", "Courses", "book"),
         ("my-classes", "My Classes", "video"),
         ("assignments", "Assignments", "file"),
         ("exams", "Exams", "clipboard"),
@@ -356,6 +356,7 @@ def _to_class_item(class_, course_code: str, course_title: str, program_title: s
         timezone=class_.timezone,
         capacity=class_.capacity,
         status=class_.status,
+        study_mode=class_.study_mode,
         created_at=class_.created_at,
         updated_at=class_.updated_at,
     )

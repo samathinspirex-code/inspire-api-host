@@ -170,17 +170,17 @@ async def get_bootstrap(current_user: CurrentUser = Depends(get_current_user)) -
 
 admin_access = require_lms_roles("SUPER_ADMIN", "ADMIN")
 academic_catalogue_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
-portal_access = require_lms_roles("LECTURER", "STUDENT")
-course_preview_access = require_lms_roles("SUPER_ADMIN", "LECTURER", "STUDENT")
+portal_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
+course_preview_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
 meeting_view_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
 super_admin_access = require_lms_roles("SUPER_ADMIN")
-lecturer_access = require_lms_roles("LECTURER")
+lecturer_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 course_manager_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 student_access = require_lms_roles("STUDENT")
 attendance_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 media_upload_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
-coursework_access = require_lms_roles("LECTURER", "STUDENT")
-exam_access = require_lms_roles("LECTURER", "STUDENT")
+coursework_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
+exam_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
 notification_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT")
 announcement_manage_access = require_lms_roles("SUPER_ADMIN", "ADMIN", "LECTURER")
 profile_access = require_lms_roles("LECTURER", "STUDENT")
@@ -280,11 +280,13 @@ async def regenerate_profile_recovery_codes(
 
 @router.get("/coursework/assignments", response_model=CourseworkAssignmentListResponse)
 async def list_coursework_assignments(
+    course_id: int | None = Query(None, gt=0),
+    class_id: int | None = Query(None, gt=0),
     current_user: CurrentUser = Depends(coursework_access),
     db: AsyncSession = Depends(get_db),
 ) -> CourseworkAssignmentListResponse:
     return await coursework_service.list_assignments(
-        db, current_user.user_id, service.resolve_role(current_user.access)
+        db, current_user.user_id, service.resolve_role(current_user.access), course_id, class_id,
     )
 
 
@@ -429,10 +431,12 @@ async def get_student_grades(
 
 @router.get("/exams", response_model=ExamListResponse)
 async def list_exams(
+    course_id: int | None = Query(None, gt=0),
+    class_id: int | None = Query(None, gt=0),
     current_user: CurrentUser = Depends(exam_access),
     db: AsyncSession = Depends(get_db),
 ) -> ExamListResponse:
-    return await exam_service.list_exams(db, current_user.user_id, service.resolve_role(current_user.access) or "")
+    return await exam_service.list_exams(db, current_user.user_id, service.resolve_role(current_user.access) or "", course_id, class_id)
 
 
 @router.post("/exams", response_model=ExamEditorResponse)
@@ -763,7 +767,7 @@ async def update_my_course_presentation(
     db: AsyncSession = Depends(get_db),
 ) -> PortalCourseDetailResponse:
     return await portal_service.update_my_course_presentation(
-        db, course_id, payload, current_user.user_id
+        db, course_id, payload, current_user.user_id, service.resolve_role(current_user.access)
     )
 
 

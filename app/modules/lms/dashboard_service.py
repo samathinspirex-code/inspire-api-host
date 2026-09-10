@@ -1,4 +1,4 @@
-"""Admin home totals: four bounded reads, without loading rosters or full courses."""
+"""Admin home totals: five bounded reads, without loading rosters or full courses."""
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -102,6 +102,9 @@ async def get_student_population(db: AsyncSession) -> StudentPopulationResponse:
     active_course_enrolments = await db.scalar(
         select(func.count()).select_from(CourseEnrollment).where(CourseEnrollment.status == "enrolled")
     ) or 0
+    active_class_enrolments = await db.scalar(
+        select(func.count()).select_from(ClassStudent)
+    ) or 0
     new_enrolments = await db.scalar(
         select(func.count()).select_from(CourseEnrollment).where(
             CourseEnrollment.status == "enrolled", CourseEnrollment.enrolled_at >= period_start,
@@ -133,6 +136,9 @@ async def get_student_population(db: AsyncSession) -> StudentPopulationResponse:
             LmsClass.class_id, LmsCourse.course_id, LmsCourse.code.label("course_code"),
             LmsCourse.title.label("course_title"), LmsClass.code, LmsClass.name,
             func.count(ClassStudent.student_user_id).label("population"),
+            func.count(ClassStudent.student_user_id).filter(
+                ClassStudent.assigned_at >= period_start,
+            ).label("new_enrolments_30d"),
             LmsClass.start_date, LmsClass.end_date, LmsClass.status,
         )
         .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
@@ -148,6 +154,7 @@ async def get_student_population(db: AsyncSession) -> StudentPopulationResponse:
     return StudentPopulationResponse(
         total_students=total_students,
         active_course_enrolments=active_course_enrolments,
+        active_class_enrolments=active_class_enrolments,
         new_enrolments_30d=new_enrolments,
         enrolments_previous_30d=previous_enrolments,
         course_population=[CoursePopulationItem.model_validate(row) for row in course_rows],

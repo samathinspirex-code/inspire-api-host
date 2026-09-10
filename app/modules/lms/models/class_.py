@@ -26,6 +26,7 @@ class LmsClass(Base):
     timezone: Mapped[str] = mapped_column(String(100), nullable=False, default="Asia/Colombo")
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    study_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

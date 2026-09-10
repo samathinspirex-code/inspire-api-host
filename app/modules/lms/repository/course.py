@@ -12,7 +12,7 @@ class CourseRepository:
         self.db = db
 
     def _filters(self, search: str | None, program_id: int | None, status: str | None) -> list[Any]:
-        filters: list[Any] = []
+        filters: list[Any] = [LmsCourse.is_class_copy.is_(False)]
         if search:
             pattern = f"%{search}%"
             filters.append(

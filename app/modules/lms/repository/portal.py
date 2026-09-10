@@ -1,5 +1,6 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.cms.models import Program
 from app.modules.lms.models import (
@@ -34,7 +35,12 @@ class PortalRepository:
         return ClassStudent, ClassStudent.class_id == LmsClass.class_id, ClassStudent.student_user_id == user_id
 
     async def list_courses(self, user_id: int, role: str, course_id: int | None = None):
-        relation, join_on, access_filter = self._course_relation(user_id, role)
+        # Reusable Course pages are a shared staff library.  Lecturers may
+        # browse every active master page; write operations still enforce the
+        # course-manager assignment separately.
+        is_staff = role in {"SUPER_ADMIN", "ADMIN", "LECTURER"}
+        relation, join_on, access_filter = (None, None, None) if is_staff else self._course_relation(user_id, role)
+        class_course = aliased(LmsCourse)
         module_count = (
             select(func.count(LmsModule.module_id))
             .where(
@@ -44,21 +50,31 @@ class PortalRepository:
             .correlate(LmsCourse)
             .scalar_subquery()
         )
-        if role == "LECTURER":
+        if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}:
             class_count = (
                 select(func.count(ClassLecturer.class_id))
                 .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+                .join(class_course, class_course.course_id == LmsClass.course_id)
                 .where(
-                    LmsClass.course_id == LmsCourse.course_id,
+                    (LmsClass.course_id == LmsCourse.course_id) | (class_course.source_master_course_id == LmsCourse.course_id),
                     ClassLecturer.lecturer_user_id == user_id,
                 )
                 .correlate(LmsCourse)
                 .scalar_subquery()
             )
+            if role in {"SUPER_ADMIN", "ADMIN"}:
+                class_count = (
+                    select(func.count(LmsClass.class_id))
+                    .join(class_course, class_course.course_id == LmsClass.course_id)
+                    .where((LmsClass.course_id == LmsCourse.course_id) | (class_course.source_master_course_id == LmsCourse.course_id))
+                    .correlate(LmsCourse)
+                    .scalar_subquery()
+                )
             people_count = (
-                select(func.count(CourseEnrollment.student_user_id))
+                select(func.count(func.distinct(CourseEnrollment.student_user_id)))
+                .join(class_course, class_course.course_id == CourseEnrollment.course_id)
                 .where(
-                    CourseEnrollment.course_id == LmsCourse.course_id,
+                    (CourseEnrollment.course_id == LmsCourse.course_id) | (class_course.source_master_course_id == LmsCourse.course_id),
                     CourseEnrollment.status == "enrolled",
                 )
                 .correlate(LmsCourse)
@@ -91,10 +107,12 @@ class PortalRepository:
                 people_count,
             )
             .join(Program, Program.program_id == LmsCourse.program_id)
-            .join(relation, join_on)
-            .where(access_filter)
             .order_by(LmsCourse.title)
         )
+        if course_id is None and is_staff:
+            stmt = stmt.where(LmsCourse.is_class_copy.is_(False), LmsCourse.status != "archived")
+        if not is_staff:
+            stmt = stmt.join(relation, join_on).where(access_filter)
         if course_id is not None:
             stmt = stmt.where(LmsCourse.course_id == course_id)
         return list((await self.db.execute(stmt)).all())
@@ -104,8 +122,9 @@ class PortalRepository:
         return rows[0] if rows else None
 
     async def list_classes(self, user_id: int, role: str):
-        relation, join_on, access_filter = self._class_relation(user_id, role)
-        if role == "LECTURER":
+        is_manager = role in {"SUPER_ADMIN", "ADMIN"}
+        relation, join_on, access_filter = (None, None, None) if is_manager else self._class_relation(user_id, role)
+        if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}:
             people_count = (
                 select(func.count(ClassStudent.student_user_id))
                 .where(ClassStudent.class_id == LmsClass.class_id)
@@ -129,10 +148,11 @@ class PortalRepository:
             )
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
             .join(Program, Program.program_id == LmsCourse.program_id)
-            .join(relation, join_on)
-            .where(access_filter)
             .order_by(LmsClass.start_date.desc(), LmsClass.name)
         )
+        stmt = stmt.where(LmsClass.status != "cancelled")
+        if not is_manager:
+            stmt = stmt.join(relation, join_on).where(access_filter)
         return list((await self.db.execute(stmt)).all())
 
     async def get_class(self, class_id: int, user_id: int, role: str):

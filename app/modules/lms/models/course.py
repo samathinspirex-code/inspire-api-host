@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -21,6 +21,10 @@ class LmsCourse(Base):
     takeaways: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     vimeo_folder_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_class_copy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_master_course_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lms_courses.course_id", ondelete="RESTRICT"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

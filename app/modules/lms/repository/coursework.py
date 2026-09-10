@@ -43,6 +43,22 @@ class CourseworkRepository:
         )
         return list((await self.db.execute(stmt)).all())
 
+    async def list_for_manager(self):
+        stmt = (
+            select(LmsCourseworkAssignment, LmsCourse, LmsClass)
+            .join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id)
+            .outerjoin(
+                LmsClass,
+                and_(
+                    LmsCourseworkAssignment.target_type == "class",
+                    LmsClass.class_id == LmsCourseworkAssignment.target_id,
+                ),
+            )
+            .where(~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)))
+            .order_by(LmsCourseworkAssignment.created_at.desc())
+        )
+        return list((await self.db.execute(stmt)).all())
+
     async def list_for_student(self, user_id: int, include_exams: bool = False):
         class_access = select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
         stmt = (

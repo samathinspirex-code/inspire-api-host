@@ -175,7 +175,7 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
             db.commit()
         await self.assert_access(True)
 
-    async def test_quiz_load_reuses_attempt_and_prefers_unseen_questions(self):
+    async def test_completed_quiz_stays_completed_until_explicit_reattempt(self):
         self.bank(112, count=6)
         db = self.db()
         self.queries.clear()
@@ -193,9 +193,9 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
             attempt_id=first.attempt_id, answers=[{"question_id": q.question_id, "selected_option": "B"} for q in first.questions]), 7)
         self.assertEqual(result.score, 4)
         second = await assistant_service.get_or_create_quiz_attempt(db, 112, 7)
-        self.assertEqual(second.attempt_number, 2)
-        self.assertNotEqual(first.attempt_id, second.attempt_id)
-        self.assertEqual(len({q.question_id for q in second.questions} - first_ids), 2)
+        self.assertEqual(second.attempt_number, 1)
+        self.assertEqual(first.attempt_id, second.attempt_id)
+        self.assertEqual({q.question_id for q in second.questions}, first_ids)
 
     async def test_only_earlier_items_in_the_same_section_block_access(self):
         with Session(self.engine) as db:
