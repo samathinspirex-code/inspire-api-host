@@ -141,7 +141,9 @@ async def create_exam(db: AsyncSession, payload: ExamCreate, user_id: int) -> Ex
     return ExamEditorResponse(exam=await _exam_item(db, await _exam_context(db, exam.exam_id)), questions=[])
 
 
-async def list_exams(db: AsyncSession, user_id: int, role: str) -> ExamListResponse:
+async def list_exams(
+    db: AsyncSession, user_id: int, role: str, course_id: int | None = None, class_id: int | None = None,
+) -> ExamListResponse:
     stmt = (
         select(LmsExam, LmsCourseworkAssignment, LmsCourse, LmsClass, LmsExamAttempt)
         .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsExam.assignment_id)
@@ -153,6 +155,8 @@ async def list_exams(db: AsyncSession, user_id: int, role: str) -> ExamListRespo
         stmt = stmt.join(CourseLecturer, and_(CourseLecturer.course_id == LmsExam.course_id, CourseLecturer.lecturer_user_id == user_id)).outerjoin(
             LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == -1)
         )
+    elif role in {"ADMIN", "SUPER_ADMIN"}:
+        stmt = stmt.outerjoin(LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == -1))
     elif role == "STUDENT":
         class_ids = select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
         stmt = stmt.join(CourseEnrollment, and_(CourseEnrollment.course_id == LmsExam.course_id, CourseEnrollment.student_user_id == user_id, CourseEnrollment.status == "enrolled")).outerjoin(
@@ -163,12 +167,16 @@ async def list_exams(db: AsyncSession, user_id: int, role: str) -> ExamListRespo
         )
     else:
         raise ForbiddenError("This LMS role cannot access exams")
+    if class_id is not None:
+        stmt = stmt.where(LmsExam.target_type == "class", LmsExam.target_id == class_id)
+    elif course_id is not None:
+        stmt = stmt.where(LmsExam.course_id == course_id, LmsExam.target_type == "course")
     rows = list((await db.execute(stmt.order_by(LmsExam.created_at.desc()))).all())
     data = []
     for exam, assignment, course, target_class, attempt in rows:
         if attempt and attempt.status == "in_progress" and remaining_seconds(attempt.expires_at) == 0:
             await _finalize_attempt(db, exam, assignment, attempt, expired=True)
-        data.append(await _exam_item(db, (exam, assignment, course, target_class), attempt, expose_grade=role == "LECTURER"))
+        data.append(await _exam_item(db, (exam, assignment, course, target_class), attempt, expose_grade=role in {"LECTURER", "ADMIN", "SUPER_ADMIN"}))
     return ExamListResponse(data=data)
 
 
@@ -343,6 +351,10 @@ async def get_practice_test_for_item(
         await content_service.get_accessible_student_item(db, item_id, user_id)
         await _ensure_student_target(db, exam, user_id)
         attempt = await _get_attempt(db, exam.exam_id, user_id)
+        # The expiry is persisted on the server.  Finalise an overdue attempt
+        # as soon as it is revisited, so a browser refresh can never restart it.
+        if attempt is not None and attempt.status == "in_progress" and remaining_seconds(attempt.expires_at) == 0:
+            await _finalize_attempt(db, exam, context[1], attempt, expired=True)
         return await _exam_item(db, context, attempt, expose_grade=False)
     if role == "LECTURER":
         await _ensure_lecturer_course(db, exam.course_id, user_id)

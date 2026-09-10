@@ -52,6 +52,7 @@ class ClassPopulationItem(BaseModel):
     code: str
     name: str
     population: int
+    new_enrolments_30d: int
     start_date: date
     end_date: date
     status: str
@@ -79,6 +80,7 @@ class AdminDashboardResponse(BaseModel):
 class StudentPopulationResponse(BaseModel):
     total_students: int
     active_course_enrolments: int
+    active_class_enrolments: int
     new_enrolments_30d: int
     enrolments_previous_30d: int
     course_population: list[CoursePopulationItem]

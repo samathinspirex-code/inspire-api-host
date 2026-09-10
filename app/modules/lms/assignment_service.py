@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
@@ -131,9 +132,36 @@ async def assign_class_student(db: AsyncSession, class_id: int, user_id: int, as
     if not user.is_active:
         raise ValidationError("Inactive students cannot be assigned")
     repo = AssignmentRepository(db)
+    # A class is the final point in the academic pathway.  Enrolling directly
+    # into a class therefore records the School → Programme → Level → Course →
+    # Study Mode → Class relationship as well as granting LMS access.
+    if class_.academic_course_id is not None and class_.study_mode is not None:
+        academic_enrolment = await db.scalar(text("""
+            SELECT course_enrolment_id FROM academic_course_enrolments
+            WHERE student_user_id=:user_id AND class_id=:class_id
+            LIMIT 1
+        """), {"user_id": user_id, "class_id": class_id})
+        if academic_enrolment is None:
+            option = (await db.execute(text("""
+                SELECT price, duration FROM academic_course_study_options
+                WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
+                LIMIT 1
+            """), {"course_id": class_.academic_course_id, "study_mode": class_.study_mode})).mappings().first()
+            if option is None:
+                raise ValidationError("This class does not have an enabled study mode in the academic catalogue")
+            await db.execute(text("""
+                INSERT INTO academic_course_enrolments
+                  (student_user_id, course_id, study_mode, class_id, agreed_price, agreed_duration, status, confirmed_by)
+                VALUES (:user_id, :course_id, :study_mode, :class_id, :price, :duration, 'active', :assigned_by)
+                ON CONFLICT DO NOTHING
+            """), {
+                "user_id": user_id, "course_id": class_.academic_course_id,
+                "study_mode": class_.study_mode, "class_id": class_id,
+                "price": option["price"], "duration": option["duration"], "assigned_by": assigned_by,
+            })
     enrollment = await repo.get_enrollment(class_.course_id, user_id)
     if enrollment is None or enrollment.status != "enrolled":
-        raise ValidationError("Student must be enrolled in the class course first")
+        await repo.enroll_student(class_.course_id, user_id, assigned_by)
     if await repo.get_class_student(class_id, user_id) is not None:
         raise ConflictError("Student is already assigned to this class")
     if await repo.count_class_students(class_id) >= class_.capacity:
@@ -174,7 +202,7 @@ async def assign_class_lecturer(db: AsyncSession, class_id: int, user_id: int, a
         raise ValidationError("Inactive lecturers cannot be assigned")
     repo = AssignmentRepository(db)
     if await repo.get_course_lecturer(class_.course_id, user_id) is None:
-        raise ValidationError("Lecturer must be assigned to the class course first")
+        await repo.assign_course_lecturer(class_.course_id, user_id, assigned_by)
     if await repo.get_class_lecturer(class_id, user_id) is not None:
         raise ConflictError("Lecturer is already assigned to this class")
     relation = await repo.assign_class_lecturer(class_id, user_id, assigned_by)

@@ -1,14 +1,12 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
 
 from app.core.database import get_db
 from app.modules.academic import service
 from app.modules.academic.schemas import (
-    AcademicLevelCreate, AcademicResponse, ClassFromTemplateRequest, CourseCreate,
+    AcademicLevelCreate, AcademicResponse, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
     NamedNodeCreate, PathwayConfirmRequest, ProgrammeEnrolmentCreate,
     ProgrammeEnrolmentResponse, ProgrammeLevelUpdate, StudyOptionUpsert,
-    TemplateDraftRequest, TemplatePublishRequest, WorkspaceSyncRequest, WorkspaceUpdate,
 )
 from app.modules.auth.dependencies import get_current_user, require_access
 from app.modules.auth.schemas import CurrentUser
@@ -37,18 +35,18 @@ async def ensure_class_access(db: AsyncSession, class_id: int, user: CurrentUser
 
 
 @public_router.get("/catalogue/programmes", response_model=AcademicResponse)
-async def public_programmes(db: AsyncSession = Depends(get_db)):
-    return {"data": await service.list_nodes(db, "programmes", True)}
+async def public_programmes(school_id: int | None = Query(None, gt=0), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.public_programmes(db, school_id)}
 
 
 @public_router.get("/catalogue/levels", response_model=AcademicResponse)
-async def public_levels(programme_id: int = Query(..., gt=0), db: AsyncSession = Depends(get_db)):
-    return {"data": await service.public_levels(db, programme_id)}
+async def public_levels(programme_id: int = Query(..., gt=0), school_id: int | None = Query(None, gt=0), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.public_levels(db, programme_id, school_id)}
 
 
 @public_router.get("/catalogue/schools", response_model=AcademicResponse)
-async def public_schools(programme_id: int = Query(..., gt=0), level_id: int | None = Query(None, gt=0), db: AsyncSession = Depends(get_db)):
-    return {"data": await service.public_schools(db, programme_id, level_id)}
+async def public_schools(db: AsyncSession = Depends(get_db)):
+    return {"data": await service.public_schools(db)}
 
 
 @public_router.get("/catalogue/courses", response_model=AcademicResponse)
@@ -79,6 +77,11 @@ async def update_programme(node_id: int, payload: NamedNodeCreate, db: AsyncSess
     return {"data": await service.update_node(db, "programmes", node_id, payload)}
 
 
+@cms_router.delete("/programmes/{node_id}", response_model=AcademicResponse)
+async def delete_programme(node_id: int, db: AsyncSession = Depends(get_db)):
+    return {"data": await service.delete_node(db, "programmes", node_id)}
+
+
 @cms_router.put("/programmes/{programme_id}/levels", response_model=AcademicResponse)
 async def programme_levels(programme_id: int, payload: ProgrammeLevelUpdate, db: AsyncSession = Depends(get_db)):
     return {"data": await service.set_programme_levels(db, programme_id, payload.level_ids)}
@@ -99,6 +102,11 @@ async def update_level(node_id: int, payload: AcademicLevelCreate, db: AsyncSess
     return {"data": await service.update_node(db, "levels", node_id, payload)}
 
 
+@cms_router.delete("/levels/{node_id}", response_model=AcademicResponse)
+async def delete_level(node_id: int, db: AsyncSession = Depends(get_db)):
+    return {"data": await service.delete_node(db, "levels", node_id)}
+
+
 @cms_router.post("/schools", response_model=AcademicResponse, status_code=201)
 async def create_school(payload: NamedNodeCreate, db: AsyncSession = Depends(get_db)):
     return {"data": await service.create_node(db, "schools", payload)}
@@ -107,6 +115,11 @@ async def create_school(payload: NamedNodeCreate, db: AsyncSession = Depends(get
 @cms_router.put("/schools/{node_id}", response_model=AcademicResponse)
 async def update_school(node_id: int, payload: NamedNodeCreate, db: AsyncSession = Depends(get_db)):
     return {"data": await service.update_node(db, "schools", node_id, payload)}
+
+
+@cms_router.delete("/schools/{node_id}", response_model=AcademicResponse)
+async def delete_school(node_id: int, db: AsyncSession = Depends(get_db)):
+    return {"data": await service.delete_node(db, "schools", node_id)}
 
 
 @cms_router.get("/courses/list", response_model=AcademicResponse)
@@ -122,6 +135,11 @@ async def create_course(payload: CourseCreate, db: AsyncSession = Depends(get_db
 @cms_router.put("/courses/{course_id}", response_model=AcademicResponse)
 async def update_course(course_id: int, payload: CourseCreate, db: AsyncSession = Depends(get_db)):
     return {"data": await service.upsert_course(db, payload, course_id)}
+
+
+@cms_router.delete("/courses/{course_id}", response_model=AcademicResponse)
+async def delete_course(course_id: int, db: AsyncSession = Depends(get_db)):
+    return {"data": await service.delete_course(db, course_id)}
 
 
 @cms_router.put("/courses/{course_id}/study-options/{study_mode}", response_model=AcademicResponse)
@@ -152,12 +170,6 @@ async def cms_classes(db: AsyncSession = Depends(get_db)):
     return {"data": await service.list_academic_classes(db)}
 
 
-@lms_router.get("/courses/{course_id}/templates", response_model=AcademicResponse)
-async def templates(course_id: int, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    await ensure_course_access(db, course_id, user)
-    return {"data": await service.list_templates(db, course_id)}
-
-
 @lms_router.get("/my/enrolments", response_model=AcademicResponse)
 async def my_enrolments(user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if "STUDENT" not in user.access:
@@ -181,45 +193,22 @@ async def academic_classes(user: CurrentUser = Depends(require_academic_staff), 
     return {"data": classes}
 
 
-@lms_router.post("/templates/draft", response_model=AcademicResponse)
-async def save_draft(payload: TemplateDraftRequest, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    await ensure_course_access(db, payload.course_id, user)
-    return {"data": await service.save_template_draft(db, payload, user.user_id)}
+@lms_router.delete("/courses/{course_id}", response_model=AcademicResponse)
+async def archive_course_workspace(course_id: int, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.archive_master_course_workspace(db, course_id, user)}
 
 
-@lms_router.post("/templates/{template_id}/publish", response_model=AcademicResponse)
-async def publish(template_id: int, payload: TemplatePublishRequest, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    course_id = await db.scalar(text("SELECT course_id FROM academic_course_templates WHERE template_id=:id"), {"id": template_id})
-    await ensure_course_access(db, course_id or 0, user)
-    return {"data": await service.publish_template(db, template_id, payload.snapshot, user.user_id)}
+@lms_router.delete("/classes/{class_id}", response_model=AcademicResponse)
+async def archive_class_workspace(class_id: int, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.archive_class_workspace(db, class_id, user)}
 
 
-@lms_router.post("/classes/from-template", response_model=AcademicResponse, status_code=201)
-async def class_from_template(payload: ClassFromTemplateRequest, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    course_id = await db.scalar(text("SELECT course_id FROM academic_course_templates WHERE template_id=:id"), {"id": payload.template_id})
-    await ensure_course_access(db, course_id or 0, user)
-    return {"data": await service.create_class_from_template(db, payload, user.user_id)}
+@lms_router.patch("/classes/{class_id}/status", response_model=AcademicResponse)
+async def update_class_status(class_id: int, payload: ClassStatusUpdate, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.update_class_workspace_status(db, class_id, payload.status, user)}
 
 
-@lms_router.get("/classes/{class_id}/workspace", response_model=AcademicResponse)
-async def workspace(class_id: int, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    await ensure_class_access(db, class_id, user)
-    return {"data": await service.get_workspace(db, class_id)}
-
-
-@lms_router.put("/classes/{class_id}/workspace", response_model=AcademicResponse)
-async def update_workspace(class_id: int, payload: WorkspaceUpdate, _: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    await ensure_class_access(db, class_id, _)
-    return {"data": await service.update_workspace(db, class_id, payload.snapshot)}
-
-
-@lms_router.get("/classes/{class_id}/template-updates", response_model=AcademicResponse)
-async def compare(class_id: int, template_version_id: int = Query(..., gt=0), user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    await ensure_class_access(db, class_id, user)
-    return {"data": await service.compare_workspace(db, class_id, template_version_id)}
-
-
-@lms_router.post("/classes/{class_id}/template-updates", response_model=AcademicResponse)
-async def sync(class_id: int, payload: WorkspaceSyncRequest, _: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
-    await ensure_class_access(db, class_id, _)
-    return {"data": await service.sync_workspace(db, class_id, payload)}
+@lms_router.post("/classes/from-course", response_model=AcademicResponse, status_code=201)
+async def class_from_course(payload: ClassFromCourseRequest, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    await service.ensure_staff_can_manage_lms_course(db, payload.source_course_id, user)
+    return {"data": await service.create_class_from_course(db, payload, user.user_id)}

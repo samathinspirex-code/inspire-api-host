@@ -119,7 +119,7 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.upcoming_meetings, [])
         self.assertEqual(result.recent_courses, [])
         self.assertIsNone(result.attendance_rate)
-        self.assertEqual(len(self.queries), 4)
+        self.assertEqual(len(self.queries), 5)
 
     async def test_live_counts_and_bounded_upcoming_schedule(self):
         self.seed()
@@ -131,7 +131,10 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m.meeting_id for m in result.upcoming_meetings], [1, 2, 6, 7, 8])
         self.assertTrue(all(m.start_time.tzinfo is not None for m in result.upcoming_meetings))
         self.assertEqual([c.course_id for c in result.recent_courses], [3, 2, 1])
-        self.assertEqual(len(self.queries), 4)
+        self.assertEqual(result.new_enrolments_30d, 3)
+        self.assertEqual(result.enrolments_previous_30d, 0)
+        self.assertEqual(result.popular_course.course_id, 1)
+        self.assertEqual(len(self.queries), 5)
         self.assertNotIn("email", result.model_dump_json())
 
     async def test_status_changes_additions_and_deletions_refresh_totals(self):
@@ -193,7 +196,9 @@ class AdminDashboardAccessTests(unittest.TestCase):
     def test_both_admin_roles_receive_live_endpoint_not_bootstrap_placeholders(self):
         payload = dict(total_students=5, total_lecturers=2, total_programmes=1, active_courses=3,
                        active_classes=1, published_content=8, upcoming_classes=0, attendance_rate=None,
-                       attendance_records=0, upcoming_meetings=[], recent_courses=[], generated_at="2026-08-31T12:00:00Z")
+                       attendance_records=0, new_enrolments_30d=0, enrolments_previous_30d=0,
+                       popular_course=None, popular_courses=[], upcoming_meetings=[], recent_courses=[],
+                       generated_at="2026-08-31T12:00:00Z")
         for role in ["ADMIN", "SUPER_ADMIN"]:
             with self.subTest(role=role):
                 self.user(["LMS", role])

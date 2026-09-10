@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.academic.schemas import (
     AcademicLevelCreate,
+    ClassFromCourseRequest,
     ClassFromTemplateRequest,
     CourseCreate,
     NamedNodeCreate,
@@ -34,6 +35,24 @@ def _rows(result) -> list[dict[str, Any]]:
 
 def _json(value: dict[str, Any]) -> str:
     return json.dumps(value, default=str)
+
+
+async def _replace_public_course_content(
+    db: AsyncSession, legacy_program_id: int, topics: list[str], outcomes: list[str]
+) -> None:
+    """Keep the public course detail tabs in sync with the CMS course editor."""
+    clean_topics = list(dict.fromkeys(item.strip() for item in topics if item.strip()))
+    clean_outcomes = list(dict.fromkeys(item.strip() for item in outcomes if item.strip()))
+    await db.execute(text("DELETE FROM topics WHERE program_id=:program_id"), {"program_id": legacy_program_id})
+    await db.execute(text("DELETE FROM outcomes WHERE program_id=:program_id"), {"program_id": legacy_program_id})
+    for order, topic in enumerate(clean_topics, start=1):
+        await db.execute(text("INSERT INTO topics (program_id, \"order\", topic) VALUES (:program_id, :order, :topic)"), {
+            "program_id": legacy_program_id, "order": order, "topic": topic,
+        })
+    for order, outcome in enumerate(clean_outcomes, start=1):
+        await db.execute(text("INSERT INTO outcomes (program_id, \"order\", outcome) VALUES (:program_id, :order, :outcome)"), {
+            "program_id": legacy_program_id, "order": order, "outcome": outcome,
+        })
 
 
 async def list_nodes(db: AsyncSession, resource: str, active_only: bool = False):
@@ -77,6 +96,97 @@ async def update_node(db: AsyncSession, resource: str, node_id: int, payload):
     return dict(row)
 
 
+async def delete_node(db: AsyncSession, resource: str, node_id: int):
+    table = RESOURCE_TABLES[resource]
+    id_column = {"programmes": "programme_id", "levels": "level_id", "schools": "school_id"}[resource]
+    exists = await db.scalar(text(f"SELECT 1 FROM {table} WHERE {id_column}=:id"), {"id": node_id})
+    if not exists:
+        raise NotFoundError(f"{resource[:-1].title()} {node_id} not found")
+
+    reference_checks = {
+        "programmes": "SELECT EXISTS(SELECT 1 FROM academic_courses WHERE programme_id=:id) OR EXISTS(SELECT 1 FROM academic_programme_enrolments WHERE programme_id=:id)",
+        "levels": "SELECT EXISTS(SELECT 1 FROM academic_courses WHERE level_id=:id) OR EXISTS(SELECT 1 FROM academic_programme_enrolments WHERE preferred_level_id=:id)",
+        "schools": "SELECT EXISTS(SELECT 1 FROM academic_courses WHERE school_id=:id) OR EXISTS(SELECT 1 FROM academic_programme_enrolments WHERE preferred_school_id=:id)",
+    }
+    referenced = bool(await db.scalar(text(reference_checks[resource]), {"id": node_id}))
+    if referenced:
+        await db.execute(text(f"UPDATE {table} SET status='archived', updated_at=now() WHERE {id_column}=:id"), {"id": node_id})
+        disposition = "archived"
+    else:
+        if resource == "programmes":
+            await db.execute(text("DELETE FROM academic_programme_levels WHERE programme_id=:id"), {"id": node_id})
+        elif resource == "levels":
+            await db.execute(text("DELETE FROM academic_programme_levels WHERE level_id=:id"), {"id": node_id})
+        await db.execute(text(f"DELETE FROM {table} WHERE {id_column}=:id"), {"id": node_id})
+        disposition = "deleted"
+    await db.commit()
+    return {"id": node_id, "disposition": disposition}
+
+
+async def delete_course(db: AsyncSession, course_id: int):
+    course = (await db.execute(text("SELECT legacy_program_id, school_id, programme_id FROM academic_courses WHERE course_id=:id"), {"id": course_id})).mappings().first()
+    if course is None:
+        raise NotFoundError(f"Course {course_id} not found")
+    referenced = bool(await db.scalar(text("""
+        SELECT EXISTS(SELECT 1 FROM academic_course_enrolments WHERE course_id=:id)
+          OR EXISTS(SELECT 1 FROM academic_course_templates WHERE course_id=:id)
+          OR EXISTS(SELECT 1 FROM lms_classes WHERE academic_course_id=:id)
+    """), {"id": course_id}))
+    if referenced:
+        await db.execute(text("UPDATE academic_courses SET status='archived', updated_at=now() WHERE course_id=:id"), {"id": course_id})
+        disposition = "archived"
+    else:
+        legacy_id = course["legacy_program_id"]
+        await db.execute(text("DELETE FROM academic_courses WHERE course_id=:id"), {"id": course_id})
+        if legacy_id is not None:
+            legacy_referenced = await db.scalar(text("SELECT 1 FROM lms_courses WHERE program_id=:id LIMIT 1"), {"id": legacy_id})
+            if not legacy_referenced:
+                await db.execute(text("DELETE FROM programs WHERE program_id=:id"), {"id": legacy_id})
+        disposition = "deleted"
+    await db.commit()
+    return {"id": course_id, "disposition": disposition}
+
+
+async def archive_master_course_workspace(db: AsyncSession, course_id: int, user: CurrentUser):
+    """Remove a reusable Course page from active use without destroying cohorts."""
+    await ensure_staff_can_manage_lms_course(db, course_id, user)
+    course = (await db.execute(text("SELECT course_id, is_class_copy FROM lms_courses WHERE course_id=:id"), {"id": course_id})).mappings().first()
+    if course is None:
+        raise NotFoundError(f"Course {course_id} not found")
+    if course["is_class_copy"]:
+        raise ValidationError("Remove a copied class from My Classes, not from Courses")
+    await db.execute(text("UPDATE lms_courses SET status='archived', updated_at=now() WHERE course_id=:id"), {"id": course_id})
+    await db.commit()
+    return {"course_id": course_id, "disposition": "archived"}
+
+
+async def archive_class_workspace(db: AsyncSession, class_id: int, user: CurrentUser):
+    """Hide a class and its copied Course workspace while preserving its history."""
+    class_row = (await db.execute(text("SELECT class_id, course_id FROM lms_classes WHERE class_id=:id"), {"id": class_id})).mappings().first()
+    if class_row is None:
+        raise NotFoundError(f"Class {class_id} not found")
+    if not await user_can_access_class(db, class_id, user):
+        raise ValidationError("You are not assigned to this class")
+    await db.execute(text("UPDATE lms_classes SET status='cancelled', updated_at=now() WHERE class_id=:id"), {"id": class_id})
+    await db.execute(text("UPDATE lms_courses SET status='archived', updated_at=now() WHERE course_id=:course_id"), {"course_id": class_row["course_id"]})
+    await db.commit()
+    return {"class_id": class_id, "disposition": "archived"}
+
+
+async def update_class_workspace_status(db: AsyncSession, class_id: int, status: str, user: CurrentUser):
+    """Move an intake from planned to active without changing its content."""
+    class_row = (await db.execute(text("SELECT class_id, status FROM lms_classes WHERE class_id=:id"), {"id": class_id})).mappings().first()
+    if class_row is None:
+        raise NotFoundError(f"Class {class_id} not found")
+    if not await user_can_access_class(db, class_id, user):
+        raise ValidationError("You are not assigned to this class")
+    if class_row["status"] == "cancelled":
+        raise ValidationError("A removed class cannot be reactivated")
+    await db.execute(text("UPDATE lms_classes SET status=:status, updated_at=now() WHERE class_id=:id"), {"id": class_id, "status": status})
+    await db.commit()
+    return {"class_id": class_id, "status": status}
+
+
 async def list_courses(
     db: AsyncSession,
     programme_id: int | None = None,
@@ -96,6 +206,11 @@ async def list_courses(
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     result = await db.execute(text(f"""
         SELECT c.*, p.name AS programme_name, l.name AS level_name, s.name AS school_name,
+               COALESCE((SELECT popularity FROM programs lp WHERE lp.program_id=c.legacy_program_id), 0) AS popularity,
+               COALESCE((SELECT jsonb_agg(jsonb_build_object('topic_id', t.topic_id, 'order', t.\"order\", 'topic', t.topic) ORDER BY t.\"order\")
+                         FROM topics t WHERE t.program_id=c.legacy_program_id), '[]'::jsonb) AS topics,
+               COALESCE((SELECT jsonb_agg(jsonb_build_object('outcome_id', o2.outcome_id, 'order', o2.\"order\", 'outcome', o2.outcome) ORDER BY o2.\"order\")
+                         FROM outcomes o2 WHERE o2.program_id=c.legacy_program_id), '[]'::jsonb) AS outcomes,
                COALESCE(jsonb_agg(jsonb_build_object(
                    'study_mode', o.study_mode, 'price', o.price, 'duration', o.duration,
                    'is_enabled', o.is_enabled
@@ -106,20 +221,20 @@ async def list_courses(
         JOIN academic_schools s ON s.school_id = c.school_id
         LEFT JOIN academic_course_study_options o ON o.course_id = c.course_id
         {where}
-        GROUP BY c.course_id, p.name, l.name, s.name
-        ORDER BY p.position, COALESCE(l.rank, 999), s.position, c.title
+         GROUP BY c.course_id, p.name, p.position, l.name, l.rank, s.name, s.position
+         ORDER BY s.position, p.position, COALESCE(l.rank, 999), c.title
     """), params)
     return _rows(result)
 
 
 async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int | None = None):
-    values = payload.model_dump(exclude={"study_options"}) | {"course_id": course_id}
+    values = payload.model_dump(exclude={"study_options", "topics", "outcomes", "popularity"}) | {"course_id": course_id}
     if payload.level_id is not None:
         valid_level = await db.scalar(text(
-            "SELECT 1 FROM academic_programme_levels WHERE programme_id=:programme_id AND level_id=:level_id AND is_active"
+            "SELECT 1 FROM academic_levels WHERE level_id=:level_id AND status='active'"
         ), values)
         if not valid_level:
-            raise ValidationError("The selected level is not enabled for this programme")
+            raise ValidationError("The selected academic level is not available")
     if course_id is None:
         row = (await db.execute(text("""
             INSERT INTO academic_courses
@@ -152,11 +267,12 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         "school": course["school_name"], "awarding_body": course["awarding_body"],
         "code": course["code"], "duration": course["duration"], "price_from": course["price_from"],
         "image_url": course["image_url"], "blurb": course["blurb"], "image_label": course["title"],
+        "popularity": payload.popularity,
     }
     if course["legacy_program_id"] is None:
         legacy_id = await db.scalar(text("""
             INSERT INTO programs (slug,title,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity)
-            VALUES (:slug,:title,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,0)
+            VALUES (:slug,:title,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity)
             RETURNING program_id
         """), legacy_values)
         await db.execute(text("UPDATE academic_courses SET legacy_program_id=:legacy_id WHERE course_id=:course_id"), {"legacy_id": legacy_id, "course_id": course_id})
@@ -164,9 +280,13 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         await db.execute(text("""
             UPDATE programs SET slug=:slug,title=:title,level=:level,school=:school,
               awarding_body=:awarding_body,code=:code,duration=:duration,price_from=:price_from,
-              image_label=:image_label,image_url=:image_url,blurb=:blurb
+              image_label=:image_label,image_url=:image_url,blurb=:blurb,popularity=:popularity
             WHERE program_id=:legacy_id
         """), {**legacy_values, "legacy_id": course["legacy_program_id"]})
+    legacy_program_id = course["legacy_program_id"]
+    if legacy_program_id is None:
+        legacy_program_id = await db.scalar(text("SELECT legacy_program_id FROM academic_courses WHERE course_id=:course_id"), {"course_id": course_id})
+    await _replace_public_course_content(db, legacy_program_id, payload.topics, payload.outcomes)
     await db.commit()
     courses = await list_courses(db)
     return next(item for item in courses if item["course_id"] == course_id)
@@ -180,6 +300,16 @@ async def upsert_study_option(db: AsyncSession, course_id: int, payload: StudyOp
             duration=EXCLUDED.duration, is_enabled=EXCLUDED.is_enabled, updated_at=now()
         RETURNING *
     """), {"course_id": course_id, **payload.model_dump()})).mappings().one()
+    await db.execute(text("""
+        UPDATE academic_course_study_options
+        SET price=:price, duration=:duration, updated_at=now()
+        WHERE course_id=:course_id AND study_option_id<>:study_option_id
+    """), {
+        "course_id": course_id,
+        "study_option_id": row["study_option_id"],
+        "price": payload.price,
+        "duration": payload.duration,
+    })
     if commit:
         await db.commit()
     return dict(row)
@@ -200,31 +330,59 @@ async def set_programme_levels(db: AsyncSession, programme_id: int, level_ids: l
     """), {"id": programme_id}))
 
 
-async def public_levels(db: AsyncSession, programme_id: int):
-    return _rows(await db.execute(text("""
-        SELECT l.* FROM academic_levels l JOIN academic_programme_levels pl USING (level_id)
-        WHERE pl.programme_id=:id AND pl.is_active AND l.status='active'
+async def public_programmes(db: AsyncSession, school_id: int | None = None):
+    school_filter = "AND c.school_id=:school_id" if school_id is not None else ""
+    return _rows(await db.execute(text(f"""
+        SELECT p.*
+        FROM academic_programmes p
+        WHERE p.status='active'
+          AND EXISTS (
+            SELECT 1 FROM academic_courses c
+            WHERE c.programme_id=p.programme_id AND c.status='active'
+              {school_filter}
+          )
+        ORDER BY p.position, p.name
+    """), {"school_id": school_id}))
+
+
+async def public_levels(db: AsyncSession, programme_id: int, school_id: int | None = None):
+    school_filter = "AND c.school_id=:school_id AND c.status='active'" if school_id is not None else ""
+    return _rows(await db.execute(text(f"""
+        SELECT DISTINCT l.*
+        FROM academic_levels l
+        JOIN academic_courses c ON c.level_id=l.level_id
+        WHERE c.programme_id=:programme_id AND c.status='active' AND l.status='active'
+          {school_filter}
         ORDER BY l.rank NULLS LAST, l.position, l.name
-    """), {"id": programme_id}))
+    """), {"programme_id": programme_id, "school_id": school_id}))
 
 
-async def public_schools(db: AsyncSession, programme_id: int, level_id: int | None):
-    return _rows(await db.execute(text("""
-        SELECT DISTINCT s.* FROM academic_schools s JOIN academic_courses c USING (school_id)
-        WHERE c.programme_id=:programme_id AND (:level_id IS NULL OR c.level_id=:level_id)
-          AND c.status='active' AND s.status='active'
-        ORDER BY s.position, s.name
-    """), {"programme_id": programme_id, "level_id": level_id}))
+async def public_schools(db: AsyncSession):
+    return await list_nodes(db, "schools", True)
 
 
 async def create_programme_enrolment(db: AsyncSession, payload: ProgrammeEnrolmentCreate):
     programme_exists = await db.scalar(text("SELECT 1 FROM academic_programmes WHERE programme_id=:id AND status='active'"), {"id": payload.programme_id})
     if not programme_exists:
         raise ValidationError("The selected programme is not available")
+    if payload.preferred_school_id is not None:
+        valid_school_programme = await db.scalar(text("""
+            SELECT 1 FROM academic_courses
+            WHERE school_id=:preferred_school_id AND programme_id=:programme_id AND status='active'
+            LIMIT 1
+        """), payload.model_dump())
+        if not valid_school_programme:
+            raise ValidationError("The selected programme is not available in this school")
     if payload.preferred_level_id is not None:
-        valid = await db.scalar(text("SELECT 1 FROM academic_programme_levels WHERE programme_id=:programme_id AND level_id=:level_id AND is_active"), payload.model_dump())
+        school_filter = "AND school_id=:preferred_school_id" if payload.preferred_school_id is not None else ""
+        valid = await db.scalar(text(f"""
+            SELECT 1 FROM academic_courses
+            WHERE programme_id=:programme_id AND level_id=:preferred_level_id AND status='active'
+              {school_filter}
+            LIMIT 1
+        """), payload.model_dump())
         if not valid:
-            raise ValidationError("The preferred level is not available for this programme")
+            raise ValidationError("The preferred level is not available for this school and programme")
     if payload.preferred_course_id is not None:
         preferred = (await db.execute(text("""
             SELECT programme_id, level_id, school_id FROM academic_courses
@@ -268,8 +426,9 @@ async def create_programme_enrolment(db: AsyncSession, payload: ProgrammeEnrolme
     duplicate = await db.scalar(text("""
         SELECT enrolment_id FROM academic_programme_enrolments
         WHERE student_user_id=:user_id AND programme_id=:programme_id
+          AND preferred_school_id IS NOT DISTINCT FROM :preferred_school_id
           AND status IN ('awaiting_counselling','counselling','pathway_selected')
-    """), {"user_id": user_id, "programme_id": payload.programme_id})
+    """), {"user_id": user_id, "programme_id": payload.programme_id, "preferred_school_id": payload.preferred_school_id})
     if duplicate:
         await db.rollback()
         raise ConflictError("This student already has an active enrolment for the selected programme")
@@ -361,12 +520,14 @@ async def confirm_pathway(db: AsyncSession, enrolment_id: int, payload: PathwayC
     if enrolment is None:
         raise NotFoundError(f"Programme enrolment {enrolment_id} not found")
     option = (await db.execute(text("""
-        SELECT o.*, c.programme_id FROM academic_course_study_options o
+        SELECT o.*, c.programme_id, c.school_id FROM academic_course_study_options o
         JOIN academic_courses c ON c.course_id=o.course_id
         WHERE o.course_id=:course_id AND o.study_mode=:study_mode AND o.is_enabled
     """), payload.model_dump())).mappings().first()
     if option is None or option["programme_id"] != enrolment["programme_id"]:
         raise ValidationError("The selected course and study mode do not belong to this programme")
+    if enrolment["preferred_school_id"] is not None and option["school_id"] != enrolment["preferred_school_id"]:
+        raise ValidationError("The selected course does not belong to the enrolled school")
     duplicate = await db.scalar(text("""
         SELECT course_enrolment_id FROM academic_course_enrolments
         WHERE student_user_id=:student_user_id AND course_id=:course_id AND study_mode=:study_mode
@@ -389,7 +550,7 @@ async def confirm_pathway(db: AsyncSession, enrolment_id: int, payload: PathwayC
     })
     if payload.class_id:
         class_row = (await db.execute(text("""
-            SELECT class_id FROM lms_classes WHERE class_id=:class_id AND academic_course_id=:course_id
+            SELECT class_id, course_id FROM lms_classes WHERE class_id=:class_id AND academic_course_id=:course_id
               AND study_mode=:study_mode
         """), payload.model_dump())).first()
         if class_row is None:
@@ -398,6 +559,11 @@ async def confirm_pathway(db: AsyncSession, enrolment_id: int, payload: PathwayC
             INSERT INTO lms_class_students (class_id, student_user_id, assigned_by)
             VALUES (:class_id, :student_user_id, :assigned_by) ON CONFLICT DO NOTHING
         """), {"class_id": payload.class_id, "student_user_id": enrolment["student_user_id"], "assigned_by": counsellor_id})
+        await db.execute(text("""
+            INSERT INTO lms_course_enrollments (course_id, student_user_id, status, enrolled_by)
+            VALUES (:course_id, :student_user_id, 'enrolled', :assigned_by)
+            ON CONFLICT (course_id, student_user_id) DO UPDATE SET status='enrolled', updated_at=now()
+        """), {"course_id": class_row.course_id, "student_user_id": enrolment["student_user_id"], "assigned_by": counsellor_id})
         await db.execute(text("UPDATE academic_course_enrolments SET class_id=:class_id WHERE course_enrolment_id=:id"), {"class_id": payload.class_id, "id": course_enrolment_id})
     await db.execute(text("""
         UPDATE academic_programme_enrolments SET status='pathway_selected', counsellor_user_id=:user_id,
@@ -456,15 +622,19 @@ async def build_course_snapshot(db: AsyncSession, source_course_id: int):
 async def list_academic_classes(db: AsyncSession):
     return _rows(await db.execute(text("""
         SELECT cl.class_id, cl.code, cl.name, cl.description, cl.start_date, cl.end_date,
-          cl.delivery_mode, cl.timezone, cl.capacity, cl.status, cl.academic_course_id AS course_id,
+          cl.delivery_mode, cl.timezone, cl.capacity, cl.status, cl.academic_course_id AS academic_course_id,
+          cl.course_id AS course_id, lc.source_master_course_id AS source_course_id,
           cl.study_mode, cl.source_template_version_id, cl.last_synced_version_id,
           c.code AS course_code, c.title AS course_title, p.name AS programme_name,
-          s.name AS school_name, l.name AS level_name
+          s.name AS school_name, l.name AS level_name,
+          (SELECT count(*) FROM lms_class_students cs WHERE cs.class_id=cl.class_id) AS student_count
         FROM lms_classes cl
+        JOIN lms_courses lc ON lc.course_id=cl.course_id
         JOIN academic_courses c ON c.course_id=cl.academic_course_id
         JOIN academic_programmes p ON p.programme_id=c.programme_id
         JOIN academic_schools s ON s.school_id=c.school_id
         LEFT JOIN academic_levels l ON l.level_id=c.level_id
+        WHERE cl.status <> 'cancelled'
         ORDER BY cl.start_date DESC, cl.name
     """)))
 
@@ -492,6 +662,179 @@ async def user_can_access_class(db: AsyncSession, class_id: int, user: CurrentUs
     else:
         return False
     return bool(await db.scalar(text(f"SELECT 1 FROM {table} WHERE class_id=:class_id AND {column}=:user_id"), {"class_id": class_id, "user_id": user.user_id}))
+
+
+async def ensure_staff_can_manage_lms_course(db: AsyncSession, course_id: int, user: CurrentUser) -> None:
+    course = (await db.execute(text("""
+        SELECT course_id, is_class_copy FROM lms_courses WHERE course_id=:course_id
+    """), {"course_id": course_id})).mappings().first()
+    if course is None:
+        raise NotFoundError(f"Course {course_id} not found")
+    if course["is_class_copy"]:
+        raise ValidationError("Select a master Course page, not an existing class copy")
+    if any(role in user.access for role in ("SUPER_ADMIN", "ADMIN")):
+        return
+    assigned = await db.scalar(text("""
+        SELECT 1 FROM lms_course_lecturers
+        WHERE course_id=:course_id AND lecturer_user_id=:user_id
+    """), {"course_id": course_id, "user_id": user.user_id})
+    if not assigned:
+        raise ValidationError("You must be assigned to the Course page before creating its class")
+
+
+async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseRequest, user_id: int):
+    """Create a batch with a fully independent visual Course Studio copy."""
+    master = (await db.execute(text("""
+        SELECT lc.*, ac.course_id AS academic_course_id
+        FROM lms_courses lc
+        LEFT JOIN academic_courses ac ON ac.legacy_program_id=lc.program_id
+        WHERE lc.course_id=:course_id AND COALESCE(lc.is_class_copy, FALSE)=FALSE
+        ORDER BY ac.course_id LIMIT 1
+    """), {"course_id": payload.source_course_id})).mappings().first()
+    if master is None:
+        raise NotFoundError("The selected master Course page was not found")
+    if master["academic_course_id"] is None:
+        raise ValidationError("Link this Course page to the academic catalogue before creating a class")
+    enabled = await db.scalar(text("""
+        SELECT 1 FROM academic_course_study_options
+        WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
+    """), {"course_id": master["academic_course_id"], "study_mode": payload.study_mode})
+    if not enabled:
+        raise ValidationError("This study mode is not enabled for the selected course")
+    duplicate = await db.scalar(text("SELECT 1 FROM lms_classes WHERE lower(code)=lower(:code)"), {"code": payload.code.strip()})
+    if duplicate:
+        raise ConflictError(f"Class code '{payload.code.strip().upper()}' is already in use")
+
+    copy_code = f"{master['code']}-{payload.code.strip()}".upper()[:100]
+    if await db.scalar(text("SELECT 1 FROM lms_courses WHERE lower(code)=lower(:code)"), {"code": copy_code}):
+        raise ConflictError("A class workspace with this code already exists")
+    copied_course_id = await db.scalar(text("""
+        INSERT INTO lms_courses
+          (program_id, code, title, description, takeaways, cover_image_url, status,
+           created_by, is_class_copy, source_master_course_id)
+        VALUES (:program_id, :code, :title, :description, :takeaways, :cover, :status,
+                :user_id, TRUE, :source_id)
+        RETURNING course_id
+    """), {
+        "program_id": master["program_id"], "code": copy_code, "title": master["title"],
+        "description": master["description"], "takeaways": master.get("takeaways"),
+        "cover": master.get("cover_image_url"), "status": master["status"],
+        "user_id": user_id, "source_id": payload.source_course_id,
+    })
+    class_id = await db.scalar(text("""
+        INSERT INTO lms_classes
+          (course_id, code, name, description, start_date, end_date, delivery_mode, timezone,
+           capacity, status, created_by, academic_course_id, study_mode, content_snapshot)
+        VALUES (:course_id, :code, :name, :description, :start_date, :end_date, :delivery_mode,
+                :timezone, :capacity, 'planned', :user_id, :academic_course_id, :study_mode,
+                '{"sections":[]}'::jsonb)
+        RETURNING class_id
+    """), {**payload.model_dump(exclude={"source_course_id"}), "course_id": copied_course_id,
+             "academic_course_id": master["academic_course_id"], "user_id": user_id,
+             "code": payload.code.strip().upper(), "name": payload.name.strip()})
+
+    module_map: dict[int, int] = {}
+    item_map: dict[int, int] = {}
+    modules = _rows(await db.execute(text("SELECT * FROM lms_modules WHERE course_id=:id ORDER BY position"), {"id": payload.source_course_id}))
+    for module in modules:
+        new_module_id = await db.scalar(text("""
+            INSERT INTO lms_modules (course_id,title,description,position,status,created_by)
+            VALUES (:course_id,:title,:description,:position,:status,:user_id) RETURNING module_id
+        """), {**module, "course_id": copied_course_id, "user_id": user_id})
+        module_map[module["module_id"]] = new_module_id
+        # A class starts with an isolated, locked content workspace.  Copying a
+        # master Course page must never expose a section because it happened to
+        # be released for a different intake.  The class lecturer releases each
+        # copied section explicitly to this class (or an individual student).
+        items = _rows(await db.execute(text("SELECT * FROM lms_learning_items WHERE module_id=:id ORDER BY position"), {"id": module["module_id"]}))
+        for item in items:
+            new_item_id = await db.scalar(text("""
+                INSERT INTO lms_learning_items
+                  (module_id,item_type,title,description,resource_url,thumbnail_url,text_content,
+                   duration_minutes,position,status,is_required,created_by)
+                VALUES (:module_id,:item_type,:title,:description,:resource_url,:thumbnail_url,:text_content,
+                        :duration_minutes,:position,:status,:is_required,:user_id)
+                RETURNING learning_item_id
+            """), {**item, "module_id": new_module_id, "user_id": user_id})
+            item_map[item["learning_item_id"]] = new_item_id
+
+    await db.execute(text("""
+        INSERT INTO lms_course_assistant_settings
+          (course_id,is_enabled,assistant_name,welcome_message,fallback_message,attention_animation,created_by)
+        SELECT :new_course,is_enabled,assistant_name,welcome_message,fallback_message,attention_animation,:user_id
+        FROM lms_course_assistant_settings WHERE course_id=:source_course
+        ON CONFLICT (course_id) DO NOTHING
+    """), {"new_course": copied_course_id, "source_course": payload.source_course_id, "user_id": user_id})
+    for old_item, new_item in item_map.items():
+        await db.execute(text("""
+            INSERT INTO lms_lecture_questions
+              (course_id,learning_item_id,question,option_a,option_b,option_c,option_d,correct_option,
+               explanation,difficulty,topic,source_locator,status,generated_by_ai,created_by)
+            SELECT :new_course,:new_item,question,option_a,option_b,option_c,option_d,correct_option,
+                   explanation,difficulty,topic,source_locator,status,generated_by_ai,:user_id
+            FROM lms_lecture_questions WHERE course_id=:source_course AND learning_item_id=:old_item
+        """), {"new_course": copied_course_id, "new_item": new_item, "source_course": payload.source_course_id,
+                 "old_item": old_item, "user_id": user_id})
+
+    assignment_map: dict[int, int] = {}
+    assignments = _rows(await db.execute(text("SELECT * FROM lms_coursework_assignments WHERE course_id=:id ORDER BY assignment_id"), {"id": payload.source_course_id}))
+    for assignment in assignments:
+        new_assignment_id = await db.scalar(text("""
+            INSERT INTO lms_coursework_assignments
+              (learning_item_id,course_id,target_type,target_id,title,instructions,assignment_type,
+               available_from,due_at,duration_minutes,max_marks,allow_late,grades_released,status,created_by)
+            VALUES (:learning_item_id,:course_id,'class',:class_id,:title,:instructions,:assignment_type,
+                    :available_from,:due_at,:duration_minutes,:max_marks,:allow_late,:grades_released,:status,:user_id)
+            RETURNING assignment_id
+        """), {**assignment, "learning_item_id": item_map.get(assignment.get("learning_item_id")),
+                 "course_id": copied_course_id, "class_id": class_id, "user_id": user_id})
+        assignment_map[assignment["assignment_id"]] = new_assignment_id
+    exams = _rows(await db.execute(text("SELECT * FROM lms_exams WHERE course_id=:id ORDER BY exam_id"), {"id": payload.source_course_id}))
+    for exam in exams:
+        new_exam_id = await db.scalar(text("""
+            INSERT INTO lms_exams
+              (assessment_kind,assignment_id,course_id,target_type,target_id,title,instructions,
+               available_from,due_at,duration_minutes,randomize_questions,randomize_options,
+               grades_released,status,created_by)
+            VALUES (:assessment_kind,:assignment_id,:course_id,'class',:class_id,:title,:instructions,
+                    :available_from,:due_at,:duration_minutes,:randomize_questions,:randomize_options,
+                    :grades_released,:status,:user_id) RETURNING exam_id
+        """), {**exam, "assignment_id": assignment_map[exam["assignment_id"]],
+                 "course_id": copied_course_id, "class_id": class_id, "user_id": user_id})
+        await db.execute(text("""
+            INSERT INTO lms_exam_questions
+              (exam_id,question_type,prompt,marks,position,options,correct_option_index,
+               correct_option_indices,accepted_answers)
+            SELECT :new_exam,question_type,prompt,marks,position,options,correct_option_index,
+                   correct_option_indices,accepted_answers
+            FROM lms_exam_questions WHERE exam_id=:old_exam
+        """), {"new_exam": new_exam_id, "old_exam": exam["exam_id"]})
+
+    await db.execute(text("""
+        INSERT INTO lms_course_lecturers (course_id,lecturer_user_id,assigned_by)
+        SELECT :new_course,lecturer_user_id,:user_id FROM lms_course_lecturers WHERE course_id=:source_course
+        ON CONFLICT DO NOTHING
+    """), {"new_course": copied_course_id, "source_course": payload.source_course_id, "user_id": user_id})
+    await db.execute(text("""
+        INSERT INTO lms_class_lecturers (class_id,lecturer_user_id,assigned_by)
+        SELECT :class_id,lecturer_user_id,:user_id FROM lms_course_lecturers WHERE course_id=:new_course
+        ON CONFLICT DO NOTHING
+    """), {"class_id": class_id, "new_course": copied_course_id, "user_id": user_id})
+    await db.execute(text("""
+        INSERT INTO lms_course_lecturers (course_id,lecturer_user_id,assigned_by)
+        SELECT :new_course,:user_id,:user_id WHERE EXISTS
+          (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+        ON CONFLICT DO NOTHING
+    """), {"new_course": copied_course_id, "user_id": user_id})
+    await db.execute(text("""
+        INSERT INTO lms_class_lecturers (class_id,lecturer_user_id,assigned_by)
+        SELECT :class_id,:user_id,:user_id WHERE EXISTS
+          (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+        ON CONFLICT DO NOTHING
+    """), {"class_id": class_id, "user_id": user_id})
+    await db.commit()
+    return {"class_id": class_id, "course_id": copied_course_id,
+            "source_course_id": payload.source_course_id, "study_mode": payload.study_mode}
 
 
 async def save_template_draft(db: AsyncSession, payload: TemplateDraftRequest, user_id: int):

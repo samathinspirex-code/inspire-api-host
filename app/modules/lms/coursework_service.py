@@ -9,7 +9,6 @@ from app.modules.cms.models import MediaAsset
 from app.modules.lms.models import (
     ClassStudent,
     CourseEnrollment,
-    CourseLecturer,
     LmsClass,
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
@@ -56,8 +55,8 @@ def remaining_seconds(expires_at: datetime | None, now: datetime | None = None) 
 
 
 async def _ensure_lecturer_course(db: AsyncSession, course_id: int, user_id: int) -> None:
-    if await db.get(CourseLecturer, (course_id, user_id)) is None:
-        raise ForbiddenError("This course is not assigned to your lecturer profile")
+    from app.modules.lms import content_service
+    await content_service.ensure_course_manager(db, course_id, user_id)
 
 
 async def _ensure_student_target(db: AsyncSession, assignment, user_id: int) -> None:
@@ -127,15 +126,26 @@ async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreat
     return _assignment_item(context)
 
 
-async def list_assignments(db: AsyncSession, user_id: int, role: str) -> CourseworkAssignmentListResponse:
+async def list_assignments(
+    db: AsyncSession, user_id: int, role: str, course_id: int | None = None, class_id: int | None = None,
+) -> CourseworkAssignmentListResponse:
     repo = CourseworkRepository(db)
-    if role == "LECTURER":
-        rows = await repo.list_for_lecturer(user_id)
+    def belongs_to_workspace(assignment: LmsCourseworkAssignment) -> bool:
+        if class_id is not None:
+            return assignment.target_type == "class" and assignment.target_id == class_id
+        if course_id is not None:
+            return assignment.course_id == course_id and assignment.target_type == "course"
+        return True
+    if role in {"LECTURER", "ADMIN", "SUPER_ADMIN"}:
+        raw_rows = await repo.list_for_lecturer(user_id) if role == "LECTURER" else await repo.list_for_manager()
+        rows = [row for row in raw_rows if belongs_to_workspace(row[0])]
         return CourseworkAssignmentListResponse(data=[_assignment_item(row) for row in rows])
     if role != "STUDENT":
         raise ForbiddenError("This LMS role cannot access coursework assignments")
     data = []
     for assignment, course, target_class, submission in await repo.list_for_student(user_id):
+        if not belongs_to_workspace(assignment):
+            continue
         timer_finished = submission and submission.expires_at and remaining_seconds(submission.expires_at) == 0
         deadline_finished = (
             submission

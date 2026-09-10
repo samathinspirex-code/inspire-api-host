@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import re
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -60,7 +60,7 @@ def _discussion_response(discussion, author_name, author_email, is_lecturer):
 async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, role: str) -> None:
     if await CourseRepository(db).get(course_id) is None:
         raise NotFoundError(f"Course {course_id} not found")
-    if role == "SUPER_ADMIN":
+    if role in {"SUPER_ADMIN", "ADMIN"}:
         return
     if role == "LECTURER":
         relation = await db.get(CourseLecturer, (course_id, user_id))
@@ -78,12 +78,20 @@ async def _ensure_module_manager(db: AsyncSession, module_id: int, user_id: int)
     module = await ModuleRepository(db).get(module_id)
     if module is None:
         raise NotFoundError(f"Section {module_id} not found")
-    await _ensure_course_access(db, module.course_id, user_id, "LECTURER")
+    await ensure_course_manager(db, module.course_id, user_id)
     return module
 
 
 async def ensure_course_manager(db: AsyncSession, course_id: int, user_id: int) -> None:
-    await _ensure_course_access(db, course_id, user_id, "LECTURER")
+    global_manager = await db.scalar(text("""
+        SELECT 1 FROM user_access_levels ual
+        JOIN access_levels al ON al.access_level_id=ual.access_level_id
+        WHERE ual.user_id=:user_id AND al.access_key IN ('SUPER_ADMIN','ADMIN')
+        LIMIT 1
+    """), {"user_id": user_id})
+    await _ensure_course_access(
+        db, course_id, user_id, "SUPER_ADMIN" if global_manager else "LECTURER"
+    )
 
 
 async def ensure_module_manager(db: AsyncSession, module_id: int, user_id: int):
@@ -263,7 +271,7 @@ async def get_course_studio(
     blocked_by_video: str | None = None
     for module in visible_modules:
         rules = rules_by_module.get(module.module_id, [])
-        privileged_viewer = role in {"LECTURER", "SUPER_ADMIN"}
+        privileged_viewer = role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
         unlocked, reason = (True, None) if privileged_viewer else _student_access(rules, course_id, user_id, class_ids)
         items = items_by_module.get(module.module_id, [])
         if role == "STUDENT":
@@ -302,10 +310,10 @@ async def get_course_studio(
                 is_unlocked=unlocked,
                 locked_reason=reason,
                 items=item_responses,
-                access_rules=[ModuleAccessResponse.model_validate(rule) for rule in rules] if role == "LECTURER" else [],
+                access_rules=[ModuleAccessResponse.model_validate(rule) for rule in rules] if privileged_viewer else [],
             )
         )
-    return CourseStudioResponse(course_id=course_id, can_manage=role == "LECTURER", sections=sections)
+    return CourseStudioResponse(course_id=course_id, can_manage=role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}, sections=sections)
 
 
 async def create_learning_item(db: AsyncSession, module_id: int, payload: LearningItemCreate, user_id: int):

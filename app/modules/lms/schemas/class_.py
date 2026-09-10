@@ -49,6 +49,7 @@ class ClassItem(BaseModel):
     timezone: str
     capacity: int
     status: ClassStatus
+    study_mode: str | None = None
     created_at: datetime
     updated_at: datetime
 

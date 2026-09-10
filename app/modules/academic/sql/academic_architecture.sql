@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS academic_courses (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_academic_courses_hierarchy ON academic_courses(programme_id, level_id, school_id);
+CREATE INDEX IF NOT EXISTS idx_academic_courses_school_hierarchy ON academic_courses(school_id, programme_id, level_id);
 CREATE INDEX IF NOT EXISTS idx_academic_courses_code ON academic_courses(code);
 
 CREATE TABLE IF NOT EXISTS academic_course_study_options (
@@ -93,8 +93,9 @@ CREATE TABLE IF NOT EXISTS academic_programme_enrolments (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_programme_enrolments_student ON academic_programme_enrolments(student_user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_programme_enrolment
-  ON academic_programme_enrolments(student_user_id, programme_id)
+DROP INDEX IF EXISTS uq_active_programme_enrolment;
+CREATE UNIQUE INDEX uq_active_programme_enrolment
+  ON academic_programme_enrolments(student_user_id, programme_id, COALESCE(preferred_school_id, 0))
   WHERE status IN ('awaiting_counselling','counselling','pathway_selected');
 
 CREATE TABLE IF NOT EXISTS academic_course_enrolments (
@@ -156,6 +157,13 @@ ALTER TABLE lms_classes ADD COLUMN IF NOT EXISTS study_mode VARCHAR(20) CHECK (s
 ALTER TABLE lms_classes ADD COLUMN IF NOT EXISTS source_template_version_id INT REFERENCES academic_course_template_versions(template_version_id) ON DELETE SET NULL;
 ALTER TABLE lms_classes ADD COLUMN IF NOT EXISTS last_synced_version_id INT REFERENCES academic_course_template_versions(template_version_id) ON DELETE SET NULL;
 ALTER TABLE lms_classes ADD COLUMN IF NOT EXISTS content_snapshot JSONB NOT NULL DEFAULT '{"sections":[]}'::jsonb;
+
+-- A batch class owns an editable copy of its master visual Course page.
+-- These copies stay out of the shared Courses catalogue.
+ALTER TABLE lms_courses ADD COLUMN IF NOT EXISTS is_class_copy BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE lms_courses ADD COLUMN IF NOT EXISTS source_master_course_id INT REFERENCES lms_courses(course_id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_lms_courses_master_only ON lms_courses(is_class_copy, title);
+CREATE INDEX IF NOT EXISTS idx_lms_courses_source_master ON lms_courses(source_master_course_id);
 
 -- Convert the current CMS catalogue into authoritative courses.
 INSERT INTO academic_programmes (code, name, position)

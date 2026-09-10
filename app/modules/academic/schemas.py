@@ -42,7 +42,21 @@ class CourseCreate(BaseModel):
     blurb: str = Field(..., min_length=1)
     image_url: str | None = None
     status: Status = "active"
+    popularity: int = Field(0, ge=0, le=100)
+    topics: list[str] = Field(default_factory=list, max_length=100)
+    outcomes: list[str] = Field(default_factory=list, max_length=100)
     study_options: list[StudyOptionUpsert] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def study_options_share_commercial_terms(self):
+        if self.study_options:
+            prices = {option.price for option in self.study_options}
+            durations = {option.duration.strip().casefold() for option in self.study_options}
+            if len(prices) > 1 or len(durations) > 1:
+                raise ValueError("Full-time and Part-time must use the same price and duration")
+            if not any(option.is_enabled for option in self.study_options):
+                raise ValueError("Enable Full-time, Part-time, or both")
+        return self
 
 
 class ProgrammeEnrolmentCreate(BaseModel):
@@ -89,6 +103,29 @@ class ClassFromTemplateRequest(BaseModel):
         if self.end_date < self.start_date:
             raise ValueError("end_date must be on or after start_date")
         return self
+
+
+class ClassFromCourseRequest(BaseModel):
+    source_course_id: int = Field(..., gt=0)
+    study_mode: StudyMode
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=5000)
+    start_date: date
+    end_date: date
+    delivery_mode: Literal["online", "hybrid", "on_site"] = "online"
+    timezone: str = Field("Asia/Colombo", min_length=1, max_length=100)
+    capacity: int = Field(50, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def dates_are_ordered(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
+
+
+class ClassStatusUpdate(BaseModel):
+    status: Literal["planned", "active"]
 
 
 class WorkspaceUpdate(BaseModel):

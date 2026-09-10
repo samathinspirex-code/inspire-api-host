@@ -81,13 +81,9 @@ class AssignmentRepository:
         return item
 
     async def remove_course_lecturer(self, item: CourseLecturer) -> None:
-        class_ids = select(LmsClass.class_id).where(LmsClass.course_id == item.course_id)
-        await self.db.execute(
-            delete(ClassLecturer).where(
-                ClassLecturer.lecturer_user_id == item.lecturer_user_id,
-                ClassLecturer.class_id.in_(class_ids),
-            )
-        )
+        # Class teaching teams are independent from reusable Course page
+        # access. Removing a lecturer from a Course must not unassign them
+        # from any intake they still teach.
         await self.db.delete(item)
         await self.db.commit()
 

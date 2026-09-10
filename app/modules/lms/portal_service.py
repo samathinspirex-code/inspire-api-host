@@ -33,7 +33,7 @@ def _course_item(row, role: str) -> PortalCourseItem:
         module_count=module_count,
         class_count=class_count,
         people_count=people_count,
-        people_label="Students" if role == "LECTURER" else "Lecturers",
+        people_label="Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers",
     )
 
 
@@ -54,10 +54,11 @@ def _class_item(row, role: str) -> PortalClassItem:
         timezone=class_.timezone,
         capacity=class_.capacity,
         status=class_.status,
+        study_mode=class_.study_mode,
         created_at=class_.created_at,
         updated_at=class_.updated_at,
         people_count=people_count,
-        people_label="Students" if role == "LECTURER" else "Lecturers",
+        people_label="Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers",
     )
 
 
@@ -74,20 +75,20 @@ async def get_my_course(
         raise NotFoundError("This course is not assigned to your LMS profile")
     assignments = (
         await AssignmentRepository(db).list_course_students(course_id)
-        if role == "LECTURER"
+        if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
         else await AssignmentRepository(db).list_course_lecturers(course_id)
     )
     modules = await ModuleRepository(db).list_by_course(course_id)
     if role == "STUDENT":
         modules = [module for module in modules if module.status == "active"]
-    people_label = "Students" if role == "LECTURER" else "Lecturers"
+    people_label = "Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers"
     return PortalCourseDetailResponse(
         course=_course_item(row, role),
         modules=[ModuleItem.model_validate(module) for module in modules],
         people=[
             (
                 _student_item(user, profile, relation, relation.status)
-                if role == "LECTURER"
+                if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
                 else _lecturer_item(user, profile, relation)
             )
             for user, profile, relation in assignments
@@ -101,8 +102,9 @@ async def update_my_course_presentation(
     course_id: int,
     payload: CoursePresentationUpdate,
     user_id: int,
+    role: str = "LECTURER",
 ) -> PortalCourseDetailResponse:
-    row = await PortalRepository(db).get_course(course_id, user_id, "LECTURER")
+    row = await PortalRepository(db).get_course(course_id, user_id, role)
     if row is None:
         raise NotFoundError("This course is not assigned to your lecturer profile")
     course = row[0]
@@ -111,7 +113,7 @@ async def update_my_course_presentation(
     course.cover_image_url = payload.cover_image_url.strip() if payload.cover_image_url else None
     await db.commit()
     await db.refresh(course)
-    return await get_my_course(db, course_id, user_id, "LECTURER")
+    return await get_my_course(db, course_id, user_id, role)
 
 
 async def list_my_classes(db: AsyncSession, user_id: int, role: str) -> PortalClassListResponse:
@@ -127,16 +129,16 @@ async def get_my_class(
         raise NotFoundError("This class is not assigned to your LMS profile")
     assignments = (
         await AssignmentRepository(db).list_class_students(class_id)
-        if role == "LECTURER"
+        if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
         else await AssignmentRepository(db).list_class_lecturers(class_id)
     )
-    people_label = "Students" if role == "LECTURER" else "Lecturers"
+    people_label = "Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers"
     return PortalClassDetailResponse(
         class_=_class_item(row, role),
         people=[
             (
                 _student_item(user, profile, relation, "assigned")
-                if role == "LECTURER"
+                if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
                 else _lecturer_item(user, profile, relation)
             )
             for user, profile, relation in assignments
