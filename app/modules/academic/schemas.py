@@ -33,12 +33,13 @@ class StudyOptionUpsert(BaseModel):
 
 class CourseCreate(BaseModel):
     programme_id: int = Field(..., gt=0)
-    level_id: int | None = Field(None, gt=0)
     school_id: int = Field(..., gt=0)
     slug: str = Field(..., min_length=1, max_length=255)
     code: str = Field(..., min_length=1, max_length=100)
     title: str = Field(..., min_length=1, max_length=255)
     awarding_body: str = Field(..., min_length=1, max_length=100)
+    entry_requirements: str = Field(..., min_length=1, max_length=5000)
+    progression_route: str = Field(..., min_length=1, max_length=5000)
     blurb: str = Field(..., min_length=1)
     image_url: str | None = None
     status: Status = "active"
@@ -64,7 +65,6 @@ class ProgrammeEnrolmentCreate(BaseModel):
     email: EmailStr
     phone: str = Field(..., min_length=5, max_length=50)
     programme_id: int = Field(..., gt=0)
-    preferred_level_id: int | None = Field(None, gt=0)
     preferred_school_id: int | None = Field(None, gt=0)
     preferred_course_id: int | None = Field(None, gt=0)
     preferred_study_mode: StudyMode | None = None
@@ -107,6 +107,7 @@ class ClassFromTemplateRequest(BaseModel):
 
 class ClassFromCourseRequest(BaseModel):
     source_course_id: int = Field(..., gt=0)
+    academic_course_id: int = Field(..., gt=0)
     study_mode: StudyMode
     code: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=255)
