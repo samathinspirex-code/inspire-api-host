@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import APIError, NotFoundError, ValidationError
 from app.modules.lms import integration_service
-from app.modules.lms import notification_service
+from app.modules.lms import notification_service, zoom_service
 from app.modules.lms.repository import IntegrationRepository, MeetingRepository
 from app.modules.lms.schemas import MeetingCreate, MeetingItem, MeetingListResponse, MeetingUpdate
 
@@ -27,6 +27,11 @@ def _meeting_item(row) -> MeetingItem:
         end_time=meeting.end_time,
         timezone=meeting.timezone,
         status=meeting.status,
+        provider=meeting.provider,
+        join_uri=meeting.join_uri or meeting.google_meeting_uri,
+        provider_meeting_id=meeting.provider_meeting_id,
+        processing_status=meeting.processing_status,
+        processing_error=meeting.processing_error,
         google_meeting_uri=meeting.google_meeting_uri,
         google_meeting_code=meeting.google_meeting_code,
         google_calendar_event_uri=meeting.google_calendar_event_uri,
@@ -101,6 +106,27 @@ async def create_meeting(
     if class_row is None:
         raise ValidationError("You can schedule meetings only for classes assigned to you")
     class_, course = class_row
+    attendee_emails = await repository.list_student_emails(payload.class_id)
+    if payload.provider == "zoom":
+        provider_data = await zoom_service.create_zoom_meeting(
+            db, payload, lecturer_user_id, class_, course
+        )
+        meeting = await repository.save(
+            {
+                "class_id": class_.class_id,
+                "lecturer_user_id": lecturer_user_id,
+                "title": payload.title.strip(),
+                "description": (payload.description or "").strip() or None,
+                "start_time": payload.start_time,
+                "end_time": payload.end_time,
+                "timezone": class_.timezone,
+                **provider_data,
+            }
+        )
+        await zoom_service.register_class_students(db, meeting.meeting_id)
+        await notification_service.notify_meeting_change(db, meeting, class_, course, "created")
+        return _meeting_item((meeting, class_, course, len(attendee_emails)))
+
     integration = await IntegrationRepository(db).get_google_settings()
     if integration is None or not integration.enabled:
         raise ValidationError("Google Meet integration is not enabled")
@@ -113,7 +139,6 @@ async def create_meeting(
     if integration.attendance_sync_enabled:
         space_config["attendanceReportGenerationType"] = "GENERATE_REPORT"
 
-    attendee_emails = await repository.list_student_emails(payload.class_id)
     lecturer_email = await repository.get_user_email(lecturer_user_id)
     if not lecturer_email:
         raise ValidationError("The lecturer account could not be found")
@@ -161,6 +186,8 @@ async def create_meeting(
             "start_time": payload.start_time,
             "end_time": payload.end_time,
             "timezone": class_.timezone,
+            "provider": "google",
+            "join_uri": space["meetingUri"],
             "google_space_name": space["name"],
             "google_meeting_uri": space["meetingUri"],
             "google_meeting_code": space.get("meetingCode", ""),
@@ -185,6 +212,13 @@ async def update_meeting(
     meeting, class_, course, attendee_count = row
     if meeting.status != "scheduled":
         raise ValidationError("Only scheduled meetings can be edited")
+
+    if meeting.provider == "zoom":
+        meeting = await repository.update(
+            meeting, await zoom_service.update_zoom_meeting(db, meeting, payload)
+        )
+        await notification_service.notify_meeting_change(db, meeting, class_, course, "updated")
+        return _meeting_item((meeting, class_, course, attendee_count))
 
     attendee_emails = await repository.list_student_emails(meeting.class_id)
     lecturer_email = await repository.get_user_email(lecturer_user_id)
@@ -271,6 +305,15 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, lecturer_user_id: in
         return _meeting_item(row)
     if meeting.status == "completed":
         raise ValidationError("Completed meetings cannot be cancelled")
+
+    if meeting.provider == "zoom":
+        await zoom_service.cancel_zoom_meeting(db, meeting)
+        meeting = await repository.update(
+            meeting,
+            {"status": "cancelled", "processing_status": "cancelled", "processing_error": None},
+        )
+        await notification_service.notify_meeting_change(db, meeting, class_, course, "cancelled")
+        return _meeting_item((meeting, class_, course, attendee_count))
 
     integration = await IntegrationRepository(db).get_google_settings()
     calendar_status = "disabled"

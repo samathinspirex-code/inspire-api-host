@@ -14,6 +14,10 @@ class OnlineMeeting(Base):
             name="ck_lms_online_meetings_status",
         ),
         CheckConstraint(
+            "provider IN ('google', 'zoom')",
+            name="ck_lms_online_meetings_provider",
+        ),
+        CheckConstraint(
             "calendar_sync_status IN ('synced', 'disabled', 'failed')",
             name="ck_lms_online_meetings_calendar_sync",
         ),
@@ -35,9 +39,17 @@ class OnlineMeeting(Base):
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     timezone: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="scheduled")
-    google_space_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    google_meeting_uri: Mapped[str] = mapped_column(Text, nullable=False)
-    google_meeting_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False, default="google")
+    join_uri: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    provider_meeting_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_meeting_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    zoom_host_connection_id: Mapped[int | None] = mapped_column(nullable=True)
+    zoom_passcode_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_status: Mapped[str] = mapped_column(String(30), nullable=False, default="not_applicable")
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_space_name: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    google_meeting_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_meeting_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     google_calendar_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     google_calendar_event_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     calendar_sync_status: Mapped[str] = mapped_column(String(20), nullable=False)

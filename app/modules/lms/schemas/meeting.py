@@ -13,6 +13,7 @@ class MeetingCreate(BaseModel):
     description: str | None = Field(None, max_length=5000)
     start_time: datetime
     end_time: datetime
+    provider: Literal["google", "zoom"] = "google"
 
     @model_validator(mode="after")
     def validate_schedule(self):
@@ -51,8 +52,13 @@ class MeetingItem(BaseModel):
     end_time: datetime
     timezone: str
     status: MeetingStatus
-    google_meeting_uri: str
-    google_meeting_code: str
+    provider: Literal["google", "zoom"] = "google"
+    join_uri: str
+    provider_meeting_id: str | None = None
+    processing_status: str = "not_applicable"
+    processing_error: str | None = None
+    google_meeting_uri: str | None = None
+    google_meeting_code: str | None = None
     google_calendar_event_uri: str | None
     calendar_sync_status: CalendarSyncStatus
     calendar_sync_error: str | None

@@ -241,7 +241,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
                 label = "now" if offset == 0 else ("24 hours" if offset == 1440 else "15 minutes")
                 title = f"Join online class now: {meeting.title}" if offset == 0 else f"Online class in {label}: {meeting.title}"
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
-                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{course.code} · {class_.name} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", meeting.google_meeting_uri if offset == 0 else f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset == 0 else "important", now, True)
+                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{course.code} · {class_.name} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", (f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings" if meeting.provider == "zoom" else meeting.google_meeting_uri) if offset == 0 else f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset == 0 else "important", now, True)
     await db.commit(); return created, published
 
 
@@ -286,6 +286,13 @@ async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> Notif
         await vimeo_service.refresh_pending_learning_item_thumbnails(db)
     except Exception:
         # Thumbnail processing must never delay notification delivery.
+        pass
+    try:
+        from app.modules.lms import zoom_service
+
+        await zoom_service.process_jobs(db)
+    except Exception:
+        # Zoom reports and recordings can remain pending until the next worker cycle.
         pass
     created, published = await generate_reminders(db, now)
     sent, failed = await deliver_pending_emails(db, now)

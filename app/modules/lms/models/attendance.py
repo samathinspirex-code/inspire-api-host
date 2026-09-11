@@ -24,6 +24,7 @@ class AttendanceSession(Base):
         ForeignKey("lms_classes.class_id", ondelete="CASCADE"), nullable=False
     )
     google_conference_record_name: Mapped[str | None] = mapped_column(String(255))
+    provider_reference: Mapped[str | None] = mapped_column(String(255))
     actual_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     threshold_percentage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=50)
@@ -44,7 +45,7 @@ class AttendanceRecord(Base):
         CheckConstraint("status IN ('present', 'absent')", name="ck_lms_attendance_record_status"),
         CheckConstraint("attended_seconds >= 0", name="ck_lms_attendance_duration"),
         CheckConstraint("attendance_percentage BETWEEN 0 AND 100", name="ck_lms_attendance_percentage"),
-        CheckConstraint("source IN ('google_meet', 'manual_override')", name="ck_lms_attendance_source"),
+        CheckConstraint("source IN ('google_meet', 'zoom', 'manual_override')", name="ck_lms_attendance_source"),
         UniqueConstraint("attendance_session_id", "student_user_id", name="uq_lms_attendance_record_student"),
         Index("idx_lms_attendance_records_student", "student_user_id"),
         Index("idx_lms_attendance_records_status", "status"),

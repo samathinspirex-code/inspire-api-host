@@ -27,6 +27,9 @@ class LmsLearningItem(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    origin: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    ai_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    quiz_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

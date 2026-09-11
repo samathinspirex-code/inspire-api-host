@@ -56,6 +56,9 @@ class LearningItemResponse(BaseModel):
     download_allowed: bool = True
     is_accessible: bool = True
     item_locked_reason: str | None = None
+    origin: str = "manual"
+    ai_eligible: bool = True
+    quiz_eligible: bool = True
 
 
 class LearningItemReorderRequest(BaseModel):

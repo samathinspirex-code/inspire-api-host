@@ -39,6 +39,7 @@ class ClassItem(BaseModel):
     course_id: int
     course_code: str
     course_title: str
+    cover_image_url: str | None = None
     program_title: str
     code: str
     name: str

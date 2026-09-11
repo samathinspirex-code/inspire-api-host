@@ -17,6 +17,10 @@ class LmsClass(Base):
     course_id: Mapped[int] = mapped_column(
         ForeignKey("lms_courses.course_id", ondelete="RESTRICT"), nullable=False
     )
+    # The database foreign key is installed by the academic architecture
+    # migration. Keep the ORM column mapped so class enrolments can resolve
+    # the authoritative CMS Course and its Study Mode.
+    academic_course_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

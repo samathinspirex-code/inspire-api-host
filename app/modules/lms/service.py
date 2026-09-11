@@ -87,7 +87,6 @@ ROLE_NAVIGATION = {
     ],
     "STUDENT": [
         ("profile", "My Profile", "user"),
-        ("my-courses", "My Courses", "book"),
         ("my-classes", "My Classes", "video"),
         ("meetings", "Online Classes", "camera"),
         ("assignments", "Assignments", "file"),
@@ -206,20 +205,29 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
     # Every course receives a dedicated, non-required Practice Test section.
     from app.modules.lms.exam_service import ensure_practice_test_section
     await ensure_practice_test_section(db, course.course_id, user_id)
+    # A staff member can hold both an admin role and a lecturer profile.  Give
+    # lecturer-creators immediate access even when they create the reusable
+    # Course page from the shared Admin/Super Admin catalogue.
+    people_repo = PeopleRepository(db)
+    assignment_repo = AssignmentRepository(db)
+    if (
+        await people_repo.get_lecturer_profile(user_id) is not None
+        and await assignment_repo.get_course_lecturer(course.course_id, user_id) is None
+    ):
+        await assignment_repo.assign_course_lecturer(course.course_id, user_id, user_id)
     return _to_course_item(course, programme.title, programme.code)
 
 
 async def create_lecturer_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
     """Create a draft course and give its creating lecturer immediate ownership."""
     course = await create_course(db, payload.model_copy(update={"status": "draft"}), user_id)
-    try:
-        await AssignmentRepository(db).assign_course_lecturer(course.course_id, user_id, user_id)
-    except Exception:
-        # Avoid leaving a course that the lecturer cannot reach if their profile is invalid.
+    if await AssignmentRepository(db).get_course_lecturer(course.course_id, user_id) is None:
+        # This endpoint is also available to admins.  Only a genuine lecturer
+        # profile can own a Course page as a lecturer.
         stored = await CourseRepository(db).get(course.course_id)
         if stored is not None:
             await CourseRepository(db).delete(stored)
-        raise
+        raise ValidationError("Create a lecturer profile before creating a lecturer-owned Course page")
     return course
 
 
