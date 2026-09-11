@@ -639,6 +639,34 @@ async def list_academic_classes(db: AsyncSession):
     """)))
 
 
+async def list_lms_course_study_options(db: AsyncSession, source_course_id: int):
+    """Return the authoritative study options linked to a reusable LMS Course page."""
+    course = (await db.execute(text("""
+        SELECT lc.course_id, ac.course_id AS academic_course_id, ac.title AS academic_course_title
+        FROM lms_courses lc
+        LEFT JOIN academic_courses ac ON ac.legacy_program_id=lc.program_id
+        WHERE lc.course_id=:course_id AND COALESCE(lc.is_class_copy, FALSE)=FALSE
+        ORDER BY ac.course_id
+        LIMIT 1
+    """), {"course_id": source_course_id})).mappings().first()
+    if course is None:
+        raise NotFoundError("The selected reusable Course page was not found")
+    if course["academic_course_id"] is None:
+        raise ValidationError("Link this Course page to a CMS academic course before creating a class")
+    options = _rows(await db.execute(text("""
+        SELECT study_option_id, course_id, study_mode, price, duration, is_enabled
+        FROM academic_course_study_options
+        WHERE course_id=:course_id
+        ORDER BY CASE study_mode WHEN 'full_time' THEN 1 ELSE 2 END
+    """), {"course_id": course["academic_course_id"]}))
+    return {
+        "course_id": source_course_id,
+        "academic_course_id": course["academic_course_id"],
+        "academic_course_title": course["academic_course_title"],
+        "study_options": options,
+    }
+
+
 async def staff_can_manage_course(db: AsyncSession, course_id: int, user: CurrentUser) -> bool:
     if any(role in user.access for role in ("SUPER_ADMIN", "ADMIN")):
         return True
@@ -924,6 +952,21 @@ async def create_class_from_template(db: AsyncSession, payload: ClassFromTemplat
         "user_id": user_id, "academic_course_id": template["course_id"], "study_mode": template["study_mode"],
         "version_id": template["template_version_id"], "snapshot": _json(template["snapshot"]),
     })
+    # Keep legacy template-based creation consistent with the current visual
+    # Course-page flow: a lecturer who creates an intake immediately appears in
+    # both its template access list and its independent class teaching team.
+    await db.execute(text("""
+        INSERT INTO lms_course_lecturers (course_id, lecturer_user_id, assigned_by)
+        SELECT :course_id, :user_id, :user_id
+        WHERE EXISTS (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+        ON CONFLICT DO NOTHING
+    """), {"course_id": template["source_lms_course_id"], "user_id": user_id})
+    await db.execute(text("""
+        INSERT INTO lms_class_lecturers (class_id, lecturer_user_id, assigned_by)
+        SELECT :class_id, :user_id, :user_id
+        WHERE EXISTS (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+        ON CONFLICT DO NOTHING
+    """), {"class_id": class_id, "user_id": user_id})
     await db.commit()
     return {"class_id": class_id, "course_id": template["course_id"], "study_mode": template["study_mode"], "source_template_version_id": template["template_version_id"], "snapshot": template["snapshot"]}
 

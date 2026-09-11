@@ -193,6 +193,12 @@ async def academic_classes(user: CurrentUser = Depends(require_academic_staff), 
     return {"data": classes}
 
 
+@lms_router.get("/courses/{course_id}/study-options", response_model=AcademicResponse)
+async def lms_course_study_options(course_id: int, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    await service.ensure_staff_can_manage_lms_course(db, course_id, user)
+    return {"data": await service.list_lms_course_study_options(db, course_id)}
+
+
 @lms_router.delete("/courses/{course_id}", response_model=AcademicResponse)
 async def archive_course_workspace(course_id: int, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
     return {"data": await service.archive_master_course_workspace(db, course_id, user)}

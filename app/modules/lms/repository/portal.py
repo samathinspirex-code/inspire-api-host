@@ -143,6 +143,7 @@ class PortalRepository:
                 LmsClass,
                 LmsCourse.code,
                 LmsCourse.title,
+                LmsCourse.cover_image_url,
                 Program.title,
                 people_count,
             )

@@ -202,3 +202,26 @@ validation failures return row errors with `imported: 0`. Both operations requir
 an LMS admin role. `POST /api/v1/lms/students/import/excel?preview=true|false`
 accepts the raw `.xlsx` body with the standard Excel MIME type and uses the same
 atomic importer. Responses are not cached. No database migration is required.
+
+## Zoom meetings, attendance and recordings
+
+Apply the Zoom tables and meeting-provider upgrade before enabling Zoom:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\apply_zoom_integration_migration.py
+```
+
+Configure `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_REDIRECT_URI`,
+`ZOOM_TOKEN_ENCRYPTION_KEY`, `ZOOM_MEETING_SDK_KEY`,
+`ZOOM_MEETING_SDK_SECRET`, and `ZOOM_WEBHOOK_SECRET`. The encryption key must be
+a Fernet key and must remain stable after host accounts are connected. Configure
+the Zoom event subscription endpoint as
+`https://<api-host>/api/v1/lms/integrations/zoom/webhook` and subscribe to
+`meeting.ended` and `recording.completed`.
+
+In LMS Settings, enable Zoom and connect up to two licensed host accounts. Each
+host can be limited to one or two concurrent meetings. The existing notification
+worker also processes the durable Zoom attendance and recording jobs. Completed
+cloud recordings are downloaded server-side, uploaded to Vimeo, and published in
+the class-copy Course under `Recordings · <class code>` with AI question creation
+disabled.

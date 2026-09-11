@@ -12,6 +12,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "http://localhost:4174",
+        "http://127.0.0.1:4174",
         "https://lms-ui-amber.vercel.app",
     ]
 
@@ -53,6 +55,14 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/lms/integrations/google/callback"
     GOOGLE_TOKEN_ENCRYPTION_KEY: str = ""
     GOOGLE_OAUTH_STATE_EXPIRE_MINUTES: int = 10
+    ZOOM_CLIENT_ID: str = ""
+    ZOOM_CLIENT_SECRET: str = ""
+    ZOOM_REDIRECT_URI: str = "http://localhost:8000/api/v1/lms/integrations/zoom/callback"
+    ZOOM_WEBHOOK_SECRET: str = ""
+    ZOOM_TOKEN_ENCRYPTION_KEY: str = ""
+    ZOOM_MEETING_SDK_KEY: str = ""
+    ZOOM_MEETING_SDK_SECRET: str = ""
+    ZOOM_OAUTH_STATE_EXPIRE_MINUTES: int = 10
     LMS_UI_URL: str = "http://localhost:5174"
     CMS_UI_URL: str = "http://localhost:5173"
 

@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -33,6 +33,7 @@ from app.modules.lms import profile_service
 from app.modules.lms import analytics_service
 from app.modules.lms import dashboard_service
 from app.modules.lms import vimeo_service
+from app.modules.lms import zoom_service
 from app.modules.lms.schemas.dashboard import AdminDashboardResponse, StudentPopulationResponse
 from app.modules.cms import media_service
 from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
@@ -209,6 +210,13 @@ async def get_student_population(
 
 def _google_ui_redirect(status: str, message: str = "", view: str = "meetings") -> str:
     params = {"view": view, "google": status}
+    if message:
+        params["message"] = message
+    return f"{settings.LMS_UI_URL.rstrip('/')}?{urlencode(params)}"
+
+
+def _zoom_ui_redirect(status: str, message: str = "") -> str:
+    params = {"view": "settings", "zoom": status}
     if message:
         params["message"] = message
     return f"{settings.LMS_UI_URL.rstrip('/')}?{urlencode(params)}"
@@ -741,6 +749,88 @@ async def google_oauth_callback(
         return RedirectResponse(_google_ui_redirect("error", exc.message))
 
 
+@router.get("/integrations/zoom")
+async def get_zoom_integration(
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_service.get_settings(db)
+
+
+@router.put("/integrations/zoom")
+async def update_zoom_integration(
+    payload: dict,
+    current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_service.update_settings(db, payload, current_user.user_id)
+
+
+@router.post("/integrations/zoom/connect")
+async def connect_zoom_host(
+    current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"authorization_url": await zoom_service.begin_connection(db, current_user.user_id)}
+
+
+@router.patch("/integrations/zoom/hosts/{connection_id}")
+async def update_zoom_host(
+    connection_id: int,
+    payload: dict,
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_service.update_host(
+        db, connection_id, int(payload.get("capacity", 1)), bool(payload.get("enabled", True))
+    )
+
+
+@router.delete("/integrations/zoom/hosts/{connection_id}", status_code=204)
+async def remove_zoom_host(
+    connection_id: int,
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await zoom_service.remove_host(db, connection_id)
+
+
+@router.get("/integrations/zoom/callback", include_in_schema=False)
+async def zoom_oauth_callback(
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    if error:
+        return RedirectResponse(_zoom_ui_redirect("cancelled", "Zoom account connection was cancelled."))
+    if not code or not state:
+        return RedirectResponse(_zoom_ui_redirect("error", "Zoom did not return a valid authorization response."))
+    try:
+        email = await zoom_service.complete_connection(db, code, state)
+        return RedirectResponse(_zoom_ui_redirect("connected", f"Connected {email} successfully."))
+    except APIError as exc:
+        return RedirectResponse(_zoom_ui_redirect("error", exc.message))
+
+
+@router.post("/integrations/zoom/webhook", include_in_schema=False)
+async def zoom_webhook(request: Request, db: AsyncSession = Depends(get_db)) -> JSONResponse:
+    body = await request.body()
+    payload = await request.json()
+    if payload.get("event") == "endpoint.url_validation":
+        plain = str(payload.get("payload", {}).get("plainToken") or "")
+        encrypted = zoom_service.webhook_validation_token(plain)
+        return JSONResponse({"plainToken": plain, "encryptedToken": encrypted})
+    if not zoom_service.verify_webhook(
+        request.headers.get("x-zm-request-timestamp", ""),
+        body,
+        request.headers.get("x-zm-signature", ""),
+    ):
+        raise ForbiddenError("Invalid Zoom webhook signature")
+    await zoom_service.receive_webhook(db, payload)
+    return JSONResponse({"received": True})
+
+
 @router.get("/my/courses", response_model=PortalCourseListResponse)
 async def list_my_courses(
     current_user: CurrentUser = Depends(portal_access), db: AsyncSession = Depends(get_db)
@@ -1237,6 +1327,24 @@ async def cancel_online_meeting(
     db: AsyncSession = Depends(get_db),
 ) -> MeetingItem:
     return await meeting_service.cancel_meeting(db, meeting_id, current_user.user_id)
+
+
+@router.post("/meetings/{meeting_id}/zoom/join")
+async def get_zoom_join_config(
+    meeting_id: int,
+    current_user: CurrentUser = Depends(meeting_view_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    role = service.resolve_role(current_user.access)
+    return await zoom_service.join_config(db, meeting_id, current_user.user_id, role)
+
+
+@router.post("/integrations/zoom/jobs/dispatch")
+async def dispatch_zoom_jobs(
+    _current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_service.process_jobs(db)
 
 
 @router.post(

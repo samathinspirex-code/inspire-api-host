@@ -38,12 +38,13 @@ def _course_item(row, role: str) -> PortalCourseItem:
 
 
 def _class_item(row, role: str) -> PortalClassItem:
-    class_, course_code, course_title, program_title, people_count = row
+    class_, course_code, course_title, cover_image_url, program_title, people_count = row
     return PortalClassItem(
         class_id=class_.class_id,
         course_id=class_.course_id,
         course_code=course_code,
         course_title=course_title,
+        cover_image_url=cover_image_url,
         program_title=program_title,
         code=class_.code,
         name=class_.name,

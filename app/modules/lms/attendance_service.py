@@ -7,7 +7,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
-from app.modules.lms import integration_service
+from app.modules.lms import integration_service, zoom_service
 from app.modules.lms.repository import AttendanceRepository, IntegrationRepository, MeetingRepository
 from app.modules.lms.schemas import (
     AttendanceRecordItem,
@@ -231,6 +231,12 @@ async def sync_meeting_attendance(
         raise ValidationError("Cancelled meetings do not have attendance")
     if meeting.end_time > datetime.now(timezone.utc):
         raise ValidationError("Attendance can be synchronized after the scheduled meeting end time")
+
+    if meeting.provider == "zoom":
+        await zoom_service.sync_attendance(db, meeting_id, lecturer_user_id)
+        repository = AttendanceRepository(db)
+        context = await repository.get_session_context(meeting_id)
+        return await _session_item(repository, context)
 
     integration = await IntegrationRepository(db).get_google_settings()
     if integration is None or not integration.enabled or not integration.attendance_sync_enabled:

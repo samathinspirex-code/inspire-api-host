@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +16,8 @@ class NewsEventRepository:
         status: Optional[str] = None,
         kind: Optional[str] = None,
         category: Optional[str] = None,
-    ) -> list[Any]:
-        filters: list[Any] = []
+    ) -> List[Any]:
+        filters: List[Any] = []
         if search:
             pattern = f"%{search}%"
             filters.append(or_(NewsEvent.title.ilike(pattern), NewsEvent.excerpt.ilike(pattern), NewsEvent.author.ilike(pattern)))
@@ -34,7 +34,7 @@ class NewsEventRepository:
         stmt = select(func.count()).select_from(select(NewsEvent).where(*where).subquery())
         return (await self.db.execute(stmt)).scalar_one()
 
-    async def list(self, page: int, size: int, **filters: Optional[str]) -> list[NewsEvent]:
+    async def list(self, page: int, size: int, **filters: Optional[str]) -> List[NewsEvent]:
         where = self._filters(**filters)
         stmt = (
             select(NewsEvent)
@@ -47,7 +47,7 @@ class NewsEventRepository:
 
     async def list_published(
         self, limit: int, kind: Optional[str] = None, category: Optional[str] = None
-    ) -> list[NewsEvent]:
+    ) -> List[NewsEvent]:
         where = self._filters(status="Published", kind=kind, category=category)
         stmt = (
             select(NewsEvent)
