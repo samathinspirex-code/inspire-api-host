@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     AUTHENTICATOR_LOCK_MINUTES: int = 5
     AUTHENTICATOR_IP_RATE_LIMIT_PER_HOUR: int = 30
 
+    # Optional CMS-only shared sign-in. Keep the real values in the deployed
+    # environment; ordinary users continue to use their Authenticator code.
+    CMS_COMMON_LOGIN_EMAIL: str = ""
+    CMS_COMMON_LOGIN_CODE: str = ""
+
     MAILJET_API_KEY: str = ""
     MAILJET_SECRET_KEY: str = ""
     MAILJET_FROM_EMAIL: str = ""
