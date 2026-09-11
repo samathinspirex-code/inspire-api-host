@@ -1,5 +1,6 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from app.core.errors import APIError
 from app.modules.auth import service
@@ -68,6 +69,38 @@ class AuthenticatorSecurityTests(unittest.TestCase):
                 with self.assertRaises(APIError) as raised:
                     service._validate_student_password(password, "learner@example.test")
                 self.assertEqual(raised.exception.code, "PASSWORD_WEAK")
+
+
+class CmsCommonLoginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_common_credential_issues_cms_user_tokens(self):
+        user = SimpleNamespace(
+            user_id=12,
+            email="shared@example.test",
+            is_active=True,
+            access_levels=[SimpleNamespace(access_level=SimpleNamespace(access_key="CMS", is_active=True))],
+        )
+        repository = SimpleNamespace(get_by_email=AsyncMock(return_value=user))
+        with (
+            patch.object(service.settings, "CMS_COMMON_LOGIN_EMAIL", "shared@example.test"),
+            patch.object(service.settings, "CMS_COMMON_LOGIN_CODE", "654321"),
+            patch.object(service, "UserRepository", return_value=repository),
+            patch.object(service, "_issue_tokens", AsyncMock(return_value="tokens")) as issue,
+        ):
+            result = await service.verify_cms_login(None, "SHARED@example.test", "654321", "local")
+
+        self.assertEqual(result, "tokens")
+        issue.assert_awaited_once_with(None, user)
+
+    async def test_regular_cms_account_keeps_authenticator_login(self):
+        with (
+            patch.object(service.settings, "CMS_COMMON_LOGIN_EMAIL", "shared@example.test"),
+            patch.object(service.settings, "CMS_COMMON_LOGIN_CODE", "654321"),
+            patch.object(service, "verify_authenticator", AsyncMock(return_value="authenticator")) as verify,
+        ):
+            result = await service.verify_cms_login(None, "admin@example.test", "123456", "local")
+
+        self.assertEqual(result, "authenticator")
+        verify.assert_awaited_once_with(None, "admin@example.test", "123456", "local")
 
 
 if __name__ == "__main__":

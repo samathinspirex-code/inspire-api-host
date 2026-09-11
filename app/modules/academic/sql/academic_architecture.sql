@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS academic_courses (
     code VARCHAR(100) NOT NULL,
     title VARCHAR(255) NOT NULL,
     awarding_body VARCHAR(100) NOT NULL,
+    entry_requirements TEXT NOT NULL DEFAULT 'Contact admissions for entry requirements.',
+    progression_route TEXT NOT NULL DEFAULT 'Contact admissions for progression options.',
     blurb TEXT NOT NULL,
     image_url TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
@@ -64,6 +66,10 @@ CREATE TABLE IF NOT EXISTS academic_courses (
 );
 CREATE INDEX IF NOT EXISTS idx_academic_courses_school_hierarchy ON academic_courses(school_id, programme_id, level_id);
 CREATE INDEX IF NOT EXISTS idx_academic_courses_code ON academic_courses(code);
+
+ALTER TABLE academic_courses ADD COLUMN IF NOT EXISTS entry_requirements TEXT NOT NULL DEFAULT 'Contact admissions for entry requirements.';
+ALTER TABLE academic_courses ADD COLUMN IF NOT EXISTS progression_route TEXT NOT NULL DEFAULT 'Contact admissions for progression options.';
+UPDATE academic_courses SET level_id=NULL WHERE level_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS academic_course_study_options (
     study_option_id SERIAL PRIMARY KEY,
@@ -196,14 +202,13 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO academic_courses
   (course_id, legacy_program_id, programme_id, level_id, school_id, slug, code, title, awarding_body, blurb, image_url, status)
-SELECT p.program_id, p.program_id, ap.programme_id, al.level_id, s.school_id, p.slug, p.code, p.title,
+SELECT p.program_id, p.program_id, ap.programme_id, NULL, s.school_id, p.slug, p.code, p.title,
        p.awarding_body, p.blurb, p.image_url, 'active'
 FROM programs p
 JOIN academic_programmes ap ON lower(ap.name)=lower(trim(p.level))
 JOIN academic_schools s ON lower(s.name)=lower(CASE WHEN lower(trim(p.school)) LIKE 'school of %' THEN trim(p.school) ELSE 'School of ' || trim(p.school) END)
-LEFT JOIN academic_levels al ON al.code='L' || (regexp_match(p.code, '(?i)L(?:evel[[:space:]]*)?([0-9]+)'))[1]
 ON CONFLICT (legacy_program_id) DO UPDATE SET
-  programme_id=EXCLUDED.programme_id, level_id=EXCLUDED.level_id, school_id=EXCLUDED.school_id,
+  programme_id=EXCLUDED.programme_id, level_id=NULL, school_id=EXCLUDED.school_id,
   slug=EXCLUDED.slug, code=EXCLUDED.code, title=EXCLUDED.title, awarding_body=EXCLUDED.awarding_body,
   blurb=EXCLUDED.blurb, image_url=EXCLUDED.image_url, updated_at=now();
 

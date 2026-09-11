@@ -50,8 +50,8 @@ async def public_schools(db: AsyncSession = Depends(get_db)):
 
 
 @public_router.get("/catalogue/courses", response_model=AcademicResponse)
-async def public_courses(programme_id: int | None = Query(None, gt=0), level_id: int | None = Query(None, gt=0), school_id: int | None = Query(None, gt=0), db: AsyncSession = Depends(get_db)):
-    return {"data": await service.list_courses(db, programme_id, level_id, school_id, True)}
+async def public_courses(programme_id: int | None = Query(None, gt=0), school_id: int | None = Query(None, gt=0), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.list_courses(db, programme_id, school_id, True)}
 
 
 @public_router.post("/programme-enrolments", response_model=ProgrammeEnrolmentResponse, status_code=201)

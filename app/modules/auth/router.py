@@ -81,6 +81,16 @@ async def verify_authenticator(
     return await service.verify_authenticator(db, payload.email, payload.code, client_ip)
 
 
+@router.post("/auth/cms/verify", response_model=TokenResponse)
+async def verify_cms_login(
+    payload: AuthenticatorLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    return await service.verify_cms_login(db, str(payload.email), payload.code, client_ip)
+
+
 @router.post("/auth/authenticator/recovery", response_model=TokenResponse)
 async def verify_authenticator_recovery(
     payload: AuthenticatorRecoveryRequest,

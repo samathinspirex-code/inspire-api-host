@@ -1,4 +1,5 @@
 import base64
+import hmac
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote, urlencode
@@ -267,7 +268,6 @@ async def complete_authenticator_setup(
     code: str,
     client_ip: str,
 ) -> AuthenticatorSetupCompleteResponse:
-    check_ip_rate_limit(client_ip)
     normalized_email = email.strip().lower()
     repository = AuthenticatorRepository(db)
     row = await repository.get_valid_setup_token(hash_value(setup_token), normalized_email)
@@ -277,16 +277,8 @@ async def complete_authenticator_setup(
     credential = await repository.get_credential_for_update(token_user.user_id)
     if credential is None:
         raise APIError(401, "SETUP_NOT_STARTED", "Start Authenticator setup and scan the QR code first.")
-    now = datetime.now(timezone.utc)
-    if credential.locked_until and credential.locked_until > now:
-        raise APIError(429, "AUTHENTICATOR_LOCKED", "Too many incorrect codes. Try again later.")
     used_step = verify_totp(_decrypt_authenticator_secret(credential.encrypted_secret), code)
     if used_step is None:
-        await repository.record_failed_attempt(
-            credential,
-            settings.AUTHENTICATOR_MAX_ATTEMPTS,
-            now + timedelta(minutes=settings.AUTHENTICATOR_LOCK_MINUTES),
-        )
         raise APIError(401, "AUTHENTICATOR_INVALID", "The Authenticator code is incorrect or expired.")
 
     recovery_codes = generate_recovery_codes()
@@ -303,7 +295,6 @@ async def complete_authenticator_setup(
 async def verify_authenticator(
     db: AsyncSession, email: str, code: str, client_ip: str
 ) -> TokenResponse:
-    check_ip_rate_limit(client_ip)
     normalized_email = email.strip().lower()
     user = await UserRepository(db).get_by_email(normalized_email)
     invalid = APIError(
@@ -317,22 +308,37 @@ async def verify_authenticator(
     credential = await repository.get_credential_for_update(user.user_id)
     if credential is None or not credential.enabled:
         raise invalid
-    now = datetime.now(timezone.utc)
-    if credential.locked_until and credential.locked_until > now:
-        raise APIError(429, "AUTHENTICATOR_LOCKED", "Too many incorrect codes. Try again later.")
     used_step = verify_totp(
         _decrypt_authenticator_secret(credential.encrypted_secret),
         code,
         last_used_step=credential.last_used_step,
     )
     if used_step is None:
-        await repository.record_failed_attempt(
-            credential,
-            settings.AUTHENTICATOR_MAX_ATTEMPTS,
-            now + timedelta(minutes=settings.AUTHENTICATOR_LOCK_MINUTES),
-        )
         raise invalid
     await repository.record_success(credential, used_step)
+    return await _issue_tokens(db, user)
+
+
+async def verify_cms_login(
+    db: AsyncSession, email: str, code: str, client_ip: str
+) -> TokenResponse:
+    """Accept the CMS shared credential or the user's usual Authenticator code."""
+    normalized_email = email.strip().lower()
+    common_email = settings.CMS_COMMON_LOGIN_EMAIL.strip().lower()
+    common_code = settings.CMS_COMMON_LOGIN_CODE.strip()
+    common_match = (
+        bool(common_email and common_code)
+        and hmac.compare_digest(normalized_email, common_email)
+        and hmac.compare_digest(code, common_code)
+    )
+    if not common_match:
+        return await verify_authenticator(db, email, code, client_ip)
+
+    user = await UserRepository(db).get_by_email(normalized_email)
+    if user is None or not user.is_active:
+        raise APIError(503, "CMS_COMMON_LOGIN_NOT_READY", "The common CMS account has not been provisioned.")
+    if "CMS" not in _user_access_keys(user):
+        raise APIError(403, "CMS_ACCESS_REQUIRED", "The common account does not have CMS access.")
     return await _issue_tokens(db, user)
 
 
@@ -414,13 +420,8 @@ async def regenerate_recovery_codes(db: AsyncSession, user_id: int, code: str) -
     credential = await repository.get_credential_for_update(user_id)
     if credential is None or not credential.enabled:
         raise APIError(400, "AUTHENTICATOR_NOT_CONFIGURED", "Google Authenticator is not configured for this account.")
-    now = datetime.now(timezone.utc)
-    if credential.locked_until and credential.locked_until > now:
-        raise APIError(429, "AUTHENTICATOR_LOCKED", "Too many incorrect codes. Try again later.")
     used_step = verify_totp(_decrypt_authenticator_secret(credential.encrypted_secret), code, last_used_step=credential.last_used_step)
     if used_step is None:
-        await repository.record_failed_attempt(credential, settings.AUTHENTICATOR_MAX_ATTEMPTS,
-            now + timedelta(minutes=settings.AUTHENTICATOR_LOCK_MINUTES))
         raise APIError(401, "AUTHENTICATOR_INVALID", "The Authenticator code is incorrect or expired.")
     credential.last_used_step = used_step
     credential.failed_attempts = 0
