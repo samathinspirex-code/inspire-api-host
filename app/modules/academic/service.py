@@ -227,6 +227,21 @@ async def list_courses(
 
 async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int | None = None):
     values = payload.model_dump(exclude={"study_options", "topics", "outcomes", "popularity"}) | {"course_id": course_id}
+    values["slug"] = payload.slug.strip()
+    duplicate = (await db.execute(text("""
+        SELECT title FROM academic_courses
+        WHERE lower(slug)=lower(:slug) AND course_id IS DISTINCT FROM :course_id
+        UNION ALL
+        SELECT p.title FROM programs p
+        LEFT JOIN academic_courses c ON c.legacy_program_id=p.program_id
+        WHERE lower(p.slug)=lower(:slug) AND c.course_id IS DISTINCT FROM :course_id
+        LIMIT 1
+    """), values)).mappings().first()
+    if duplicate:
+        raise ConflictError(
+            f"The public URL slug '{values['slug']}' is already used by {duplicate['title']}. "
+            "Choose a different slug, such as one containing the school or programme name."
+        )
     if course_id is None:
         row = (await db.execute(text("""
             INSERT INTO academic_courses
@@ -256,10 +271,10 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         JOIN academic_schools s ON s.school_id=c.school_id WHERE c.course_id=:id
     """), {"id": course_id})).mappings().one()
     legacy_values = {
-        "slug": course["slug"], "title": course["title"], "level": course["programme_name"],
-        "school": course["school_name"], "awarding_body": course["awarding_body"],
+        "slug": course["slug"], "title": course["title"], "level": course["programme_name"][:100],
+        "school": course["school_name"][:100], "awarding_body": course["awarding_body"],
         "code": course["code"], "duration": course["duration"], "price_from": course["price_from"],
-        "image_url": course["image_url"], "blurb": course["blurb"], "image_label": course["title"],
+        "image_url": course["image_url"], "blurb": course["blurb"], "image_label": course["title"][:100],
         "popularity": payload.popularity,
     }
     if course["legacy_program_id"] is None:

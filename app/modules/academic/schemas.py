@@ -1,11 +1,12 @@
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 Status = Literal["active", "archived"]
 StudyMode = Literal["full_time", "part_time"]
+CourseContentItem = Annotated[str, Field(min_length=1, max_length=255)]
 
 
 class NamedNodeCreate(BaseModel):
@@ -44,8 +45,8 @@ class CourseCreate(BaseModel):
     image_url: str | None = None
     status: Status = "active"
     popularity: int = Field(0, ge=0, le=100)
-    topics: list[str] = Field(default_factory=list, max_length=100)
-    outcomes: list[str] = Field(default_factory=list, max_length=100)
+    topics: list[CourseContentItem] = Field(default_factory=list, max_length=100)
+    outcomes: list[CourseContentItem] = Field(default_factory=list, max_length=100)
     study_options: list[StudyOptionUpsert] = Field(default_factory=list)
 
     @model_validator(mode="after")
