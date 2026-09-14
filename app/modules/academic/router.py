@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.modules.academic import service
 from app.modules.academic.schemas import (
-    AcademicLevelCreate, AcademicResponse, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
+    AcademicLevelCreate, AcademicResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
     NamedNodeCreate, PathwayConfirmRequest, ProgrammeEnrolmentCreate,
     ProgrammeEnrolmentResponse, ProgrammeLevelUpdate, StudyOptionUpsert,
 )
@@ -212,6 +212,11 @@ async def archive_class_workspace(class_id: int, user: CurrentUser = Depends(req
 @lms_router.patch("/classes/{class_id}/status", response_model=AcademicResponse)
 async def update_class_status(class_id: int, payload: ClassStatusUpdate, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
     return {"data": await service.update_class_workspace_status(db, class_id, payload.status, user)}
+
+
+@lms_router.put("/classes/{class_id}", response_model=AcademicResponse)
+async def update_class_details(class_id: int, payload: ClassDetailsUpdate, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
+    return {"data": await service.update_class_workspace_details(db, class_id, payload, user)}
 
 
 @lms_router.post("/classes/from-course", response_model=AcademicResponse, status_code=201)

@@ -336,7 +336,7 @@ class AttendanceRepository:
         return {
             "programmes": await distinct_rows(Program.program_id, Program.code, Program.title),
             "courses": await distinct_rows(LmsCourse.course_id, LmsCourse.code, LmsCourse.title),
-            "classes": await distinct_rows(LmsClass.class_id, LmsClass.code, LmsClass.name),
+            "classes": await distinct_rows(LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.title),
             "lecturers": await distinct_rows(
                 LecturerUser.user_id,
                 LecturerProfile.staff_number,

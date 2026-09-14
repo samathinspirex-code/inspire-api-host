@@ -34,10 +34,8 @@ class CourseUpdate(CourseCreate):
     pass
 
 
-class CoursePresentationUpdate(BaseModel):
-    description: str | None = Field(None, max_length=5000)
-    takeaways: str | None = Field(None, max_length=12000)
-    cover_image_url: str | None = Field(None, max_length=5000)
+class CoursePresentationUpdate(CourseUpdate):
+    """Full reusable-course editor payload used inside the course workspace."""
 
 
 class CourseItem(BaseModel):

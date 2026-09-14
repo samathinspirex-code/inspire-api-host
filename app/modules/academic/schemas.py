@@ -1,11 +1,12 @@
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 Status = Literal["active", "archived"]
 StudyMode = Literal["full_time", "part_time"]
+CourseContentItem = Annotated[str, Field(min_length=1, max_length=255)]
 
 
 class NamedNodeCreate(BaseModel):
@@ -44,8 +45,8 @@ class CourseCreate(BaseModel):
     image_url: str | None = None
     status: Status = "active"
     popularity: int = Field(0, ge=0, le=100)
-    topics: list[str] = Field(default_factory=list, max_length=100)
-    outcomes: list[str] = Field(default_factory=list, max_length=100)
+    topics: list[CourseContentItem] = Field(default_factory=list, max_length=100)
+    outcomes: list[CourseContentItem] = Field(default_factory=list, max_length=100)
     study_options: list[StudyOptionUpsert] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -117,6 +118,7 @@ class ClassFromCourseRequest(BaseModel):
     delivery_mode: Literal["online", "hybrid", "on_site"] = "online"
     timezone: str = Field("Asia/Colombo", min_length=1, max_length=100)
     capacity: int = Field(50, ge=1, le=1000)
+    status: Literal["planned", "active"] = "planned"
 
     @model_validator(mode="after")
     def dates_are_ordered(self):
@@ -127,6 +129,25 @@ class ClassFromCourseRequest(BaseModel):
 
 class ClassStatusUpdate(BaseModel):
     status: Literal["planned", "active"]
+
+
+class ClassDetailsUpdate(BaseModel):
+    code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=5000)
+    start_date: date
+    end_date: date
+    delivery_mode: Literal["online", "hybrid", "on_site"] = "online"
+    study_mode: StudyMode
+    timezone: str = Field("Asia/Colombo", min_length=1, max_length=100)
+    capacity: int = Field(50, ge=1, le=1000)
+    status: Literal["planned", "active", "completed"] = "planned"
+
+    @model_validator(mode="after")
+    def dates_are_ordered(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
 
 
 class WorkspaceUpdate(BaseModel):

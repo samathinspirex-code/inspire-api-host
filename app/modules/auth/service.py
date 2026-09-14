@@ -26,6 +26,7 @@ from app.modules.auth.schemas import (
     AuthenticatorSetupStartResponse,
     AuthenticatorSetupTokenResponse,
     PasswordSetupCompleteRequest,
+    PasswordResetResponse,
     SsoTicketResponse,
     TokenResponse,
     UserOut,
@@ -44,7 +45,6 @@ from app.modules.auth.security import (
 )
 
 
-STUDENT_PASSWORD_ACCESS = {"LMS", "STUDENT"}
 _DUMMY_PASSWORD_HASH = hash_password("invalid-password-timing-value")
 
 
@@ -52,8 +52,8 @@ def _user_access_keys(user: User) -> list[str]:
     return [ual.access_level.access_key for ual in user.access_levels if ual.access_level.is_active]
 
 
-def _student_password_eligible(user: User) -> bool:
-    return set(_user_access_keys(user)) == STUDENT_PASSWORD_ACCESS
+def _password_eligible(user: User) -> bool:
+    return bool(set(_user_access_keys(user)) & {"CMS", "LMS", "USER_MANAGEMENT"})
 
 
 async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
@@ -125,20 +125,22 @@ def _qr_data_url(value: str) -> str:
 
 
 async def issue_authenticator_setup_token(
-    db: AsyncSession, user_id: int, created_by: int | None
+    db: AsyncSession, user_id: int, created_by: int | None,
+    reset_credentials: bool = True, expire_minutes: int | None = None,
 ) -> AuthenticatorSetupTokenResponse:
     user = await UserRepository(db).get(user_id)
     if user is None or not user.is_active:
         raise APIError(404, "NOT_FOUND", "Active user not found.")
     plain_token = generate_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.AUTHENTICATOR_SETUP_EXPIRE_MINUTES
+        minutes=expire_minutes if expire_minutes is not None else settings.AUTHENTICATOR_SETUP_EXPIRE_MINUTES
     )
     await AuthenticatorRepository(db).create_setup_token(
         user.user_id,
         hash_value(plain_token),
         expires_at,
         created_by,
+        reset_credentials=reset_credentials,
     )
     await RefreshTokenRepository(db).revoke_all_for_user(user.user_id)
     return AuthenticatorSetupTokenResponse(
@@ -163,22 +165,79 @@ def build_authenticator_setup_url(
     return f"{base_url.rstrip('/')}?{query}"
 
 
-def build_password_setup_url(email: str, setup_token: str) -> str:
+def build_password_setup_url(email: str, setup_token: str, setup_ui_url: str | None = None) -> str:
     query = urlencode({"setup": "password", "email": email, "token": setup_token})
-    return f"{settings.LMS_UI_URL.rstrip('/')}?{query}"
+    return f"{(setup_ui_url or settings.LMS_UI_URL).rstrip('/')}?{query}"
+
+
+async def request_password_reset(
+    db: AsyncSession, email: str, portal: str, client_ip: str
+) -> PasswordResetResponse:
+    """Email a reset link without disclosing whether the account exists."""
+    check_ip_rate_limit(client_ip)
+    generic = PasswordResetResponse(
+        message="If an active account matches that email, a password reset link has been sent."
+    )
+    normalized_email = email.strip().lower()
+    user = await UserRepository(db).get_by_email(normalized_email)
+    if user is None or not user.is_active or not _password_eligible(user):
+        return generic
+    access = set(_user_access_keys(user))
+    portal_allowed = (
+        portal == "lms" and "LMS" in access
+    ) or (
+        portal == "cms" and bool(access & {"CMS", "USER_MANAGEMENT"})
+    )
+    if not portal_allowed:
+        return generic
+
+    setup = await issue_authenticator_setup_token(
+        db, user.user_id, None, reset_credentials=False,
+        expire_minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES,
+    )
+    portal_name = portal.upper()
+    portal_url = settings.LMS_UI_URL if portal == "lms" else settings.CMS_UI_URL
+    setup_url = build_password_setup_url(setup.email, setup.setup_token, portal_url)
+    link = AuthenticatorPortalLink(
+        portal=portal_name,
+        setup_url=setup_url,
+        login_url=portal_url.rstrip("/"),
+    )
+    await send_authenticator_invitation(
+        setup.email,
+        user.full_name or setup.email,
+        setup_url,
+        setup.expires_at,
+        f"password-reset-{user.user_id}-{hash_value(setup.setup_token)[:20]}",
+        portal_links=[link],
+        setup_method="password_reset",
+    )
+    return generic
 
 
 async def issue_student_password_setup_invitation(
-    db: AsyncSession, user_id: int, created_by: int | None
+    db: AsyncSession, user_id: int, created_by: int | None, setup_ui_url: str | None = None
 ) -> AuthenticatorInvitationResponse:
     user = await UserRepository(db).get(user_id)
-    if user is None or not _student_password_eligible(user):
-        raise APIError(403, "PASSWORD_NOT_ALLOWED", "Password sign-in is available only to student-only LMS accounts.")
+    if user is None or not _password_eligible(user):
+        raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account does not have CMS or LMS access.")
     setup = await issue_authenticator_setup_token(db, user_id, created_by)
-    setup_url = build_password_setup_url(setup.email, setup.setup_token)
+    access = set(_user_access_keys(user))
+    destinations = []
+    if access & {"CMS", "USER_MANAGEMENT"}:
+        destinations.append(("CMS", settings.CMS_UI_URL))
+    if "LMS" in access:
+        destinations.append(("LMS", settings.LMS_UI_URL))
+    if not destinations:
+        destinations.append(("Inspire", setup_ui_url or settings.LMS_UI_URL))
     portal_links = [AuthenticatorPortalLink(
-        portal="LMS", setup_url=setup_url, login_url=settings.LMS_UI_URL.rstrip("/")
-    )]
+        portal=portal,
+        setup_url=build_password_setup_url(setup.email, setup.setup_token, url),
+        login_url=url.rstrip("/"),
+    ) for portal, url in destinations]
+    preferred_url = (setup_ui_url or settings.LMS_UI_URL).rstrip("/")
+    primary = next((link for link in portal_links if link.login_url == preferred_url), portal_links[0])
+    setup_url = primary.setup_url
     delivery = await send_authenticator_invitation(
         setup.email, user.full_name or setup.email, setup_url, setup.expires_at,
         f"password-setup-{user_id}-{hash_value(setup.setup_token)[:20]}",
@@ -188,7 +247,7 @@ async def issue_student_password_setup_invitation(
         **setup.model_dump(), setup_method="password", setup_url=setup_url,
         portal_links=portal_links, email_sent=delivery.sent,
         delivery_message=(
-            "Student password setup invitation sent by email."
+            "Password setup invitation sent by email."
             if delivery.sent else f"{delivery.error or 'Email delivery failed'} Copy the setup link and send it manually."
         ),
     )
@@ -361,10 +420,11 @@ async def complete_student_password_setup(
     if row is None:
         raise APIError(401, "SETUP_TOKEN_INVALID", "The password setup link is invalid or expired.")
     token, user = row
-    if not _student_password_eligible(user):
-        raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account must use Authenticator sign-in.")
+    if not _password_eligible(user):
+        raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account does not have CMS or LMS access.")
     _validate_student_password(payload.password, normalized_email)
     await PasswordRepository(db).complete_setup(token, user.user_id, hash_password(payload.password))
+    await RefreshTokenRepository(db).revoke_all_for_user(user.user_id)
     return await _issue_tokens(db, user)
 
 
@@ -375,7 +435,7 @@ async def verify_student_password(
     normalized_email = email.strip().lower()
     user = await UserRepository(db).get_by_email(normalized_email)
     invalid = APIError(401, "PASSWORD_INVALID", "The email or password is incorrect.")
-    if user is None or not user.is_active or not _student_password_eligible(user):
+    if user is None or not user.is_active or not _password_eligible(user):
         verify_password(password, _DUMMY_PASSWORD_HASH)
         raise invalid
     repository = PasswordRepository(db)

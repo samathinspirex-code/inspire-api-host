@@ -5,15 +5,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
-from app.modules.lms.models import LecturerProfile, StudentProfile
+from app.modules.lms.models import ClassStudent, LecturerProfile, StudentProfile
 
 
 class PeopleRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def list_students(self, search: str | None) -> list[tuple[User, StudentProfile]]:
-        stmt = select(User, StudentProfile).join(StudentProfile, StudentProfile.user_id == User.user_id)
+    async def list_students(self, search: str | None):
+        last_enrolled = (
+            select(func.max(ClassStudent.assigned_at))
+            .where(ClassStudent.student_user_id == User.user_id)
+            .correlate(User)
+            .scalar_subquery()
+        )
+        stmt = select(User, StudentProfile, last_enrolled).join(StudentProfile, StudentProfile.user_id == User.user_id)
         if search:
             pattern = f"%{search}%"
             stmt = stmt.where(
@@ -23,7 +29,7 @@ class PeopleRepository:
                     StudentProfile.student_number.ilike(pattern),
                 )
             )
-        return [(row[0], row[1]) for row in (await self.db.execute(stmt.order_by(User.full_name))).all()]
+        return list((await self.db.execute(stmt.order_by(last_enrolled.desc().nullslast(), User.full_name))).all())
 
     async def list_lecturers(self, search: str | None) -> list[tuple[User, LecturerProfile]]:
         stmt = select(User, LecturerProfile).join(LecturerProfile, LecturerProfile.user_id == User.user_id)

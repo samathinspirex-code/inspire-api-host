@@ -28,10 +28,10 @@ async def get_user(user_id: int, db: AsyncSession = Depends(get_db)) -> UserDeta
 
 
 @router.post(
-    "/users/{user_id}/authenticator-setup",
+    "/users/{user_id}/password-setup",
     response_model=AuthenticatorInvitationResponse,
 )
-async def create_authenticator_setup_token(
+async def create_password_setup_token(
     user_id: int,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

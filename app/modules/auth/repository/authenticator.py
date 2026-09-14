@@ -21,16 +21,10 @@ class AuthenticatorRepository:
     async def configured_user_ids(self, user_ids: list[int]) -> set[int]:
         if not user_ids:
             return set()
-        stmt = select(AuthenticatorCredential.user_id).where(
-            AuthenticatorCredential.user_id.in_(user_ids),
-            AuthenticatorCredential.enabled.is_(True),
-        )
-        configured = set((await self.db.execute(stmt)).scalars().all())
         password_stmt = select(PasswordCredential.user_id).where(
             PasswordCredential.user_id.in_(user_ids)
         )
-        configured.update((await self.db.execute(password_stmt)).scalars().all())
-        return configured
+        return set((await self.db.execute(password_stmt)).scalars().all())
 
     async def setup_statuses(
         self, user_ids: list[int]
@@ -72,6 +66,7 @@ class AuthenticatorRepository:
         token_hash: str,
         expires_at: datetime,
         created_by: int | None,
+        reset_credentials: bool = True,
     ) -> AuthenticatorSetupToken:
         await self.db.execute(
             delete(AuthenticatorSetupToken).where(
@@ -79,21 +74,20 @@ class AuthenticatorRepository:
                 AuthenticatorSetupToken.used_at.is_(None),
             )
         )
-        credential = await self.db.get(AuthenticatorCredential, user_id)
-        if credential is not None:
-            credential.enabled = False
-            credential.last_used_step = None
-            credential.failed_attempts = 0
-            credential.locked_until = None
-        await self.db.execute(
-            delete(AuthenticatorRecoveryCode).where(AuthenticatorRecoveryCode.user_id == user_id)
-        )
-        # Issuing a new credential invitation is an administrator reset. Revoke
-        # any existing student password immediately so the old credential cannot
-        # remain usable while the single-use setup link is outstanding.
-        await self.db.execute(
-            delete(PasswordCredential).where(PasswordCredential.user_id == user_id)
-        )
+        if reset_credentials:
+            credential = await self.db.get(AuthenticatorCredential, user_id)
+            if credential is not None:
+                credential.enabled = False
+                credential.last_used_step = None
+                credential.failed_attempts = 0
+                credential.locked_until = None
+            await self.db.execute(
+                delete(AuthenticatorRecoveryCode).where(AuthenticatorRecoveryCode.user_id == user_id)
+            )
+            # Administrator resets invalidate the old credential immediately.
+            await self.db.execute(
+                delete(PasswordCredential).where(PasswordCredential.user_id == user_id)
+            )
         item = AuthenticatorSetupToken(
             user_id=user_id,
             token_hash=token_hash,

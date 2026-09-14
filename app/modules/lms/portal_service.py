@@ -1,8 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError
+from app.core.errors import ConflictError, NotFoundError
+from app.modules.cms.models import Program
 from app.modules.lms.assignment_service import _lecturer_item, _student_item
-from app.modules.lms.repository import AssignmentRepository, ModuleRepository, PortalRepository
+from app.modules.lms.repository import AssignmentRepository, CourseRepository, ModuleRepository, PortalRepository
 from app.modules.lms.schemas import (
     CoursePresentationUpdate,
     ModuleItem,
@@ -109,11 +110,20 @@ async def update_my_course_presentation(
     if row is None:
         raise NotFoundError("This course is not assigned to your lecturer profile")
     course = row[0]
-    course.description = payload.description.strip() if payload.description else None
-    course.takeaways = payload.takeaways.strip() if payload.takeaways else None
-    course.cover_image_url = payload.cover_image_url.strip() if payload.cover_image_url else None
-    await db.commit()
-    await db.refresh(course)
+    if await db.get(Program, payload.program_id) is None:
+        raise NotFoundError(f"Programme {payload.program_id} not found")
+    code = payload.code.strip().upper()
+    repository = CourseRepository(db)
+    if await repository.get_by_code(code, exclude_course_id=course_id) is not None:
+        raise ConflictError(f"Course code '{code}' is already in use")
+    await repository.update(course, {
+        **payload.model_dump(),
+        "code": code,
+        "title": payload.title.strip(),
+        "description": payload.description.strip() if payload.description else None,
+        "takeaways": payload.takeaways.strip() if payload.takeaways else None,
+        "cover_image_url": payload.cover_image_url.strip() if payload.cover_image_url else None,
+    })
     return await get_my_course(db, course_id, user_id, role)
 
 

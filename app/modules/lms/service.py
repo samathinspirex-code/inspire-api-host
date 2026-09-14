@@ -413,6 +413,12 @@ async def create_class(db: AsyncSession, payload: ClassCreate, user_id: int) -> 
             "created_by": user_id,
         }
     )
+    if await PeopleRepository(db).get_lecturer_profile(user_id) is not None:
+        assignments = AssignmentRepository(db)
+        if await assignments.get_course_lecturer(class_.course_id, user_id) is None:
+            await assignments.assign_course_lecturer(class_.course_id, user_id, user_id)
+        if await assignments.get_class_lecturer(class_.class_id, user_id) is None:
+            await assignments.assign_class_lecturer(class_.class_id, user_id, user_id)
     course, program_title, _program_code = course_row
     return _to_class_item(class_, course.code, course.title, program_title)
 
@@ -460,6 +466,7 @@ def _student_item(
     profile,
     authenticator_status: str = "not_invited",
     invitation_expires_at=None,
+    last_class_enrolled_at=None,
 ) -> StudentItem:
     return StudentItem(
         user_id=user.user_id,
@@ -471,6 +478,7 @@ def _student_item(
         notes=profile.notes,
         is_active=user.is_active,
         created_at=user.created_at,
+        last_class_enrolled_at=last_class_enrolled_at,
         authenticator_status=authenticator_status,
         authenticator_invitation_expires_at=invitation_expires_at,
     )
@@ -506,12 +514,12 @@ def _clean_optional(value: str | None) -> str | None:
 async def list_students(db: AsyncSession, search: str | None) -> StudentListResponse:
     rows = await PeopleRepository(db).list_students(search)
     statuses = await AuthenticatorRepository(db).setup_statuses(
-        [user.user_id for user, _profile in rows]
+        [user.user_id for user, _profile, _last_enrolled_at in rows]
     )
     return StudentListResponse(
         data=[
-            _student_item(user, profile, *statuses[user.user_id])
-            for user, profile in rows
+            _student_item(user, profile, *statuses[user.user_id], last_enrolled_at)
+            for user, profile, last_enrolled_at in rows
         ]
     )
 
@@ -651,15 +659,7 @@ async def send_person_authenticator_invitation(
     user = await PeopleRepository(db).get_user(user_id)
     if user is None or not user.is_active:
         raise NotFoundError(f"Active LMS user {user_id} not found")
-    access = {
-        item.access_level.access_key
-        for item in user.access_levels
-        if item.access_level.is_active
-    }
+    access = {item.access_level.access_key for item in user.access_levels if item.access_level.is_active}
     if not ({"STUDENT", "LECTURER"} & access):
         raise NotFoundError(f"Student or lecturer {user_id} not found")
-    if access == {"LMS", "STUDENT"}:
-        return await auth_service.issue_student_password_setup_invitation(
-            db, user_id, created_by
-        )
-    return await auth_service.issue_authenticator_setup_invitation(db, user_id, created_by)
+    return await auth_service.issue_student_password_setup_invitation(db, user_id, created_by)

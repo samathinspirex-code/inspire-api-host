@@ -31,6 +31,7 @@ class StudentItem(BaseModel):
     notes: str | None
     is_active: bool
     created_at: datetime
+    last_class_enrolled_at: datetime | None = None
     authenticator_status: Literal[
         "not_invited", "invitation_sent", "invitation_expired", "configured"
     ] = "not_invited"

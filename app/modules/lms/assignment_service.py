@@ -170,12 +170,58 @@ async def assign_class_student(db: AsyncSession, class_id: int, user_id: int, as
     return _student_item(user, profile, relation, "assigned")
 
 
+async def assign_class_students_bulk(
+    db: AsyncSession, class_id: int, user_ids: list[int], assigned_by: int
+) -> AssignmentListResponse:
+    unique_user_ids = list(dict.fromkeys(user_ids))
+    class_ = await ClassRepository(db).get_for_update(class_id)
+    if class_ is None:
+        raise NotFoundError(f"Class {class_id} not found")
+    repo = AssignmentRepository(db)
+    existing_ids = {
+        user_id for user_id in unique_user_ids
+        if await repo.get_class_student(class_id, user_id) is not None
+    }
+    new_user_ids = [user_id for user_id in unique_user_ids if user_id not in existing_ids]
+    if await repo.count_class_students(class_id) + len(new_user_ids) > class_.capacity:
+        raise ConflictError("The selected students exceed this class capacity")
+    people = PeopleRepository(db)
+    for user_id in new_user_ids:
+        user = await people.get_user(user_id)
+        profile = await people.get_student_profile(user_id)
+        if user is None or profile is None:
+            raise NotFoundError(f"Student {user_id} not found")
+        if not user.is_active:
+            raise ValidationError(f"{user.full_name or user.email} is inactive and cannot be assigned")
+    for user_id in new_user_ids:
+        await assign_class_student(db, class_id, user_id, assigned_by)
+    return await list_class_students(db, class_id)
+
+
 async def remove_class_student(db: AsyncSession, class_id: int, user_id: int) -> None:
     repo = AssignmentRepository(db)
     relation = await repo.get_class_student(class_id, user_id)
     if relation is None:
         raise NotFoundError("Class student assignment not found")
+    class_ = await ClassRepository(db).get(class_id)
     await repo.remove(relation)
+    if class_ is not None:
+        still_assigned = await db.scalar(text("""
+            SELECT 1 FROM lms_class_students cs
+            JOIN lms_classes cl ON cl.class_id=cs.class_id
+            WHERE cs.student_user_id=:user_id AND cl.course_id=:course_id
+            LIMIT 1
+        """), {"user_id": user_id, "course_id": class_.course_id})
+        if not still_assigned:
+            await db.execute(text("""
+                UPDATE lms_course_enrollments SET status='withdrawn', updated_at=now()
+                WHERE course_id=:course_id AND student_user_id=:user_id
+            """), {"course_id": class_.course_id, "user_id": user_id})
+        await db.execute(text("""
+            DELETE FROM academic_course_enrolments
+            WHERE class_id=:class_id AND student_user_id=:user_id
+        """), {"class_id": class_id, "user_id": user_id})
+        await db.commit()
 
 
 async def list_class_lecturers(db: AsyncSession, class_id: int) -> AssignmentListResponse:
