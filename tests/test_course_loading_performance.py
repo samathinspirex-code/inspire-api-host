@@ -57,6 +57,10 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
             for sid in range(20, 70):
                 db.add(User(user_id=sid, email=f"student{sid}@example.test"))
                 db.add(CourseEnrollment(course_id=1, student_user_id=sid, status="enrolled"))
+            now = datetime.now(timezone.utc)
+            db.add(LmsClass(class_id=1, course_id=1, code="C1-INTAKE", name="Course 1 intake",
+                            start_date=now.date(), end_date=(now + timedelta(days=90)).date()))
+            db.add(ClassStudent(class_id=1, student_user_id=20))
             db.add(CourseEnrollment(course_id=1, student_user_id=99, status="withdrawn"))
             db.add(CourseEnrollment(course_id=2, student_user_id=99, status="enrolled"))
             for mid in range(1, 13):
@@ -69,7 +73,6 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
             for sid in [20, 99]:
                 for iid in range(1, 16):
                     db.add(LmsLearningProgress(learning_item_id=iid, student_user_id=sid, completion_percent=50, is_completed=False))
-            now = datetime.now(timezone.utc)
             for did in range(1, 206):
                 db.add(LmsCourseDiscussion(discussion_id=did, course_id=1, author_user_id=10 if did % 2 else 20,
                                           message=f"Message {did}", created_at=now + timedelta(seconds=did)))

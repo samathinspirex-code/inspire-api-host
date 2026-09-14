@@ -555,11 +555,11 @@ async def get_attendance_report_options(
             for item in rows["programmes"]
         ],
         courses=[
-            AttendanceReportOption(value=item[0], label=f"{item[1]} · {item[2]}")
+            AttendanceReportOption(value=item[0], label=f"{item[2]} · {item[1]}")
             for item in rows["courses"]
         ],
         classes=[
-            AttendanceReportOption(value=item[0], label=f"{item[1]} · {item[2]}")
+            AttendanceReportOption(value=item[0], label=f"{item[3]} → {item[2]} · {item[1]}")
             for item in rows["classes"]
         ],
         lecturers=[

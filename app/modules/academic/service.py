@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.academic.schemas import (
     AcademicLevelCreate,
+    ClassDetailsUpdate,
     ClassFromCourseRequest,
     ClassFromTemplateRequest,
     CourseCreate,
@@ -185,6 +186,41 @@ async def update_class_workspace_status(db: AsyncSession, class_id: int, status:
     await db.execute(text("UPDATE lms_classes SET status=:status, updated_at=now() WHERE class_id=:id"), {"id": class_id, "status": status})
     await db.commit()
     return {"class_id": class_id, "status": status}
+
+
+async def update_class_workspace_details(db: AsyncSession, class_id: int, payload: ClassDetailsUpdate, user: CurrentUser):
+    """Update an intake without changing its copied course, enrolments, or tracking history."""
+    class_row = (await db.execute(text("""
+        SELECT class_id, status FROM lms_classes WHERE class_id=:id
+    """), {"id": class_id})).mappings().first()
+    if class_row is None:
+        raise NotFoundError(f"Class {class_id} not found")
+    if not await user_can_access_class(db, class_id, user):
+        raise ValidationError("You are not assigned to this class")
+    if class_row["status"] == "cancelled":
+        raise ValidationError("A removed class cannot be edited")
+    code = payload.code.strip().upper()
+    duplicate = await db.scalar(text("""
+        SELECT 1 FROM lms_classes
+        WHERE class_id <> :class_id AND lower(code)=lower(:code)
+    """), {"class_id": class_id, "code": code})
+    if duplicate:
+        raise ConflictError(f"Class code '{code}' is already in use")
+    await db.execute(text("""
+        UPDATE lms_classes
+        SET code=:code, name=:name, description=:description,
+            start_date=:start_date, end_date=:end_date,
+            delivery_mode=:delivery_mode, study_mode=:study_mode,
+            timezone=:timezone, capacity=:capacity, status=:status, updated_at=now()
+        WHERE class_id=:class_id
+    """), {
+        **payload.model_dump(), "class_id": class_id, "code": code,
+        "name": payload.name.strip(),
+        "description": payload.description.strip() if payload.description else None,
+    })
+    await db.commit()
+    classes = await list_academic_classes(db)
+    return next(item for item in classes if item["class_id"] == class_id)
 
 
 async def list_courses(
@@ -620,7 +656,9 @@ async def list_academic_classes(db: AsyncSession):
           cl.delivery_mode, cl.timezone, cl.capacity, cl.status, cl.academic_course_id AS academic_course_id,
           cl.course_id AS course_id, lc.source_master_course_id AS source_course_id,
           cl.study_mode, cl.source_template_version_id, cl.last_synced_version_id,
-          c.code AS course_code, c.title AS course_title, p.name AS programme_name,
+          lc.code AS course_code, lc.title AS course_title,
+          c.code AS catalogue_course_code, c.title AS catalogue_course_title,
+          c.awarding_body, p.name AS programme_name,
           s.name AS school_name,
           (SELECT count(*) FROM lms_class_students cs WHERE cs.class_id=cl.class_id) AS student_count
         FROM lms_classes cl
@@ -636,10 +674,14 @@ async def list_academic_classes(db: AsyncSession):
 async def list_lms_course_study_options(db: AsyncSession, source_course_id: int):
     """Return catalogue destinations available to a reusable LMS Course page."""
     course = (await db.execute(text("""
-        SELECT lc.course_id, ac.course_id AS academic_course_id, ac.title AS academic_course_title,
-               ac.programme_id
+        SELECT lc.course_id, lc.title AS template_course_title,
+               ac.course_id AS academic_course_id, ac.title AS academic_course_title,
+               ac.awarding_body, ac.programme_id, p.name AS programme_name,
+               ac.school_id, s.name AS school_name
         FROM lms_courses lc
         LEFT JOIN academic_courses ac ON ac.legacy_program_id=lc.program_id
+        LEFT JOIN academic_programmes p ON p.programme_id=ac.programme_id
+        LEFT JOIN academic_schools s ON s.school_id=ac.school_id
         WHERE lc.course_id=:course_id AND COALESCE(lc.is_class_copy, FALSE)=FALSE
         ORDER BY ac.course_id
         LIMIT 1
@@ -671,8 +713,14 @@ async def list_lms_course_study_options(db: AsyncSession, source_course_id: int)
     options = destinations.get(course["academic_course_id"], {}).get("study_options", [])
     return {
         "course_id": source_course_id,
+        "template_course_title": course["template_course_title"],
         "academic_course_id": course["academic_course_id"],
         "academic_course_title": course["academic_course_title"],
+        "awarding_body": course["awarding_body"],
+        "school_id": course["school_id"],
+        "school_name": course["school_name"],
+        "programme_id": course["programme_id"],
+        "programme_name": course["programme_name"],
         "study_options": options,
         "academic_courses": list(destinations.values()),
     }
@@ -776,7 +824,7 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
           (course_id, code, name, description, start_date, end_date, delivery_mode, timezone,
            capacity, status, created_by, academic_course_id, study_mode, content_snapshot)
         VALUES (:course_id, :code, :name, :description, :start_date, :end_date, :delivery_mode,
-                :timezone, :capacity, 'planned', :user_id, :academic_course_id, :study_mode,
+                :timezone, :capacity, :status, :user_id, :academic_course_id, :study_mode,
                 '{"sections":[]}'::jsonb)
         RETURNING class_id
     """), {**payload.model_dump(exclude={"source_course_id", "academic_course_id"}), "course_id": copied_course_id,

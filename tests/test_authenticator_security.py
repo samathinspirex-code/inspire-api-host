@@ -51,16 +51,18 @@ class AuthenticatorSecurityTests(unittest.TestCase):
         self.assertFalse(verify_password("WrongStudentPass123", first))
         self.assertFalse(verify_password("SafeStudentPass123", "not-a-valid-hash"))
 
-    def test_password_access_is_limited_to_student_only_lms_accounts(self):
+    def test_password_access_is_available_to_cms_and_lms_accounts(self):
         def user_with(*keys):
             return SimpleNamespace(access_levels=[
                 SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
                 for key in keys
             ])
 
-        self.assertTrue(service._student_password_eligible(user_with("LMS", "STUDENT")))
-        self.assertFalse(service._student_password_eligible(user_with("LMS", "STUDENT", "ADMIN")))
-        self.assertFalse(service._student_password_eligible(user_with("LMS", "LECTURER")))
+        self.assertTrue(service._password_eligible(user_with("LMS", "STUDENT")))
+        self.assertTrue(service._password_eligible(user_with("LMS", "STUDENT", "ADMIN")))
+        self.assertTrue(service._password_eligible(user_with("LMS", "LECTURER")))
+        self.assertTrue(service._password_eligible(user_with("CMS", "ADMIN")))
+        self.assertFalse(service._password_eligible(user_with("ADMIN")))
 
     def test_student_password_strength_rules(self):
         service._validate_student_password("SafeStudentPass123", "learner@example.test")

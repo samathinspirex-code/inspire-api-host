@@ -7,6 +7,10 @@ class AssignPersonRequest(BaseModel):
     user_id: int = Field(..., gt=0)
 
 
+class BulkAssignPeopleRequest(BaseModel):
+    user_ids: list[int] = Field(..., min_length=1, max_length=250)
+
+
 class AssignmentPersonItem(BaseModel):
     user_id: int
     full_name: str

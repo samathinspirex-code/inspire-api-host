@@ -28,8 +28,9 @@ def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime, 
     safe_name = html.escape(full_name or "Inspire user")
     safe_expiry = html.escape(expires_at.strftime("%d %B %Y at %H:%M UTC"))
     links = _portal_links(setup_url, portal_links)
-    password_setup = setup_method == "password"
-    setup_label = "Set up password" if password_setup else "Set up Authenticator"
+    password_setup = setup_method in {"password", "password_reset"}
+    password_reset = setup_method == "password_reset"
+    setup_label = "Reset password" if password_reset else "Set up password" if password_setup else "Set up Authenticator"
     setup_buttons = "".join(
         f'<p><a href="{html.escape(link.setup_url, quote=True)}">{setup_label} — {html.escape(link.portal)}</a></p>'
         for link in links
@@ -41,8 +42,8 @@ def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime, 
     guidance = ("Choose either portal link to set up Authenticator once. The same Authenticator works for both CMS and LMS. "
                 "Completing setup uses the shared invitation, so both setup links become invalid.") if len(links) > 1 else "Use the secure link below to connect Google Authenticator."
     if password_setup:
-        guidance = "Use the secure link below to create your student password. The link works once and must not be shared."
-    account_setup = "password setup" if password_setup else "Authenticator setup"
+        guidance = "Use the secure link below to create your password. The link works once and must not be shared."
+    account_setup = "password reset" if password_reset else "password setup" if password_setup else "Authenticator setup"
     login_method = "email address and password" if password_setup else "Authenticator code"
     return f"""
     <div style="font-family:Arial,sans-serif;line-height:1.55;color:#202124;max-width:560px">
@@ -60,17 +61,18 @@ def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime, 
 
 def build_invitation_text(full_name: str, setup_url: str, expires_at: datetime, portal_links: list[AuthenticatorPortalLink] | None = None, setup_method: str = "authenticator") -> str:
     links = _portal_links(setup_url, portal_links)
-    password_setup = setup_method == "password"
-    setup_label = "Set up password" if password_setup else "Set up Authenticator"
+    password_setup = setup_method in {"password", "password_reset"}
+    password_reset = setup_method == "password_reset"
+    setup_label = "Reset password" if password_reset else "Set up password" if password_setup else "Set up Authenticator"
     setup_lines = "\n".join(f"{link.portal} — {setup_label}: {link.setup_url}" for link in links)
     logins = "\n".join(f"Open {link.portal}: {link.login_url}" for link in links if link.login_url)
     login_section = f"After setup, sign in using your Authenticator code:\n{logins}\n\n" if logins else ""
     guidance = ("Choose either portal link to set up Authenticator once. The same Authenticator works for both CMS and LMS. "
                 "Completing setup uses the shared invitation, so both setup links become invalid.") if len(links) > 1 else "Use the secure link below to connect Google Authenticator."
     if password_setup:
-        guidance = "Use the secure link below to create your student password. The link works once and must not be shared."
+        guidance = "Use the secure link below to create your password. The link works once and must not be shared."
         login_section = f"After setup, sign in using your email address and password:\n{logins}\n\n" if logins else ""
-    account_setup = "password setup" if password_setup else "Authenticator setup"
+    account_setup = "password reset" if password_reset else "password setup" if password_setup else "Authenticator setup"
     return (
         f"Hello {full_name or 'Inspire user'},\n\n"
         f"Your Inspire College account is ready for {account_setup}.\n\n"
@@ -100,7 +102,7 @@ def build_mailjet_payload(
                     "Name": settings.MAILJET_FROM_NAME,
                 },
                 "To": [{"Email": to_email, "Name": full_name}],
-                "Subject": "Set up your Inspire College student password" if setup_method == "password" else settings.AUTHENTICATOR_INVITATION_SUBJECT,
+                "Subject": ("Reset your Inspire College password" if setup_method == "password_reset" else "Set up your Inspire College password") if setup_method in {"password", "password_reset"} else settings.AUTHENTICATOR_INVITATION_SUBJECT,
                 "TextPart": build_invitation_text(full_name, setup_url, expires_at, portal_links, setup_method),
                 "HTMLPart": build_invitation_html(full_name, setup_url, expires_at, portal_links, setup_method),
                 "CustomID": custom_id,

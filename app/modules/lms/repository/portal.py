@@ -35,11 +35,8 @@ class PortalRepository:
         return ClassStudent, ClassStudent.class_id == LmsClass.class_id, ClassStudent.student_user_id == user_id
 
     async def list_courses(self, user_id: int, role: str, course_id: int | None = None):
-        # Reusable Course pages are a shared staff library.  Lecturers may
-        # browse every active master page; write operations still enforce the
-        # course-manager assignment separately.
-        is_staff = role in {"SUPER_ADMIN", "ADMIN", "LECTURER"}
-        relation, join_on, access_filter = (None, None, None) if is_staff else self._course_relation(user_id, role)
+        is_manager = role in {"SUPER_ADMIN", "ADMIN"}
+        relation, join_on, access_filter = (None, None, None) if is_manager else self._course_relation(user_id, role)
         class_course = aliased(LmsCourse)
         module_count = (
             select(func.count(LmsModule.module_id))
@@ -109,10 +106,21 @@ class PortalRepository:
             .join(Program, Program.program_id == LmsCourse.program_id)
             .order_by(LmsCourse.title)
         )
-        if course_id is None and is_staff:
+        if course_id is None and role != "STUDENT":
             stmt = stmt.where(LmsCourse.is_class_copy.is_(False), LmsCourse.status != "archived")
-        if not is_staff:
+        if not is_manager:
             stmt = stmt.join(relation, join_on).where(access_filter)
+            if role == "STUDENT":
+                class_access = (
+                    select(ClassStudent.class_id)
+                    .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+                    .where(
+                        ClassStudent.student_user_id == user_id,
+                        LmsClass.course_id == LmsCourse.course_id,
+                    )
+                    .exists()
+                )
+                stmt = stmt.where(class_access)
         if course_id is not None:
             stmt = stmt.where(LmsCourse.course_id == course_id)
         return list((await self.db.execute(stmt)).all())

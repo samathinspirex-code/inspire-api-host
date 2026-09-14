@@ -52,6 +52,7 @@ from app.modules.lms.schemas import (
     ClassUpdate,
     ActiveUpdate,
     AssignPersonRequest,
+    BulkAssignPeopleRequest,
     AssignmentListResponse,
     AssignmentPersonItem,
     LecturerCreate,
@@ -148,8 +149,6 @@ from app.modules.lms.schemas import (
     NotificationReadUpdate,
     MyProfileResponse,
     MyProfileUpdate,
-    RecoveryCodesRegenerateRequest,
-    RecoveryCodesResponse,
     AnalyticsDashboardResponse,
     VimeoCourseLibraryResponse,
     VimeoUploadFinalizeRequest,
@@ -272,17 +271,6 @@ async def complete_profile_photo_upload(
 ) -> MyProfileResponse:
     return await profile_service.complete_profile_upload(
         db, asset_id, current_user.user_id, service.resolve_role(current_user.access)
-    )
-
-
-@router.post("/profile/recovery-codes", response_model=RecoveryCodesResponse)
-async def regenerate_profile_recovery_codes(
-    payload: RecoveryCodesRegenerateRequest,
-    current_user: CurrentUser = Depends(profile_access),
-    db: AsyncSession = Depends(get_db),
-) -> RecoveryCodesResponse:
-    return await profile_service.regenerate_recovery_codes(
-        db, current_user.user_id, payload.authenticator_code
     )
 
 
@@ -1796,10 +1784,10 @@ async def set_lecturer_active(
 
 
 @router.post(
-    "/users/{user_id}/authenticator-invitation",
+    "/users/{user_id}/password-invitation",
     response_model=AuthenticatorInvitationResponse,
 )
-async def send_lms_authenticator_invitation(
+async def send_lms_password_invitation(
     user_id: int,
     current_user: CurrentUser = Depends(admin_access),
     db: AsyncSession = Depends(get_db),
@@ -1884,6 +1872,16 @@ async def assign_class_student(
     db: AsyncSession = Depends(get_db),
 ) -> AssignmentPersonItem:
     return await assignment_service.assign_class_student(db, class_id, payload.user_id, current_user.user_id)
+
+
+@router.post("/classes/{class_id}/students/bulk", response_model=AssignmentListResponse, status_code=201)
+async def assign_class_students_bulk(
+    class_id: int,
+    payload: BulkAssignPeopleRequest,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentListResponse:
+    return await assignment_service.assign_class_students_bulk(db, class_id, payload.user_ids, current_user.user_id)
 
 
 @router.delete("/classes/{class_id}/students/{user_id}", status_code=204)

@@ -214,6 +214,7 @@ __all__ = [
     "StudentListResponse",
     "StudentUpdate",
     "AssignPersonRequest",
+    "BulkAssignPeopleRequest",
     "AssignmentListResponse",
     "AssignmentPersonItem",
     "PortalClassDetailResponse",
@@ -340,6 +341,7 @@ __all__ = [
 ]
 from app.modules.lms.schemas.assignment import (
     AssignPersonRequest,
+    BulkAssignPeopleRequest,
     AssignmentListResponse,
     AssignmentPersonItem,
 )

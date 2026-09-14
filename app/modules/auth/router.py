@@ -6,15 +6,11 @@ from app.modules.auth import service
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import (
     CurrentUser,
-    AuthenticatorLoginRequest,
-    AuthenticatorRecoveryRequest,
-    AuthenticatorSetupCompleteRequest,
-    AuthenticatorSetupCompleteResponse,
-    AuthenticatorSetupStartRequest,
-    AuthenticatorSetupStartResponse,
     ExchangeSsoTicketRequest,
     LogoutRequest,
     PasswordLoginRequest,
+    PasswordResetRequest,
+    PasswordResetResponse,
     PasswordSetupCompleteRequest,
     RefreshRequest,
     SsoTicketResponse,
@@ -23,6 +19,18 @@ from app.modules.auth.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
+
+
+@router.post("/auth/password/reset/request", response_model=PasswordResetResponse)
+async def request_password_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> PasswordResetResponse:
+    client_ip = request.client.host if request.client else "unknown"
+    return await service.request_password_reset(
+        db, str(payload.email), payload.portal, client_ip
+    )
 
 
 @router.post("/auth/password/setup/complete", response_model=TokenResponse)
@@ -43,64 +51,6 @@ async def verify_password(
 ) -> TokenResponse:
     client_ip = request.client.host if request.client else "unknown"
     return await service.verify_student_password(db, str(payload.email), payload.password, client_ip)
-
-
-@router.post(
-    "/auth/authenticator/setup/start",
-    response_model=AuthenticatorSetupStartResponse,
-)
-async def start_authenticator_setup(
-    payload: AuthenticatorSetupStartRequest,
-    db: AsyncSession = Depends(get_db),
-) -> AuthenticatorSetupStartResponse:
-    return await service.start_authenticator_setup(db, payload.email, payload.setup_token)
-
-
-@router.post(
-    "/auth/authenticator/setup/complete",
-    response_model=AuthenticatorSetupCompleteResponse,
-)
-async def complete_authenticator_setup(
-    payload: AuthenticatorSetupCompleteRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> AuthenticatorSetupCompleteResponse:
-    client_ip = request.client.host if request.client else "unknown"
-    return await service.complete_authenticator_setup(
-        db, payload.email, payload.setup_token, payload.code, client_ip
-    )
-
-
-@router.post("/auth/authenticator/verify", response_model=TokenResponse)
-async def verify_authenticator(
-    payload: AuthenticatorLoginRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
-    client_ip = request.client.host if request.client else "unknown"
-    return await service.verify_authenticator(db, payload.email, payload.code, client_ip)
-
-
-@router.post("/auth/cms/verify", response_model=TokenResponse)
-async def verify_cms_login(
-    payload: AuthenticatorLoginRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
-    client_ip = request.client.host if request.client else "unknown"
-    return await service.verify_cms_login(db, str(payload.email), payload.code, client_ip)
-
-
-@router.post("/auth/authenticator/recovery", response_model=TokenResponse)
-async def verify_authenticator_recovery(
-    payload: AuthenticatorRecoveryRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
-    client_ip = request.client.host if request.client else "unknown"
-    return await service.verify_recovery_code(
-        db, payload.email, payload.recovery_code, client_ip
-    )
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)

@@ -76,16 +76,7 @@ async def create_authenticator_setup_token(
     user = await UserManagementRepository(db).get(user_id)
     if user is None:
         raise NotFoundError(f"User {user_id} not found")
-    active_access = {
-        item.access_level.access_key
-        for item in user.access_levels
-        if item.access_level.is_active
-    }
-    if active_access == {"LMS", "STUDENT"}:
-        return await auth_service.issue_student_password_setup_invitation(
-            db, user_id, created_by
-        )
-    return await auth_service.issue_authenticator_setup_invitation(
+    return await auth_service.issue_student_password_setup_invitation(
         db, user_id, created_by, settings.CMS_UI_URL
     )
 

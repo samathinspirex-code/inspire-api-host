@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -23,6 +23,15 @@ class PasswordSetupCompleteRequest(BaseModel):
     email: EmailStr
     setup_token: str = Field(..., min_length=64, max_length=64)
     password: str = Field(..., min_length=12, max_length=128)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    portal: Literal["cms", "lms"]
+
+
+class PasswordResetResponse(BaseModel):
+    message: str
 
 
 class AuthenticatorSetupStartRequest(BaseModel):
