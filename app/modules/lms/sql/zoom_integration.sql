@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS lms_zoom_recordings (
 
 ALTER TABLE lms_attendance_sessions ADD COLUMN IF NOT EXISTS provider_reference VARCHAR(255);
 ALTER TABLE lms_attendance_records DROP CONSTRAINT IF EXISTS ck_lms_attendance_source;
+ALTER TABLE lms_attendance_records DROP CONSTRAINT IF EXISTS lms_attendance_records_source_check;
 ALTER TABLE lms_attendance_records ADD CONSTRAINT ck_lms_attendance_source CHECK (source IN ('google_meet','zoom','manual_override'));
 ALTER TABLE lms_learning_items ADD COLUMN IF NOT EXISTS origin VARCHAR(30) NOT NULL DEFAULT 'manual';
 ALTER TABLE lms_learning_items ADD COLUMN IF NOT EXISTS ai_eligible BOOLEAN NOT NULL DEFAULT TRUE;

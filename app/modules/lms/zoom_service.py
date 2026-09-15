@@ -58,6 +58,11 @@ def _zoom_error(response: httpx.Response) -> str:
     return detail or f"HTTP {response.status_code}"
 
 
+def _recording_download_token(payload: dict, oauth_token: str) -> str:
+    """Prefer Zoom's short-lived recording webhook token for webhook download URLs."""
+    return str(payload.get("download_token") or oauth_token)
+
+
 async def get_settings(db: AsyncSession) -> dict:
     row = (await db.execute(text("SELECT * FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     hosts = (await db.execute(text("""
@@ -406,6 +411,7 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
     from app.modules.lms import vimeo_service
     meeting=(await db.execute(text("""SELECT m.*,c.code class_code,c.course_id FROM lms_online_meetings m JOIN lms_classes c ON c.class_id=m.class_id WHERE m.meeting_id=:id"""),{"id":meeting_id})).mappings().first()
     host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":meeting["zoom_host_connection_id"]})).mappings().first(); token=await _access_token(db,dict(host))
+    download_token=_recording_download_token(payload,token)
     files=payload.get("payload",{}).get("object",{}).get("recording_files",[])
     preferred=[f for f in files if f.get("file_type")=="MP4"]
     order={"shared_screen_with_speaker_view":0,"gallery_view":1,"active_speaker":2}; preferred.sort(key=lambda f:order.get(f.get("recording_type"),9))
@@ -428,8 +434,9 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
         try:
             fd,temp=tempfile.mkstemp(suffix='.mp4'); os.close(fd)
             async with httpx.AsyncClient(timeout=None,follow_redirects=True) as client:
-                async with client.stream('GET',file['download_url'],headers={"Authorization":f"Bearer {token}"}) as response:
-                    response.raise_for_status()
+                async with client.stream('GET',file['download_url'],headers={"Authorization":f"Bearer {download_token}"}) as response:
+                    if response.is_error:
+                        raise ValidationError(f"Zoom recording download failed with HTTP {response.status_code}. Retry while the webhook download token is valid.")
                     with open(temp,'wb') as output:
                         async for chunk in response.aiter_bytes(1024*1024): output.write(chunk)
             size=os.path.getsize(temp); title=f"{meeting['title']} · {meeting['start_time'].date()}"+(f" · Part {part}" if len(preferred)>1 else "")
