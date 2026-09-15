@@ -63,6 +63,11 @@ def _recording_download_token(payload: dict, oauth_token: str) -> str:
     return str(payload.get("download_token") or oauth_token)
 
 
+def _recording_api_ref(meeting_uuid: str) -> str:
+    """Zoom requires meeting UUIDs in recording paths to be URL encoded twice."""
+    return quote(quote(str(meeting_uuid), safe=""), safe="")
+
+
 async def get_settings(db: AsyncSession) -> dict:
     row = (await db.execute(text("SELECT * FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     hosts = (await db.execute(text("""
@@ -434,11 +439,27 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
         try:
             fd,temp=tempfile.mkstemp(suffix='.mp4'); os.close(fd)
             async with httpx.AsyncClient(timeout=None,follow_redirects=True) as client:
-                async with client.stream('GET',file['download_url'],headers={"Authorization":f"Bearer {download_token}"}) as response:
-                    if response.is_error:
-                        raise ValidationError(f"Zoom recording download failed with HTTP {response.status_code}. Retry while the webhook download token is valid.")
-                    with open(temp,'wb') as output:
-                        async for chunk in response.aiter_bytes(1024*1024): output.write(chunk)
+                download_url=file['download_url']; bearer=download_token
+                async def save_download(url: str, access_token: str) -> int:
+                    async with client.stream('GET',url,headers={"Authorization":f"Bearer {access_token}"}) as response:
+                        if response.is_error:
+                            return response.status_code
+                        with open(temp,'wb') as output:
+                            async for chunk in response.aiter_bytes(1024*1024): output.write(chunk)
+                        return response.status_code
+                download_status=await save_download(download_url,bearer)
+                if download_status==401 and bearer!=token:
+                    recording_ref=_recording_api_ref(meeting["provider_meeting_uuid"] or meeting["provider_meeting_id"])
+                    refreshed=await client.get(f"{ZOOM_API}/meetings/{recording_ref}/recordings",headers={"Authorization":f"Bearer {token}"})
+                    if refreshed.is_error:
+                        raise ValidationError(f"Zoom could not refresh the expired recording link (HTTP {refreshed.status_code}).")
+                    refreshed_files=refreshed.json().get("recording_files",[])
+                    fresh=next((item for item in refreshed_files if str(item.get("id"))==str(file.get("id"))),None)
+                    if not fresh or not fresh.get("download_url"):
+                        raise ValidationError("Zoom did not return a current download link for this recording file.")
+                    download_status=await save_download(fresh["download_url"],token)
+                if download_status>=400:
+                    raise ValidationError(f"Zoom recording download failed with HTTP {download_status}. Check the connected host recording scope.")
             size=os.path.getsize(temp); title=f"{meeting['title']} · {meeting['start_time'].date()}"+(f" · Part {part}" if len(preferred)>1 else "")
             async with vimeo_service.VimeoClient() as vimeo:
                 ticket=await vimeo.create_upload(title,"Automatic Zoom class recording",size)

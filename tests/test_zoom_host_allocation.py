@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from app.modules.lms.zoom_service import _claim_host, _recording_download_token, _zak_token_url
+from app.modules.lms.zoom_service import _claim_host, _recording_api_ref, _recording_download_token, _zak_token_url
 
 
 class _Mappings:
@@ -39,6 +39,9 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_recording_download_falls_back_to_oauth_token(self):
         self.assertEqual(_recording_download_token({}, "oauth-token"), "oauth-token")
+
+    def test_recording_uuid_is_double_encoded_for_refresh(self):
+        self.assertEqual(_recording_api_ref("/abc=="), "%252Fabc%253D%253D")
 
     async def test_new_meeting_gives_nullable_exclusion_parameter_a_bigint_type(self):
         database = _Database()
