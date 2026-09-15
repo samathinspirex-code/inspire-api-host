@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -21,6 +22,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 ZOOM_API = "https://api.zoom.us/v2"
 ZOOM_AUTHORIZE = "https://zoom.us/oauth/authorize"
 ZOOM_TOKEN = "https://zoom.us/oauth/token"
+logger = logging.getLogger(__name__)
 
 
 def _fernet() -> Fernet:
@@ -492,6 +494,7 @@ async def list_class_recordings(db: AsyncSession, class_id: int, user_id: int, r
 
 async def delete_class_recording(db: AsyncSession, class_id: int, recording_id: int, user_id: int) -> None:
     from app.modules.lms import content_service
+    from app.modules.lms.repository import ContentRepository
 
     row=(await db.execute(text("""SELECT zr.*,m.class_id,c.course_id FROM lms_zoom_recordings zr
       JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id JOIN lms_classes c ON c.class_id=m.class_id
@@ -499,11 +502,15 @@ async def delete_class_recording(db: AsyncSession, class_id: int, recording_id: 
       {"recording_id":recording_id,"class_id":class_id})).mappings().first()
     if not row: raise NotFoundError("Class recording not found")
     await content_service.ensure_course_manager(db,row["course_id"],user_id)
-    if row["learning_item_id"]:
-        await content_service.delete_learning_item(db,row["learning_item_id"],user_id)
-    elif row["vimeo_video_uri"]:
-        async with vimeo_service.VimeoClient() as vimeo:
-            try: await vimeo.delete_video(row["vimeo_video_uri"])
-            except vimeo_service.VimeoPermissionError: pass
     await db.execute(text("UPDATE lms_zoom_recordings SET status='deleted',learning_item_id=NULL,updated_at=now() WHERE recording_id=:id"),{"id":recording_id})
     await db.commit()
+    video_uri=row["vimeo_video_uri"] or vimeo_service.video_uri_from_url(row["resource_url"])
+    if video_uri:
+        try:
+            async with vimeo_service.VimeoClient() as vimeo:
+                await vimeo.delete_video(video_uri)
+        except Exception:
+            logger.warning("Vimeo cleanup failed for deleted Zoom recording %s",recording_id,exc_info=True)
+    if row["learning_item_id"]:
+        item=await ContentRepository(db).get_item(row["learning_item_id"])
+        if item: await ContentRepository(db).delete_item(item)
