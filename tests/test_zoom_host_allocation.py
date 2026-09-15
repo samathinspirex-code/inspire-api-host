@@ -3,7 +3,14 @@ from datetime import datetime, timedelta, timezone
 import inspect
 from pathlib import Path
 
-from app.modules.lms.zoom_service import _claim_host, _recording_api_ref, _recording_download_token, _zak_token_url, delete_class_recording
+from app.modules.lms.zoom_service import (
+    _claim_host,
+    _preferred_recording_files,
+    _recording_api_ref,
+    _recording_download_token,
+    _zak_token_url,
+    delete_class_recording,
+)
 
 
 class _Mappings:
@@ -44,6 +51,24 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_recording_uuid_is_double_encoded_for_refresh(self):
         self.assertEqual(_recording_api_ref("/abc=="), "%252Fabc%253D%253D")
+
+    def test_only_complete_shared_screen_layout_is_published(self):
+        files = [
+            {"id": "speaker", "file_type": "MP4", "recording_type": "active_speaker", "download_url": "https://zoom/speaker"},
+            {"id": "screen", "file_type": "MP4", "recording_type": "shared_screen_with_speaker_view", "download_url": "https://zoom/screen"},
+            {"id": "gallery", "file_type": "MP4", "recording_type": "gallery_view", "download_url": "https://zoom/gallery"},
+        ]
+
+        self.assertEqual([item["id"] for item in _preferred_recording_files(files)], ["screen"])
+
+    def test_split_parts_of_preferred_layout_are_retained(self):
+        files = [
+            {"id": "part-2", "file_extension": "MP4", "recording_type": "shared_screen", "recording_start": "2026-09-15T11:00:00Z", "download_url": "https://zoom/2"},
+            {"id": "part-1", "file_extension": "MP4", "recording_type": "shared_screen", "recording_start": "2026-09-15T10:00:00Z", "download_url": "https://zoom/1"},
+            {"id": "audio", "file_type": "M4A", "recording_type": "audio_only", "download_url": "https://zoom/audio"},
+        ]
+
+        self.assertEqual([item["id"] for item in _preferred_recording_files(files)], ["part-1", "part-2"])
 
     def test_zoom_migration_moves_recordings_out_of_template_modules(self):
         migration = (Path(__file__).parents[1] / "app/modules/lms/sql/zoom_integration.sql").read_text()
