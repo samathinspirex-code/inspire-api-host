@@ -859,6 +859,28 @@ async def get_my_course_studio(
     return await content_service.get_course_studio(db, course_id, current_user.user_id, role)
 
 
+@router.get("/my/classes/{class_id}/recordings")
+async def get_my_class_recordings(
+    class_id: int,
+    current_user: CurrentUser = Depends(course_preview_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    recordings = await zoom_service.list_class_recordings(
+        db, class_id, current_user.user_id, service.resolve_role(current_user.access)
+    )
+    return {"class_id": class_id, "recordings": recordings}
+
+
+@router.delete("/my/classes/{class_id}/recordings/{recording_id}", status_code=204)
+async def delete_my_class_recording(
+    class_id: int,
+    recording_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await zoom_service.delete_class_recording(db, class_id, recording_id, current_user.user_id)
+
+
 @router.post("/studio/media/uploads", response_model=MediaUploadTicket, status_code=201)
 async def request_course_media_upload(
     payload: MediaUploadRequest,

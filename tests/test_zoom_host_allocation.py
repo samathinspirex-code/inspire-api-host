@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from app.modules.lms.zoom_service import _claim_host, _recording_api_ref, _recording_download_token, _zak_token_url
 
@@ -42,6 +43,11 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_recording_uuid_is_double_encoded_for_refresh(self):
         self.assertEqual(_recording_api_ref("/abc=="), "%252Fabc%253D%253D")
+
+    def test_zoom_migration_moves_recordings_out_of_template_modules(self):
+        migration = (Path(__file__).parents[1] / "app/modules/lms/sql/zoom_integration.sql").read_text()
+        self.assertIn("ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS resource_url", migration)
+        self.assertIn("DELETE FROM lms_modules module WHERE module.title LIKE 'Recordings", migration)
 
     async def test_new_meeting_gives_nullable_exclusion_parameter_a_bigint_type(self):
         database = _Database()

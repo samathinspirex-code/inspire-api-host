@@ -84,10 +84,29 @@ CREATE TABLE IF NOT EXISTS lms_zoom_recordings (
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   vimeo_video_uri TEXT,
   learning_item_id INT REFERENCES lms_learning_items(learning_item_id) ON DELETE SET NULL,
+  title TEXT,
+  description TEXT,
+  resource_url TEXT,
+  thumbnail_url TEXT,
+  duration_minutes INT,
   error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS resource_url TEXT;
+ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
+ALTER TABLE lms_zoom_recordings ADD COLUMN IF NOT EXISTS duration_minutes INT;
+UPDATE lms_zoom_recordings zr SET
+  title=COALESCE(zr.title,li.title),
+  description=COALESCE(zr.description,li.description),
+  resource_url=COALESCE(zr.resource_url,li.resource_url),
+  thumbnail_url=COALESCE(zr.thumbnail_url,li.thumbnail_url),
+  duration_minutes=COALESCE(zr.duration_minutes,li.duration_minutes)
+FROM lms_learning_items li WHERE zr.learning_item_id=li.learning_item_id;
+DELETE FROM lms_modules module WHERE module.title LIKE 'Recordings · %'
+  AND EXISTS (SELECT 1 FROM lms_learning_items item JOIN lms_zoom_recordings zr ON zr.learning_item_id=item.learning_item_id WHERE item.module_id=module.module_id);
 
 ALTER TABLE lms_attendance_sessions ADD COLUMN IF NOT EXISTS provider_reference VARCHAR(255);
 ALTER TABLE lms_attendance_records DROP CONSTRAINT IF EXISTS ck_lms_attendance_source;
