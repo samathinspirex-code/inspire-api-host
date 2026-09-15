@@ -422,18 +422,11 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
     order={"shared_screen_with_speaker_view":0,"gallery_view":1,"active_speaker":2}; preferred.sort(key=lambda f:order.get(f.get("recording_type"),9))
     if not preferred: return
     course=await db.get(__import__('app.modules.lms.models',fromlist=['LmsCourse']).LmsCourse,meeting["course_id"])
-    module_id=await db.scalar(text("SELECT module_id FROM lms_modules WHERE course_id=:course AND title=:title"),{"course":course.course_id,"title":f"Recordings · {meeting['class_code']}"})
-    if not module_id:
-        module_id=await db.scalar(text("""INSERT INTO lms_modules(course_id,title,description,position,status,created_by)
-          VALUES(:course,:title,'Automatically published Zoom class recordings',(SELECT COALESCE(max(position),0)+1 FROM lms_modules WHERE course_id=:course),'active',:user) RETURNING module_id"""),{"course":course.course_id,"title":f"Recordings · {meeting['class_code']}","user":meeting["lecturer_user_id"]}); await db.commit()
-    await db.execute(text("""INSERT INTO lms_module_access(module_id,scope_type,scope_id,is_unlocked,created_by)
-      VALUES(:module,'class',:class_id,TRUE,:user)
-      ON CONFLICT(module_id,scope_type,scope_id) DO UPDATE SET is_unlocked=TRUE,available_from=NULL,updated_at=now()"""),
-      {"module":module_id,"class_id":meeting["class_id"],"user":meeting["lecturer_user_id"]})
-    await db.commit()
-    module=await db.get(__import__('app.modules.lms.models',fromlist=['LmsModule']).LmsModule,module_id); folder=await vimeo_service.ensure_module_workspace(db,course,module)
+    course_folder=await vimeo_service.ensure_course_workspace(db,course)
+    async with vimeo_service.VimeoClient() as vimeo:
+        folder=await vimeo.ensure_folder(f"Recordings · {meeting['class_code']}",course_folder)
     for part,file in enumerate(preferred,1):
-        exists=await db.scalar(text("SELECT 1 FROM lms_zoom_recordings WHERE zoom_recording_file_id=:id AND status='published'"),{"id":file["id"]})
+        exists=await db.scalar(text("SELECT 1 FROM lms_zoom_recordings WHERE zoom_recording_file_id=:id AND status IN ('published','deleted')"),{"id":file["id"]})
         if exists: continue
         temp=None
         try:
@@ -469,11 +462,48 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
                         while chunk:=source.read(8*1024*1024):
                             response=await upload_client.patch(ticket.upload_link,content=chunk,headers={"Tus-Resumable":"1.0.0","Upload-Offset":str(offset),"Content-Type":"application/offset+octet-stream"}); response.raise_for_status(); offset=int(response.headers.get('Upload-Offset',offset+len(chunk)))
                 video=await vimeo.get_video(ticket.video_uri); await vimeo.add_video_to_folder(folder,ticket.video_uri)
-            resource=str(video.get('link') or ''); item_id=await db.scalar(text("""INSERT INTO lms_learning_items(module_id,item_type,title,description,resource_url,thumbnail_url,duration_minutes,position,status,is_required,origin,ai_eligible,quiz_eligible,created_by)
-              VALUES(:module,'video',:title,'Automatic Zoom class recording',:url,:thumb,:duration,(SELECT COALESCE(max(position),0)+1 FROM lms_learning_items WHERE module_id=:module),'published',FALSE,'zoom_recording',FALSE,FALSE,:user) RETURNING learning_item_id"""),
-              {"module":module_id,"title":title,"url":resource,"thumb":vimeo_service._thumbnail_url(video),"duration":max(1,round(int(video.get('duration') or 0)/60)),"user":meeting["lecturer_user_id"]})
-            await db.execute(text("""INSERT INTO lms_zoom_recordings(meeting_id,zoom_recording_file_id,recording_type,part_number,status,vimeo_video_uri,learning_item_id)
-              VALUES(:m,:file,:type,:part,'published',:vimeo,:item) ON CONFLICT(zoom_recording_file_id) DO UPDATE SET status='published',vimeo_video_uri=EXCLUDED.vimeo_video_uri,learning_item_id=EXCLUDED.learning_item_id,error=NULL"""),
-              {"m":meeting_id,"file":file["id"],"type":file.get("recording_type"),"part":part,"vimeo":ticket.video_uri,"item":item_id}); await db.commit()
+            resource=str(video.get('link') or '')
+            await db.execute(text("""INSERT INTO lms_zoom_recordings(meeting_id,zoom_recording_file_id,recording_type,part_number,status,vimeo_video_uri,title,description,resource_url,thumbnail_url,duration_minutes)
+              VALUES(:m,:file,:type,:part,'published',:vimeo,:title,'Automatic Zoom class recording',:url,:thumb,:duration)
+              ON CONFLICT(zoom_recording_file_id) DO UPDATE SET status='published',vimeo_video_uri=EXCLUDED.vimeo_video_uri,title=EXCLUDED.title,description=EXCLUDED.description,resource_url=EXCLUDED.resource_url,thumbnail_url=EXCLUDED.thumbnail_url,duration_minutes=EXCLUDED.duration_minutes,learning_item_id=NULL,error=NULL"""),
+              {"m":meeting_id,"file":file["id"],"type":file.get("recording_type"),"part":part,"vimeo":ticket.video_uri,"title":title,"url":resource,"thumb":vimeo_service._thumbnail_url(video),"duration":max(1,round(int(video.get('duration') or 0)/60))}); await db.commit()
         finally:
             if temp and os.path.exists(temp): os.unlink(temp)
+
+
+async def list_class_recordings(db: AsyncSession, class_id: int, user_id: int, role: str) -> list[dict]:
+    from app.modules.lms import content_service
+
+    class_row=(await db.execute(text("SELECT class_id,course_id FROM lms_classes WHERE class_id=:id"),{"id":class_id})).mappings().first()
+    if not class_row: raise NotFoundError(f"Class {class_id} not found")
+    if role in {"SUPER_ADMIN","ADMIN","LECTURER"}:
+        await content_service.ensure_course_manager(db,class_row["course_id"],user_id)
+    elif role=="STUDENT":
+        enrolled=await db.scalar(text("SELECT 1 FROM lms_class_students WHERE class_id=:class_id AND student_user_id=:user_id"),{"class_id":class_id,"user_id":user_id})
+        if not enrolled: raise ForbiddenError("You are not enrolled in this class")
+    else: raise ForbiddenError("This LMS role cannot view class recordings")
+    rows=(await db.execute(text("""SELECT zr.recording_id,zr.title,zr.description,zr.resource_url,zr.thumbnail_url,zr.duration_minutes,
+      zr.recording_type,zr.part_number,m.title meeting_title,m.start_time
+      FROM lms_zoom_recordings zr JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id
+      WHERE m.class_id=:class_id AND zr.status='published' AND zr.resource_url IS NOT NULL
+      ORDER BY m.start_time DESC,zr.part_number"""),{"class_id":class_id})).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def delete_class_recording(db: AsyncSession, class_id: int, recording_id: int, user_id: int) -> None:
+    from app.modules.lms import content_service
+
+    row=(await db.execute(text("""SELECT zr.*,m.class_id,c.course_id FROM lms_zoom_recordings zr
+      JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id JOIN lms_classes c ON c.class_id=m.class_id
+      WHERE zr.recording_id=:recording_id AND m.class_id=:class_id AND zr.status='published'"""),
+      {"recording_id":recording_id,"class_id":class_id})).mappings().first()
+    if not row: raise NotFoundError("Class recording not found")
+    await content_service.ensure_course_manager(db,row["course_id"],user_id)
+    if row["learning_item_id"]:
+        await content_service.delete_learning_item(db,row["learning_item_id"],user_id)
+    elif row["vimeo_video_uri"]:
+        async with vimeo_service.VimeoClient() as vimeo:
+            try: await vimeo.delete_video(row["vimeo_video_uri"])
+            except vimeo_service.VimeoPermissionError: pass
+    await db.execute(text("UPDATE lms_zoom_recordings SET status='deleted',learning_item_id=NULL,updated_at=now() WHERE recording_id=:id"),{"id":recording_id})
+    await db.commit()
