@@ -70,6 +70,42 @@ def _recording_api_ref(meeting_uuid: str) -> str:
     return quote(quote(str(meeting_uuid), safe=""), safe="")
 
 
+_RECORDING_TYPE_PRIORITY = {
+    "shared_screen_with_speaker_view(CC)": 0,
+    "shared_screen_with_speaker_view": 1,
+    "shared_screen_with_gallery_view": 2,
+    "shared_screen": 3,
+    "active_speaker": 4,
+    "gallery_view": 5,
+    "host_video": 6,
+}
+
+
+def _recording_type_priority(recording_type: str | None) -> int:
+    return _RECORDING_TYPE_PRIORITY.get(str(recording_type or ""), 99)
+
+
+def _preferred_recording_files(files: list[dict]) -> list[dict]:
+    """Return one useful Zoom video layout, retaining split parts of that layout."""
+    mp4_files = [
+        item for item in files
+        if str(item.get("file_type") or item.get("file_extension") or "").upper() == "MP4"
+        and item.get("download_url")
+        and str(item.get("status") or "completed").lower() == "completed"
+        and int(item.get("file_size") or 1) > 0
+    ]
+    if not mp4_files:
+        return []
+    selected_type = min(
+        {str(item.get("recording_type") or "") for item in mp4_files},
+        key=_recording_type_priority,
+    )
+    return sorted(
+        (item for item in mp4_files if str(item.get("recording_type") or "") == selected_type),
+        key=lambda item: (str(item.get("recording_start") or ""), str(item.get("id") or "")),
+    )
+
+
 async def get_settings(db: AsyncSession) -> dict:
     row = (await db.execute(text("SELECT * FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     hosts = (await db.execute(text("""
@@ -420,8 +456,7 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
     host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":meeting["zoom_host_connection_id"]})).mappings().first(); token=await _access_token(db,dict(host))
     download_token=_recording_download_token(payload,token)
     files=payload.get("payload",{}).get("object",{}).get("recording_files",[])
-    preferred=[f for f in files if f.get("file_type")=="MP4"]
-    order={"shared_screen_with_speaker_view":0,"gallery_view":1,"active_speaker":2}; preferred.sort(key=lambda f:order.get(f.get("recording_type"),9))
+    preferred=_preferred_recording_files(files)
     if not preferred: return
     course=await db.get(__import__('app.modules.lms.models',fromlist=['LmsCourse']).LmsCourse,meeting["course_id"])
     course_folder=await vimeo_service.ensure_course_workspace(db,course)
@@ -484,12 +519,22 @@ async def list_class_recordings(db: AsyncSession, class_id: int, user_id: int, r
         enrolled=await db.scalar(text("SELECT 1 FROM lms_class_students WHERE class_id=:class_id AND student_user_id=:user_id"),{"class_id":class_id,"user_id":user_id})
         if not enrolled: raise ForbiddenError("You are not enrolled in this class")
     else: raise ForbiddenError("This LMS role cannot view class recordings")
-    rows=(await db.execute(text("""SELECT zr.recording_id,zr.title,zr.description,zr.resource_url,zr.thumbnail_url,zr.duration_minutes,
+    rows=(await db.execute(text("""SELECT zr.recording_id,zr.meeting_id,zr.title,zr.description,zr.resource_url,zr.thumbnail_url,zr.duration_minutes,
       zr.recording_type,zr.part_number,m.title meeting_title,m.start_time
       FROM lms_zoom_recordings zr JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id
       WHERE m.class_id=:class_id AND zr.status='published' AND zr.resource_url IS NOT NULL
       ORDER BY m.start_time DESC,zr.part_number"""),{"class_id":class_id})).mappings().all()
-    return [dict(row) for row in rows]
+    preferred_types: dict[int, str] = {}
+    for row in rows:
+        meeting_id = int(row["meeting_id"])
+        recording_type = str(row["recording_type"] or "")
+        current = preferred_types.get(meeting_id)
+        if current is None or _recording_type_priority(recording_type) < _recording_type_priority(current):
+            preferred_types[meeting_id] = recording_type
+    return [
+        dict(row) for row in rows
+        if str(row["recording_type"] or "") == preferred_types[int(row["meeting_id"])]
+    ]
 
 
 async def delete_class_recording(db: AsyncSession, class_id: int, recording_id: int, user_id: int) -> None:
