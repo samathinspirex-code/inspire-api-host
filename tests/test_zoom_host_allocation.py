@@ -10,6 +10,7 @@ from app.modules.lms.zoom_service import (
     _recording_download_token,
     _zak_token_url,
     delete_class_recording,
+    receive_webhook,
 )
 
 
@@ -31,6 +32,22 @@ class _Database:
         self.sql = str(statement)
         self.parameters = parameters
         return _Result()
+
+
+class _WebhookDatabase:
+    def __init__(self):
+        self.statements = []
+        self.commits = 0
+
+    async def scalar(self, statement, parameters):
+        return 7
+
+    async def execute(self, statement, parameters):
+        self.statements.append((str(statement), parameters))
+        return _Result()
+
+    async def commit(self):
+        self.commits += 1
 
 
 class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
@@ -88,6 +105,20 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(host["connection_id"], 1)
         self.assertIsNone(database.parameters["exclude_id"])
         self.assertIn("CAST(:exclude_id AS BIGINT)", database.sql)
+
+    async def test_meeting_ended_marks_complete_before_attendance_processing(self):
+        database = _WebhookDatabase()
+
+        await receive_webhook(database, {
+            "event": "meeting.ended",
+            "payload": {"object": {"id": "123456", "uuid": "meeting-uuid"}},
+        })
+
+        self.assertIn("SET status='completed'", database.statements[0][0])
+        self.assertIn("attendance_pending", database.statements[0][0])
+        self.assertIn("INSERT INTO lms_zoom_jobs", database.statements[1][0])
+        self.assertEqual(database.statements[1][1]["kind"], "attendance")
+        self.assertEqual(database.commits, 1)
 
 
 if __name__ == "__main__":

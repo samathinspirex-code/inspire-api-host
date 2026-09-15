@@ -382,8 +382,18 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
     local=await db.scalar(text("SELECT meeting_id FROM lms_online_meetings WHERE provider='zoom' AND provider_meeting_id=:id ORDER BY meeting_id DESC LIMIT 1"),{"id":meeting_id})
     if not local: return
     kinds=[]
-    if name=="meeting.ended": kinds.append("attendance")
-    if name=="recording.completed": kinds.append("recording")
+    if name=="meeting.ended":
+        # The meeting lifecycle must not wait for Zoom's participant report.
+        # That report can take several minutes and its retry job is independent.
+        await db.execute(text("""UPDATE lms_online_meetings
+          SET status='completed',processing_status='attendance_pending',processing_error=NULL
+          WHERE meeting_id=:id AND status='scheduled'"""),{"id":local})
+        kinds.append("attendance")
+    if name=="recording.completed":
+        # A recording-completed event is also a safe fallback when Zoom did not
+        # deliver meeting.ended. Do not overwrite the attendance job status.
+        await db.execute(text("UPDATE lms_online_meetings SET status='completed' WHERE meeting_id=:id AND status='scheduled'"),{"id":local})
+        kinds.append("recording")
     for kind in kinds:
         key=f"{name}:{obj.get('uuid') or meeting_id}:{kind}"
         await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
