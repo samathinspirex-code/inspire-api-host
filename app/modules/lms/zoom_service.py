@@ -174,7 +174,7 @@ async def _claim_host(db: AsyncSession, lecturer_id: int, start: datetime, end: 
         AND prior.lecturer_user_id=:lecturer) THEN 0 ELSE 1 END AS preference,
         (SELECT count(*) FROM lms_online_meetings m WHERE m.zoom_host_connection_id=h.connection_id
           AND m.provider='zoom' AND m.status='scheduled' AND m.start_time<:end_time AND m.end_time>:start_time
-          AND (:exclude_id IS NULL OR m.meeting_id<>:exclude_id)) AS concurrent
+          AND (CAST(:exclude_id AS BIGINT) IS NULL OR m.meeting_id<>CAST(:exclude_id AS BIGINT))) AS concurrent
       FROM lms_zoom_host_connections h WHERE h.enabled=TRUE ORDER BY preference,h.connection_id FOR UPDATE OF h
     """), {"lecturer":lecturer_id,"start_time":start,"end_time":end,"exclude_id":exclude_meeting})).mappings().all()
     host=next((dict(row) for row in rows if row["concurrent"] < row["capacity"]),None)
