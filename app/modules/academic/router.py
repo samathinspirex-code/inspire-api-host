@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.modules.academic import service
 from app.modules.academic.schemas import (
-    AcademicLevelCreate, AcademicResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
+    AcademicLevelCreate, AcademicResponse, AdmissionApplicationCreate, AdmissionApplicationResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
     NamedNodeCreate, PathwayConfirmRequest, ProgrammeEnrolmentCreate,
     ProgrammeEnrolmentResponse, ProgrammeLevelUpdate, StudyOptionUpsert,
 )
@@ -57,6 +57,11 @@ async def public_courses(programme_id: int | None = Query(None, gt=0), school_id
 @public_router.post("/programme-enrolments", response_model=ProgrammeEnrolmentResponse, status_code=201)
 async def programme_enrolment(payload: ProgrammeEnrolmentCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_programme_enrolment(db, payload)
+
+
+@public_router.post("/admission-applications", response_model=AdmissionApplicationResponse, status_code=201)
+async def admission_application(payload: AdmissionApplicationCreate, db: AsyncSession = Depends(get_db)):
+    return await service.create_admission_lead(db, payload)
 
 
 @cms_router.get("/{resource}", response_model=AcademicResponse)
@@ -153,6 +158,11 @@ async def study_option(course_id: int, study_mode: str, payload: StudyOptionUpse
 @cms_router.get("/enrolments/programmes", response_model=AcademicResponse)
 async def enrolments(status: str | None = None, db: AsyncSession = Depends(get_db)):
     return {"data": await service.list_programme_enrolments(db, status)}
+
+
+@cms_router.get("/crm/leads", response_model=AcademicResponse)
+async def crm_leads(status: str | None = None, db: AsyncSession = Depends(get_db)):
+    return {"data": await service.list_admission_leads(db, status)}
 
 
 @cms_router.get("/analytics/summary", response_model=AcademicResponse)

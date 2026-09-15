@@ -19,6 +19,8 @@ from app.modules.cms.schemas.media_asset import (
 )
 
 ALLOWED_MEDIA_TYPES = {
+    "video/mp4": ("video", ".mp4"),
+    "video/webm": ("video", ".webm"),
     "image/jpeg": ("image", ".jpg"),
     "image/png": ("image", ".png"),
     "image/webp": ("image", ".webp"),
@@ -68,8 +70,10 @@ def _asset_response(row: MediaAsset) -> MediaAssetResponse:
 async def request_upload(db: AsyncSession, payload: MediaUploadRequest, user_id: int) -> MediaUploadTicket:
     media = ALLOWED_MEDIA_TYPES.get(payload.content_type.lower())
     if media is None:
-        raise ValidationError("Only JPG, PNG, WebP, GIF, and PDF files are supported")
+        raise ValidationError("Only JPG, PNG, WebP, GIF, PDF, MP4, and WebM files are supported")
     kind, extension = media
+    if kind != "video" and payload.size_bytes > 52_428_800:
+        raise ValidationError("Images and documents must be 50 MB or smaller")
     existing_name = await db.scalar(
         select(MediaAsset.media_asset_id).where(func.lower(MediaAsset.name) == payload.name.lower())
     )

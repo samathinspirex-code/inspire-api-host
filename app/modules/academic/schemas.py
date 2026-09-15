@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
@@ -69,6 +70,30 @@ class ProgrammeEnrolmentCreate(BaseModel):
     preferred_school_id: int | None = Field(None, gt=0)
     preferred_course_id: int | None = Field(None, gt=0)
     preferred_study_mode: StudyMode | None = None
+
+
+class AdmissionResultDocument(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: Literal["application/pdf", "image/jpeg", "image/png"]
+    size_bytes: int = Field(..., gt=0, le=10_485_760)
+    data_base64: str = Field(..., min_length=4, max_length=14_100_000)
+
+
+class AdmissionApplicationCreate(BaseModel):
+    submission_id: UUID
+    full_name: str = Field(..., min_length=2, max_length=255)
+    email: EmailStr
+    phone: str = Field(..., min_length=5, max_length=50)
+    highest_qualification: str = Field(..., min_length=2, max_length=120)
+    programme_id: int = Field(..., gt=0)
+    preferred_course_id: int | None = Field(None, gt=0)
+    result_document: AdmissionResultDocument | None = None
+
+
+class AdmissionApplicationResponse(BaseModel):
+    lead_id: int
+    status: str
+    message: str
 
 
 class PathwayConfirmRequest(BaseModel):

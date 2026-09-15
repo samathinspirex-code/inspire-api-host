@@ -1,6 +1,12 @@
+import asyncio
+import base64
+import binascii
 import json
+import re
 from datetime import date
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.academic.schemas import (
     AcademicLevelCreate,
+    AdmissionApplicationCreate,
     ClassDetailsUpdate,
     ClassFromCourseRequest,
     ClassFromTemplateRequest,
@@ -21,6 +28,8 @@ from app.modules.academic.schemas import (
 )
 from app.modules.auth import service as auth_service
 from app.modules.auth.schemas import CurrentUser
+from app.core.config import settings
+from app.modules.cms import media_service
 
 
 RESOURCE_TABLES = {
@@ -32,6 +41,98 @@ RESOURCE_TABLES = {
 
 def _rows(result) -> list[dict[str, Any]]:
     return [dict(row) for row in result.mappings().all()]
+
+
+async def _store_admission_document(payload, submission_id: str) -> str:
+    if not settings.MEDIA_BUCKET:
+        raise ValidationError("Result document storage is not configured. Continue without a document or contact admissions.")
+    try:
+        content = base64.b64decode(payload.data_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValidationError("The result document could not be read") from exc
+    if len(content) != payload.size_bytes or len(content) > 10_485_760:
+        raise ValidationError("The result document size is invalid")
+    extension = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png"}[payload.content_type]
+    safe_stem = re.sub(r"[^a-z0-9]+", "-", Path(payload.filename).stem.lower()).strip("-")[:70] or "results"
+    key = f"admissions/results/{submission_id}/{uuid4().hex}-{safe_stem}{extension}"
+    try:
+        await asyncio.to_thread(
+            media_service._client().put_object,
+            Bucket=settings.MEDIA_BUCKET,
+            Key=key,
+            Body=content,
+            ContentType=payload.content_type,
+            ServerSideEncryption="AES256",
+        )
+    except Exception as exc:
+        raise ValidationError("The result document could not be stored securely. Continue without it or try again.") from exc
+    return key
+
+
+async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationCreate):
+    submission_id = str(payload.submission_id)
+    existing = (await db.execute(text("SELECT lead_id, status FROM crm_admission_leads WHERE submission_id=:submission_id"), {"submission_id": submission_id})).mappings().first()
+    if existing:
+        return {"lead_id": existing["lead_id"], "status": existing["status"], "message": "Your application is already on our admissions list."}
+    if not await db.scalar(text("SELECT 1 FROM academic_programmes WHERE programme_id=:id AND status='active'"), {"id": payload.programme_id}):
+        raise ValidationError("The selected programme is not available")
+    if payload.preferred_course_id is not None:
+        valid_course = await db.scalar(text("""
+            SELECT 1 FROM academic_courses
+            WHERE course_id=:course_id AND programme_id=:programme_id AND status='active'
+        """), {"course_id": payload.preferred_course_id, "programme_id": payload.programme_id})
+        if not valid_course:
+            raise ValidationError("The selected course is not part of this programme")
+    document_key = None
+    if payload.result_document:
+        document_key = await _store_admission_document(payload.result_document, submission_id)
+    document = payload.result_document
+    try:
+        lead_id = await db.scalar(text("""
+            INSERT INTO crm_admission_leads
+              (submission_id, full_name, email, phone, highest_qualification, programme_id,
+               preferred_course_id, result_document_key, result_document_name,
+               result_document_content_type, status, source)
+            VALUES (:submission_id, :full_name, :email, :phone, :highest_qualification, :programme_id,
+                    :preferred_course_id, :document_key, :document_name, :document_content_type,
+                    'new_inquiry', 'website_admissions')
+            RETURNING lead_id
+        """), {
+            "submission_id": submission_id,
+            "full_name": payload.full_name.strip(),
+            "email": str(payload.email).strip().lower(),
+            "phone": payload.phone.strip(),
+            "highest_qualification": payload.highest_qualification.strip(),
+            "programme_id": payload.programme_id,
+            "preferred_course_id": payload.preferred_course_id,
+            "document_key": document_key,
+            "document_name": document.filename if document else None,
+            "document_content_type": document.content_type if document else None,
+        })
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        if document_key:
+            try:
+                await asyncio.to_thread(media_service._client().delete_object, Bucket=settings.MEDIA_BUCKET, Key=document_key)
+            except Exception:
+                pass
+        raise
+    return {"lead_id": lead_id, "status": "new_inquiry", "message": "Your application was received. An advisor will contact you within one business day."}
+
+
+async def list_admission_leads(db: AsyncSession, status: str | None = None):
+    rows = _rows(await db.execute(text("""
+        SELECT l.lead_id, l.full_name, l.email, l.phone, l.highest_qualification,
+               l.status, l.source, l.result_document_name, l.created_at,
+               p.name AS programme_name, c.title AS preferred_course_title
+        FROM crm_admission_leads l
+        JOIN academic_programmes p ON p.programme_id=l.programme_id
+        LEFT JOIN academic_courses c ON c.course_id=l.preferred_course_id
+        WHERE (:status IS NULL OR l.status=:status)
+        ORDER BY l.created_at DESC
+    """), {"status": status}))
+    return rows
 
 
 def _json(value: dict[str, Any]) -> str:
