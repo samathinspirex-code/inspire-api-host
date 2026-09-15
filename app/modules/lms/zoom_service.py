@@ -42,6 +42,22 @@ def _configured() -> bool:
     return bool(settings.ZOOM_CLIENT_ID and settings.ZOOM_CLIENT_SECRET and settings.ZOOM_TOKEN_ENCRYPTION_KEY)
 
 
+def _zak_token_url(host: dict) -> str:
+    zoom_user_id = quote(str(host.get("zoom_user_id") or "me"), safe="")
+    return f"{ZOOM_API}/users/{zoom_user_id}/token"
+
+
+def _zoom_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return f"HTTP {response.status_code}"
+    code = payload.get("code")
+    message = str(payload.get("message") or "").strip()
+    detail = ": ".join(part for part in (f"code {code}" if code is not None else "", message) if part)
+    return detail or f"HTTP {response.status_code}"
+
+
 async def get_settings(db: AsyncSession) -> dict:
     row = (await db.execute(text("SELECT * FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     hosts = (await db.execute(text("""
@@ -292,8 +308,8 @@ async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str
       "password":_decrypt(meeting["zoom_passcode_encrypted"]) if meeting["zoom_passcode_encrypted"] else ""}
     if is_host:
         host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":meeting["zoom_host_connection_id"]})).mappings().first(); token=await _access_token(db,dict(host))
-        async with httpx.AsyncClient(timeout=20) as client: response=await client.get(f"{ZOOM_API}/users/me/token",params={"type":"zak"},headers={"Authorization":f"Bearer {token}"})
-        if response.is_error: raise ValidationError("Zoom could not issue the lecturer host token")
+        async with httpx.AsyncClient(timeout=20) as client: response=await client.get(_zak_token_url(dict(host)),params={"type":"zak"},headers={"Authorization":f"Bearer {token}"})
+        if response.is_error: raise ValidationError(f"Zoom could not issue the lecturer host token ({_zoom_error(response)}). Reconnect this host after granting user:read:zak.")
         result["zak"]=response.json().get("token")
     else:
         registration=await register_student(db,meeting_id,user_id); result["registrant_token"]=registration.get("join_token")
