@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from app.modules.lms.zoom_service import _claim_host
+from app.modules.lms.zoom_service import _claim_host, _zak_token_url
 
 
 class _Mappings:
@@ -25,6 +25,12 @@ class _Database:
 
 
 class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
+    def test_zak_token_request_targets_the_connected_zoom_user(self):
+        self.assertEqual(
+            _zak_token_url({"zoom_user_id": "host/user@example.com"}),
+            "https://api.zoom.us/v2/users/host%2Fuser%40example.com/token",
+        )
+
     async def test_new_meeting_gives_nullable_exclusion_parameter_a_bigint_type(self):
         database = _Database()
         start = datetime(2026, 9, 15, 6, 29, tzinfo=timezone.utc)
