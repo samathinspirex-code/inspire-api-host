@@ -11,7 +11,7 @@ class MediaUploadRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=120, pattern=MEDIA_NAME_PATTERN)
     content_type: str = Field(..., min_length=3, max_length=120)
-    size_bytes: int = Field(..., gt=0, le=52_428_800)
+    size_bytes: int = Field(..., gt=0, le=524_288_000)
     folder: str = Field("media-library", pattern=r"^[a-z0-9][a-z0-9-]{0,79}$")
     alt_text: str | None = Field(None, max_length=255)
 
