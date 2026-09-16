@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     MAILJET_SECRET_KEY: str = ""
     MAILJET_FROM_EMAIL: str = ""
     MAILJET_FROM_NAME: str = "Inspire College"
+    PUBLIC_FORM_FROM_EMAIL: str = "website@inspire.college"
+    PUBLIC_FORM_FROM_NAME: str = "Inspire College"
+    PUBLIC_FORM_RECIPIENT_EMAIL: str = "enrol@inspire.college"
     AUTHENTICATOR_INVITATION_SUBJECT: str = "Set up your Inspire College Authenticator"
 
     GOOGLE_OAUTH_CLIENT_ID: str = ""

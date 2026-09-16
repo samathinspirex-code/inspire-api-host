@@ -87,12 +87,24 @@ class AdmissionApplicationCreate(BaseModel):
     highest_qualification: str = Field(..., min_length=2, max_length=120)
     programme_id: int = Field(..., gt=0)
     preferred_course_id: int | None = Field(None, gt=0)
+    preferred_study_mode: StudyMode | None = None
     result_document: AdmissionResultDocument | None = None
 
 
 class AdmissionApplicationResponse(BaseModel):
     lead_id: int
     status: str
+    message: str
+
+
+class ContactInquiryCreate(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=255)
+    email: EmailStr
+    message: str = Field(..., min_length=5, max_length=5000)
+
+
+class ContactInquiryResponse(BaseModel):
+    sent: bool
     message: str
 
 
