@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.modules.academic import service
 from app.modules.academic.schemas import (
-    AcademicLevelCreate, AcademicResponse, AdmissionApplicationCreate, AdmissionApplicationResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, CourseCreate,
+    AcademicLevelCreate, AcademicResponse, AdmissionApplicationCreate, AdmissionApplicationResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, ContactInquiryCreate, ContactInquiryResponse, CourseCreate,
     NamedNodeCreate, PathwayConfirmRequest, ProgrammeEnrolmentCreate,
     ProgrammeEnrolmentResponse, ProgrammeLevelUpdate, StudyOptionUpsert,
 )
@@ -62,6 +62,11 @@ async def programme_enrolment(payload: ProgrammeEnrolmentCreate, db: AsyncSessio
 @public_router.post("/admission-applications", response_model=AdmissionApplicationResponse, status_code=201)
 async def admission_application(payload: AdmissionApplicationCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_admission_lead(db, payload)
+
+
+@public_router.post("/contact-inquiries", response_model=ContactInquiryResponse, status_code=201)
+async def contact_inquiry(payload: ContactInquiryCreate):
+    return await service.send_contact_inquiry(payload)
 
 
 @cms_router.get("/{resource}", response_model=AcademicResponse)

@@ -2,8 +2,9 @@ import asyncio
 import base64
 import binascii
 import json
+import logging
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -11,10 +12,12 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import APIError, ConflictError, NotFoundError, ValidationError
+from app.core.public_form_email import form_email_html, send_public_form_email
 from app.modules.academic.schemas import (
     AcademicLevelCreate,
     AdmissionApplicationCreate,
+    ContactInquiryCreate,
     ClassDetailsUpdate,
     ClassFromCourseRequest,
     ClassFromTemplateRequest,
@@ -30,6 +33,9 @@ from app.modules.auth import service as auth_service
 from app.modules.auth.schemas import CurrentUser
 from app.core.config import settings
 from app.modules.cms import media_service
+
+
+logger = logging.getLogger(__name__)
 
 
 RESOURCE_TABLES = {
@@ -118,7 +124,65 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             except Exception:
                 pass
         raise
+    pathway = (await db.execute(text("""
+        SELECT p.name AS programme_name, c.title AS course_name, c.awarding_body,
+               o.price, o.duration
+        FROM academic_programmes p
+        LEFT JOIN academic_courses c ON c.course_id=:course_id
+        LEFT JOIN academic_course_study_options o
+          ON o.course_id=c.course_id AND o.study_mode=:study_mode AND o.is_enabled=true
+        WHERE p.programme_id=:programme_id
+    """), {"programme_id": payload.programme_id, "course_id": payload.preferred_course_id, "study_mode": payload.preferred_study_mode})).mappings().first()
+    submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
+    study_mode = payload.preferred_study_mode.replace("_", " ").title() if payload.preferred_study_mode else "Not selected"
+    price = f"Rs {int(pathway['price']):,}" if pathway and pathway["price"] is not None else "To be confirmed"
+    rows = [
+        ("Lead ID", str(lead_id)),
+        ("Submitted", submitted_at),
+        ("Applicant", payload.full_name.strip()),
+        ("Email", str(payload.email)),
+        ("Phone", payload.phone.strip()),
+        ("Highest qualification", payload.highest_qualification.strip()),
+        ("Awarding body", pathway["awarding_body"] if pathway else None),
+        ("Programme", pathway["programme_name"] if pathway else None),
+        ("Course", pathway["course_name"] if pathway else None),
+        ("Study option", study_mode),
+        ("Duration", pathway["duration"] if pathway else None),
+        ("Course fee", price),
+        ("Result document", document.filename if document else "Not uploaded — applicant will provide later"),
+    ]
+    text_body = "New admission application\n\n" + "\n".join(f"{label}: {value or '—'}" for label, value in rows)
+    email_result = await send_public_form_email(
+        subject=f"New admission application — {(pathway['course_name'] if pathway else None) or payload.full_name.strip()}",
+        text_body=text_body,
+        html_body=form_email_html("New admission application", "A prospective student submitted the admissions form.", rows),
+        reply_to=str(payload.email),
+        custom_id=f"admission-{submission_id}",
+    )
+    if not email_result.sent:
+        logger.warning("Admission lead %s was saved but its notification email failed: %s", lead_id, email_result.error)
     return {"lead_id": lead_id, "status": "new_inquiry", "message": "Your application was received. An advisor will contact you within one business day."}
+
+
+async def send_contact_inquiry(payload: ContactInquiryCreate):
+    submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
+    rows = [
+        ("Submitted", submitted_at),
+        ("Name", payload.full_name.strip()),
+        ("Email", str(payload.email)),
+    ]
+    text_body = "New website contact enquiry\n\n" + "\n".join(f"{label}: {value}" for label, value in rows) + f"\n\nMessage:\n{payload.message.strip()}"
+    result = await send_public_form_email(
+        subject=f"New website enquiry — {payload.full_name.strip()}",
+        text_body=text_body,
+        html_body=form_email_html("New website enquiry", "A visitor submitted the contact form.", rows, payload.message.strip()),
+        reply_to=str(payload.email),
+        custom_id=f"contact-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+    )
+    if not result.sent:
+        logger.warning("Contact form notification failed: %s", result.error)
+        raise APIError(503, "EMAIL_DELIVERY_FAILED", "Your message could not be sent right now. Please try again shortly.")
+    return {"sent": True, "message": "Your message was sent successfully."}
 
 
 async def list_admission_leads(db: AsyncSession, status: str | None = None):
@@ -476,16 +540,18 @@ async def set_programme_levels(db: AsyncSession, programme_id: int, level_ids: l
 
 
 async def public_programmes(db: AsyncSession, school_id: int | None = None):
-    school_filter = "AND c.school_id=:school_id" if school_id is not None else ""
+    course_filter = "" if school_id is None else """
+          AND EXISTS (
+            SELECT 1 FROM academic_courses c
+            WHERE c.programme_id=p.programme_id AND c.status='active'
+              AND c.school_id=:school_id
+          )
+    """
     return _rows(await db.execute(text(f"""
         SELECT p.*
         FROM academic_programmes p
         WHERE p.status='active'
-          AND EXISTS (
-            SELECT 1 FROM academic_courses c
-            WHERE c.programme_id=p.programme_id AND c.status='active'
-              {school_filter}
-          )
+          {course_filter}
         ORDER BY p.position, p.name
     """), {"school_id": school_id}))
 
