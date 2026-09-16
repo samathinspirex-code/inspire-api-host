@@ -22,6 +22,7 @@ class ProgrammeListResponse(BaseModel):
 
 class CourseCreate(BaseModel):
     program_id: int = Field(..., gt=0)
+    catalogue_course_id: int | None = Field(None, gt=0)
     code: str = Field(..., min_length=1, max_length=100)
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=5000)
@@ -43,6 +44,7 @@ class CourseItem(BaseModel):
 
     course_id: int
     program_id: int
+    catalogue_course_id: int | None = None
     program_title: str
     program_code: str
     code: str

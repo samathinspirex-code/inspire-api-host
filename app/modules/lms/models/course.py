@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -15,6 +15,11 @@ class LmsCourse(Base):
 
     course_id: Mapped[int] = mapped_column(primary_key=True)
     program_id: Mapped[int] = mapped_column(ForeignKey("programs.program_id", ondelete="RESTRICT"), nullable=False)
+    # The academic catalogue is managed by SQL migrations rather than ORM
+    # models. Its database foreign key is installed by the catalogue-link
+    # migration, while this plain mapped column keeps isolated LMS metadata
+    # (including the SQLite unit-test schema) independently creatable.
+    catalogue_course_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
