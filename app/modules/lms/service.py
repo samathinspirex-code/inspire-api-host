@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
@@ -148,6 +149,7 @@ def _to_course_item(course, program_title: str, program_code: str) -> CourseItem
     return CourseItem(
         course_id=course.course_id,
         program_id=course.program_id,
+        catalogue_course_id=course.catalogue_course_id,
         program_title=program_title,
         program_code=program_code,
         code=course.code,
@@ -186,6 +188,11 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
     programme = await db.get(Program, payload.program_id)
     if programme is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
+    if payload.catalogue_course_id is not None and not await db.scalar(text("""
+        SELECT 1 FROM academic_courses
+        WHERE course_id=:course_id AND legacy_program_id=:program_id AND status <> 'archived'
+    """), {"course_id": payload.catalogue_course_id, "program_id": payload.program_id}):
+        raise ValidationError("The selected catalogue course does not match this template pathway")
 
     repo = CourseRepository(db)
     code = payload.code.strip().upper()
@@ -240,6 +247,11 @@ async def update_course(db: AsyncSession, course_id: int, payload: CourseUpdate)
     programme = await db.get(Program, payload.program_id)
     if programme is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
+    if payload.catalogue_course_id is not None and not await db.scalar(text("""
+        SELECT 1 FROM academic_courses
+        WHERE course_id=:course_id AND legacy_program_id=:program_id AND status <> 'archived'
+    """), {"course_id": payload.catalogue_course_id, "program_id": payload.program_id}):
+        raise ValidationError("The selected catalogue course does not match this template pathway")
 
     code = payload.code.strip().upper()
     if await repo.get_by_code(code, exclude_course_id=course_id) is not None:

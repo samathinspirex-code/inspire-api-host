@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
@@ -21,6 +22,7 @@ def _course_item(row, role: str) -> PortalCourseItem:
     return PortalCourseItem(
         course_id=course.course_id,
         program_id=course.program_id,
+        catalogue_course_id=course.catalogue_course_id,
         program_title=program_title,
         program_code=program_code,
         code=course.code,
@@ -112,6 +114,11 @@ async def update_my_course_presentation(
     course = row[0]
     if await db.get(Program, payload.program_id) is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
+    if payload.catalogue_course_id is not None and not await db.scalar(text("""
+        SELECT 1 FROM academic_courses
+        WHERE course_id=:course_id AND legacy_program_id=:program_id AND status <> 'archived'
+    """), {"course_id": payload.catalogue_course_id, "program_id": payload.program_id}):
+        raise ConflictError("The selected catalogue course does not match this template pathway")
     code = payload.code.strip().upper()
     repository = CourseRepository(db)
     if await repository.get_by_code(code, exclude_course_id=course_id) is not None:

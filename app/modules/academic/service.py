@@ -976,15 +976,15 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
     copied_course_id = await db.scalar(text("""
         INSERT INTO lms_courses
           (program_id, code, title, description, takeaways, cover_image_url, status,
-           created_by, is_class_copy, source_master_course_id)
+           created_by, is_class_copy, source_master_course_id, catalogue_course_id)
         VALUES (:program_id, :code, :title, :description, :takeaways, :cover, :status,
-                :user_id, TRUE, :source_id)
+                :user_id, TRUE, :source_id, :catalogue_course_id)
         RETURNING course_id
     """), {
         "program_id": master["program_id"], "code": copy_code, "title": master["title"],
         "description": master["description"], "takeaways": master.get("takeaways"),
         "cover": master.get("cover_image_url"), "status": master["status"],
-        "user_id": user_id, "source_id": payload.source_course_id,
+        "user_id": user_id, "source_id": payload.source_course_id, "catalogue_course_id": target_course_id,
     })
     class_id = await db.scalar(text("""
         INSERT INTO lms_classes
@@ -1118,10 +1118,10 @@ async def save_template_draft(db: AsyncSession, payload: TemplateDraftRequest, u
         if course is None or course["legacy_program_id"] is None:
             raise ValidationError("This course needs a legacy catalogue link before LMS content can be created")
         source_id = await db.scalar(text("""
-            INSERT INTO lms_courses (program_id, code, title, description, status, created_by)
-            VALUES (:program_id, :code, :title, 'Reusable class template', 'draft', :user_id)
+            INSERT INTO lms_courses (program_id, catalogue_course_id, code, title, description, status, created_by)
+            VALUES (:program_id, :course_id, :code, :title, 'Reusable class template', 'draft', :user_id)
             RETURNING course_id
-        """), {"program_id": course["legacy_program_id"], "code": f"{course['code']}-{payload.study_mode[:2].upper()}-T", "title": f"{course['title']} · {payload.study_mode.replace('_',' ').title()}", "user_id": user_id})
+        """), {"program_id": course["legacy_program_id"], "course_id": payload.course_id, "code": f"{course['code']}-{payload.study_mode[:2].upper()}-T", "title": f"{course['title']} · {payload.study_mode.replace('_',' ').title()}", "user_id": user_id})
         await db.execute(text("""
             INSERT INTO lms_course_lecturers (course_id, lecturer_user_id, assigned_by)
             SELECT :course_id, :user_id, :user_id
