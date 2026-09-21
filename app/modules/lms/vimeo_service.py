@@ -36,6 +36,7 @@ API_BASE = "https://api.vimeo.com"
 VIDEO_URI = re.compile(r"^/videos/(\d+)$")
 VIMEO_URL = re.compile(r"vimeo\.com/(?:video/)?(\d+)")
 logger = logging.getLogger(__name__)
+_thumbnail_refresh_slots = asyncio.Semaphore(2)
 
 
 class VimeoPermissionError(ValidationError):
@@ -369,22 +370,29 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     item = await db.get(LmsLearningItem, item_id)
     if item is None or item.item_type != "video":
         return False
-    video_uri = video_uri_from_url(item.resource_url)
+    resource_url = item.resource_url
+    current_thumbnail = item.thumbnail_url
+    video_uri = video_uri_from_url(resource_url)
     if not video_uri:
         return False
+    # Release the scarce PostgreSQL session before waiting on Vimeo.
+    await db.rollback()
     async with VimeoClient() as vimeo:
         video = await vimeo.get_video(video_uri)
     thumbnail_url = _thumbnail_url(video)
     if not _is_ready_thumbnail(thumbnail_url):
         return False
-    if item.thumbnail_url != thumbnail_url:
+    if current_thumbnail != thumbnail_url:
+        item = await db.get(LmsLearningItem, item_id)
+        if item is None or item.item_type != "video" or item.resource_url != resource_url:
+            return False
         item.thumbnail_url = thumbnail_url
         await db.commit()
     return True
 
 
 async def wait_for_learning_item_thumbnail(
-    item_id: int, attempts: int = 60, delay_seconds: int = 10
+    item_id: int, attempts: int = 6, delay_seconds: int = 10
 ) -> None:
     """Refresh a just-uploaded video without holding up the upload response.
 
@@ -393,17 +401,23 @@ async def wait_for_learning_item_thumbnail(
     """
     from app.core.database import AsyncSessionLocal
 
+    last_error = None
     for attempt in range(attempts):
         try:
-            async with AsyncSessionLocal() as db:
-                # Vimeo can return an initial image URL before replacing it with
-                # its final frame. Keep polling even after a non-placeholder URL
-                # is available so the LMS stores the finished image.
-                await refresh_learning_item_thumbnail(db, item_id)
-        except Exception:  # A retry is safer than making a successful upload appear failed.
-            logger.warning("Could not refresh Vimeo thumbnail for LMS item %s", item_id, exc_info=True)
+            async with _thumbnail_refresh_slots:
+                async with AsyncSessionLocal() as db:
+                    if await refresh_learning_item_thumbnail(db, item_id):
+                        return
+            last_error = None
+        except Exception as exc:  # A retry is safer than making a successful upload appear failed.
+            last_error = exc
         if attempt < attempts - 1:
             await asyncio.sleep(delay_seconds)
+    if last_error is not None:
+        logger.warning(
+            "Could not refresh Vimeo thumbnail for LMS item %s after %s attempts: %s",
+            item_id, attempts, last_error,
+        )
 
 
 async def refresh_recent_learning_item_thumbnails(db: AsyncSession, limit: int = 100) -> int:
