@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import logging
 import asyncio
+from html.parser import HTMLParser
 from urllib.parse import quote
 
 import httpx
@@ -37,6 +38,35 @@ VIDEO_URI = re.compile(r"^/videos/(\d+)$")
 VIMEO_URL = re.compile(r"vimeo\.com/(?:video/)?(\d+)")
 logger = logging.getLogger(__name__)
 _thumbnail_refresh_slots = asyncio.Semaphore(2)
+
+
+class _RichTextToPlainText(HTMLParser):
+    block_tags = {"blockquote", "br", "div", "h1", "h2", "h3", "li", "ol", "p", "pre", "ul"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, _attrs) -> None:
+        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _vimeo_description(value: str | None) -> str | None:
+    if not value:
+        return None
+    parser = _RichTextToPlainText()
+    parser.feed(value)
+    lines = [" ".join(line.split()) for line in "".join(parser.parts).splitlines()]
+    plain = "\n".join(line for line in lines if line).strip()
+    return plain or None
 
 
 class VimeoPermissionError(ValidationError):
@@ -128,7 +158,7 @@ class VimeoClient:
     async def create_upload(self, title: str, description: str | None, file_size: int) -> VimeoUploadTicketResponse:
         payload = {
             "name": title,
-            "description": description or None,
+            "description": _vimeo_description(description),
             "upload": {"approach": "tus", "size": file_size},
             "privacy": {"view": "unlisted", "embed": "whitelist", "download": False},
         }
@@ -152,7 +182,7 @@ class VimeoClient:
 
     async def update_video(self, video_uri: str, title: str, description: str | None) -> dict:
         return await self.request(
-            "PATCH", video_uri, action="update the Vimeo video", json={"name": title, "description": description or None}
+            "PATCH", video_uri, action="update the Vimeo video", json={"name": title, "description": _vimeo_description(description)}
         )
 
     async def update_video_privacy(self, video_uri: str) -> dict:
