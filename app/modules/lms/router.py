@@ -429,7 +429,7 @@ async def get_student_grades(
 async def list_exams(
     course_id: int | None = Query(None, gt=0),
     class_id: int | None = Query(None, gt=0),
-    current_user: CurrentUser = Depends(exam_access),
+    current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> ExamListResponse:
     return await exam_service.list_exams(db, current_user.user_id, service.resolve_role(current_user.access) or "", course_id, class_id)

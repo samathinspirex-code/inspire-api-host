@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import logging
 import asyncio
+from html.parser import HTMLParser
 from urllib.parse import quote
 
 import httpx
@@ -36,6 +37,36 @@ API_BASE = "https://api.vimeo.com"
 VIDEO_URI = re.compile(r"^/videos/(\d+)$")
 VIMEO_URL = re.compile(r"vimeo\.com/(?:video/)?(\d+)")
 logger = logging.getLogger(__name__)
+_thumbnail_refresh_slots = asyncio.Semaphore(2)
+
+
+class _RichTextToPlainText(HTMLParser):
+    block_tags = {"blockquote", "br", "div", "h1", "h2", "h3", "li", "ol", "p", "pre", "ul"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, _attrs) -> None:
+        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _vimeo_description(value: str | None) -> str | None:
+    if not value:
+        return None
+    parser = _RichTextToPlainText()
+    parser.feed(value)
+    lines = [" ".join(line.split()) for line in "".join(parser.parts).splitlines()]
+    plain = "\n".join(line for line in lines if line).strip()
+    return plain or None
 
 
 class VimeoPermissionError(ValidationError):
@@ -127,7 +158,7 @@ class VimeoClient:
     async def create_upload(self, title: str, description: str | None, file_size: int) -> VimeoUploadTicketResponse:
         payload = {
             "name": title,
-            "description": description or None,
+            "description": _vimeo_description(description),
             "upload": {"approach": "tus", "size": file_size},
             "privacy": {"view": "unlisted", "embed": "whitelist", "download": False},
         }
@@ -151,7 +182,7 @@ class VimeoClient:
 
     async def update_video(self, video_uri: str, title: str, description: str | None) -> dict:
         return await self.request(
-            "PATCH", video_uri, action="update the Vimeo video", json={"name": title, "description": description or None}
+            "PATCH", video_uri, action="update the Vimeo video", json={"name": title, "description": _vimeo_description(description)}
         )
 
     async def update_video_privacy(self, video_uri: str) -> dict:
@@ -369,22 +400,29 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     item = await db.get(LmsLearningItem, item_id)
     if item is None or item.item_type != "video":
         return False
-    video_uri = video_uri_from_url(item.resource_url)
+    resource_url = item.resource_url
+    current_thumbnail = item.thumbnail_url
+    video_uri = video_uri_from_url(resource_url)
     if not video_uri:
         return False
+    # Release the scarce PostgreSQL session before waiting on Vimeo.
+    await db.rollback()
     async with VimeoClient() as vimeo:
         video = await vimeo.get_video(video_uri)
     thumbnail_url = _thumbnail_url(video)
     if not _is_ready_thumbnail(thumbnail_url):
         return False
-    if item.thumbnail_url != thumbnail_url:
+    if current_thumbnail != thumbnail_url:
+        item = await db.get(LmsLearningItem, item_id)
+        if item is None or item.item_type != "video" or item.resource_url != resource_url:
+            return False
         item.thumbnail_url = thumbnail_url
         await db.commit()
     return True
 
 
 async def wait_for_learning_item_thumbnail(
-    item_id: int, attempts: int = 60, delay_seconds: int = 10
+    item_id: int, attempts: int = 6, delay_seconds: int = 10
 ) -> None:
     """Refresh a just-uploaded video without holding up the upload response.
 
@@ -393,17 +431,23 @@ async def wait_for_learning_item_thumbnail(
     """
     from app.core.database import AsyncSessionLocal
 
+    last_error = None
     for attempt in range(attempts):
         try:
-            async with AsyncSessionLocal() as db:
-                # Vimeo can return an initial image URL before replacing it with
-                # its final frame. Keep polling even after a non-placeholder URL
-                # is available so the LMS stores the finished image.
-                await refresh_learning_item_thumbnail(db, item_id)
-        except Exception:  # A retry is safer than making a successful upload appear failed.
-            logger.warning("Could not refresh Vimeo thumbnail for LMS item %s", item_id, exc_info=True)
+            async with _thumbnail_refresh_slots:
+                async with AsyncSessionLocal() as db:
+                    if await refresh_learning_item_thumbnail(db, item_id):
+                        return
+            last_error = None
+        except Exception as exc:  # A retry is safer than making a successful upload appear failed.
+            last_error = exc
         if attempt < attempts - 1:
             await asyncio.sleep(delay_seconds)
+    if last_error is not None:
+        logger.warning(
+            "Could not refresh Vimeo thumbnail for LMS item %s after %s attempts: %s",
+            item_id, attempts, last_error,
+        )
 
 
 async def refresh_recent_learning_item_thumbnails(db: AsyncSession, limit: int = 100) -> int:

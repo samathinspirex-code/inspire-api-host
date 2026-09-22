@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
+    # Keep each web/worker process below the hosted session-pool limit.
+    DATABASE_POOL_SIZE: int = 3
+    DATABASE_MAX_OVERFLOW: int = 0
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 20
+    DATABASE_POOL_RECYCLE_SECONDS: int = 300
 
     @property
     def DATABASE_URL(self) -> str:

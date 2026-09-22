@@ -128,7 +128,7 @@ async def create_exam(db: AsyncSession, payload: ExamCreate, user_id: int) -> Ex
     db.add(assignment)
     await db.flush()
     exam = LmsExam(
-        assessment_kind="exam",
+        assessment_kind="question_paper",
         assignment_id=assignment.assignment_id, course_id=payload.course_id,
         target_type=payload.target_type, target_id=payload.target_id, title=payload.title,
         instructions=payload.instructions, available_from=payload.available_from, due_at=payload.due_at,
@@ -149,7 +149,7 @@ async def list_exams(
         .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsExam.assignment_id)
         .join(LmsCourse, LmsCourse.course_id == LmsExam.course_id)
         .outerjoin(LmsClass, and_(LmsExam.target_type == "class", LmsClass.class_id == LmsExam.target_id))
-        .where(LmsExam.assessment_kind == "exam")
+        .where(LmsExam.assessment_kind.in_(("exam", "question_paper")))
     )
     if role == "LECTURER":
         stmt = stmt.join(CourseLecturer, and_(CourseLecturer.course_id == LmsExam.course_id, CourseLecturer.lecturer_user_id == user_id)).outerjoin(
@@ -157,16 +157,8 @@ async def list_exams(
         )
     elif role in {"ADMIN", "SUPER_ADMIN"}:
         stmt = stmt.outerjoin(LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == -1))
-    elif role == "STUDENT":
-        class_ids = select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
-        stmt = stmt.join(CourseEnrollment, and_(CourseEnrollment.course_id == LmsExam.course_id, CourseEnrollment.student_user_id == user_id, CourseEnrollment.status == "enrolled")).outerjoin(
-            LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == user_id)
-        ).where(
-            LmsExam.status.in_(("published", "closed")),
-            or_(LmsExam.target_type == "course", and_(LmsExam.target_type == "class", LmsExam.target_id.in_(class_ids))),
-        )
     else:
-        raise ForbiddenError("This LMS role cannot access exams")
+        raise ForbiddenError("Only lecturers and administrators can access question papers")
     if class_id is not None:
         stmt = stmt.where(LmsExam.target_type == "class", LmsExam.target_id == class_id)
     elif course_id is not None:
@@ -235,13 +227,15 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
     await _ensure_lecturer_course(db, exam.course_id, user_id)
     questions = await _question_rows(db, exam_id)
     if status == "published" and not questions: raise ValidationError("Add at least one question before publishing")
-    exam.status = status; assignment.status = status
+    exam.status = status
+    is_template = exam.assessment_kind in {"exam", "question_paper"}
+    assignment.status = "draft" if is_template else status
     if assignment.learning_item_id:
         learning_item = await db.get(LmsLearningItem, assignment.learning_item_id)
         if learning_item is not None:
             learning_item.status = "draft" if status == "draft" else "published"
     await db.commit()
-    if status == "published":
+    if status == "published" and not is_template:
         await notification_service.notify_assessment_published(db, assignment, "exam")
     return await get_editor(db, exam_id, user_id)
 
@@ -308,7 +302,7 @@ async def create_practice_test(
         instructions=payload.instructions.strip(), assignment_type="timed",
         available_from=payload.available_from, due_at=payload.due_at,
         duration_minutes=payload.duration_minutes, max_marks=Decimal("1"), allow_late=False,
-        grades_released=True, status="draft", created_by=user_id,
+        grades_released=False, status="draft", created_by=user_id,
     )
     db.add(assignment)
     await db.flush()
@@ -320,7 +314,7 @@ async def create_practice_test(
         duration_minutes=payload.duration_minutes,
         randomize_questions=payload.randomize_questions,
         randomize_options=payload.randomize_options,
-        grades_released=True, status="draft", created_by=user_id,
+        grades_released=False, status="draft", created_by=user_id,
     )
     db.add(exam)
     await db.flush()
@@ -356,7 +350,7 @@ async def get_practice_test_for_item(
         if attempt is not None and attempt.status == "in_progress" and remaining_seconds(attempt.expires_at) == 0:
             await _finalize_attempt(db, exam, context[1], attempt, expired=True)
         return await _exam_item(db, context, attempt, expose_grade=False)
-    if role == "LECTURER":
+    if role in {"LECTURER", "ADMIN", "SUPER_ADMIN"}:
         await _ensure_lecturer_course(db, exam.course_id, user_id)
         return await _exam_item(db, context)
     raise ForbiddenError("This LMS role cannot access practice tests")
@@ -365,6 +359,8 @@ async def get_practice_test_for_item(
 async def update_grade_release(db: AsyncSession, exam_id: int, released: bool, user_id: int) -> ExamEditorResponse:
     context = await _exam_context(db, exam_id); exam, assignment = context[:2]
     await _ensure_lecturer_course(db, exam.course_id, user_id)
+    if exam.assessment_kind == "practice_test":
+        raise ValidationError("Practice tests are ungraded and do not release grades")
     exam.grades_released = released; assignment.grades_released = released
     await db.commit()
     if released:
@@ -478,12 +474,19 @@ async def _finalize_attempt(db: AsyncSession, exam: LmsExam, assignment: LmsCour
             answer.auto_marks = question.marks if answer.is_correct else Decimal("0"); auto += Decimal(answer.auto_marks)
         else:
             has_written = True; answer.auto_marks = Decimal("0")
-    attempt.auto_marks = auto; attempt.submitted_at = attempt.expires_at if expired else utc_now()
+    is_practice = exam.assessment_kind == "practice_test"
+    attempt.auto_marks = Decimal("0") if is_practice else auto
+    attempt.submitted_at = attempt.expires_at if expired else utc_now()
     attempt.status = "expired" if expired and has_written else ("submitted" if has_written else "reviewed")
-    if not has_written: attempt.manual_marks = Decimal("0"); attempt.total_marks = auto; attempt.marked_at = utc_now()
+    if not has_written:
+        attempt.manual_marks = None if is_practice else Decimal("0")
+        attempt.total_marks = None if is_practice else auto
+        attempt.marked_at = None if is_practice else utc_now()
     mirror = (await db.execute(select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id, LmsCourseworkSubmission.student_user_id == attempt.student_user_id))).scalar_one()
     mirror.status = "submitted" if has_written else "reviewed"; mirror.submitted_at = attempt.submitted_at
-    if not has_written: mirror.marks_awarded = auto; mirror.marked_at = attempt.marked_at
+    if not has_written:
+        mirror.marks_awarded = None if is_practice else auto
+        mirror.marked_at = attempt.marked_at
     await db.commit()
 
 
@@ -525,6 +528,8 @@ async def mark_attempt(db: AsyncSession, attempt_id: int, payload, user_id: int)
     if attempt is None: raise NotFoundError("Exam attempt not found")
     exam = await db.get(LmsExam, attempt.exam_id); assignment = await db.get(LmsCourseworkAssignment, exam.assignment_id)
     await _ensure_lecturer_course(db, exam.course_id, user_id)
+    if exam.assessment_kind == "practice_test":
+        raise ValidationError("Practice tests are ungraded and cannot be marked")
     if attempt.status == "in_progress": raise ValidationError("The student has not finished this exam")
     questions = {item.question_id: item for item in await _question_rows(db, exam.exam_id)}
     answer_map = {item.question_id: item for item in (await db.execute(select(LmsExamAnswer).where(LmsExamAnswer.attempt_id == attempt_id))).scalars().all()}

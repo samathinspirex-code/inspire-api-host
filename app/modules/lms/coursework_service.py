@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -12,6 +13,8 @@ from app.modules.lms.models import (
     LmsClass,
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
+    LmsExam,
+    LmsExamQuestion,
 )
 from app.modules.lms.repository import CourseworkRepository
 from app.modules.lms.schemas import (
@@ -74,7 +77,7 @@ def _asset_url(asset: MediaAsset | None) -> str | None:
     return media_service._public_url(asset.object_key)
 
 
-def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True) -> CourseworkAssignmentItem:
+def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True, exam_id: int | None = None) -> CourseworkAssignmentItem:
     assignment, course, target_class = row
     return CourseworkAssignmentItem(
         assignment_id=assignment.assignment_id,
@@ -107,7 +110,15 @@ def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True
         attachment_url=_asset_url(asset),
         attachment_name=asset.original_filename if asset else None,
         remaining_seconds=remaining_seconds(submission.expires_at) if submission else None,
+        exam_id=exam_id,
     )
+
+
+async def _assignment_exam_id(db: AsyncSession, assignment_id: int) -> int | None:
+    return await db.scalar(select(LmsExam.exam_id).where(
+        LmsExam.assignment_id == assignment_id,
+        LmsExam.assessment_kind == "assignment_question_paper",
+    ))
 
 
 async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreate, user_id: int):
@@ -116,14 +127,59 @@ async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreat
         target = await db.get(LmsClass, payload.target_id)
         if target is None or target.course_id != payload.course_id:
             raise ValidationError("The selected class does not belong to this course")
-    row = LmsCourseworkAssignment(**payload.model_dump(), created_by=user_id)
+    values = payload.model_dump()
+    question_paper_id = values.pop("question_paper_id", None)
+    template = None
+    questions = []
+    if question_paper_id is not None:
+        template = await db.get(LmsExam, question_paper_id)
+        if template is None or template.assessment_kind not in {"exam", "question_paper"}:
+            raise ValidationError("Select a valid question paper")
+        if (
+            template.course_id != payload.course_id
+            or template.target_type != payload.target_type
+            or template.target_id != payload.target_id
+        ):
+            raise ValidationError("Question papers can only be used in their original course or class workspace")
+        questions = list((await db.execute(
+            select(LmsExamQuestion).where(LmsExamQuestion.exam_id == template.exam_id)
+            .order_by(LmsExamQuestion.position, LmsExamQuestion.question_id)
+        )).scalars().all())
+        if not questions:
+            raise ValidationError("Add at least one question to the question paper first")
+        values["assignment_type"] = "timed"
+        values["duration_minutes"] = values.get("duration_minutes") or template.duration_minutes
+        values["max_marks"] = sum((Decimal(item.marks) for item in questions), Decimal("0"))
+    row = LmsCourseworkAssignment(**values, created_by=user_id)
     db.add(row)
+    await db.flush()
+    linked_exam = None
+    if template is not None:
+        linked_exam = LmsExam(
+            assessment_kind="assignment_question_paper", assignment_id=row.assignment_id,
+            course_id=row.course_id, target_type=row.target_type, target_id=row.target_id,
+            title=row.title, instructions=row.instructions, available_from=row.available_from,
+            due_at=row.due_at, duration_minutes=row.duration_minutes,
+            randomize_questions=template.randomize_questions,
+            randomize_options=template.randomize_options, grades_released=False,
+            status=row.status, created_by=user_id,
+        )
+        db.add(linked_exam)
+        await db.flush()
+        for source in questions:
+            db.add(LmsExamQuestion(
+                exam_id=linked_exam.exam_id, question_type=source.question_type,
+                prompt=source.prompt, marks=source.marks, position=source.position,
+                options=source.options, correct_option_index=source.correct_option_index,
+                correct_option_indices=source.correct_option_indices,
+                accepted_answers=source.accepted_answers,
+            ))
     await db.commit()
     await db.refresh(row)
     if row.status == "published":
         await notification_service.notify_assessment_published(db, row, "assignment")
     context = await CourseworkRepository(db).get_assignment_context(row.assignment_id)
-    return _assignment_item(context)
+    return _assignment_item(context, exam_id=linked_exam.exam_id if linked_exam else None)
 
 
 async def list_assignments(
@@ -139,7 +195,9 @@ async def list_assignments(
     if role in {"LECTURER", "ADMIN", "SUPER_ADMIN"}:
         raw_rows = await repo.list_for_lecturer(user_id) if role == "LECTURER" else await repo.list_for_manager()
         rows = [row for row in raw_rows if belongs_to_workspace(row[0])]
-        return CourseworkAssignmentListResponse(data=[_assignment_item(row) for row in rows])
+        return CourseworkAssignmentListResponse(data=[
+            _assignment_item(row, exam_id=await _assignment_exam_id(db, row[0].assignment_id)) for row in rows
+        ])
     if role != "STUDENT":
         raise ForbiddenError("This LMS role cannot access coursework assignments")
     data = []
@@ -158,7 +216,10 @@ async def list_assignments(
             submission.status = "expired"
             submission.submitted_at = submission.expires_at or as_utc(assignment.due_at) or utc_now()
         asset = await db.get(MediaAsset, submission.attachment_asset_id) if submission and submission.attachment_asset_id else None
-        data.append(_assignment_item((assignment, course, target_class), submission, asset, expose_grade=False))
+        data.append(_assignment_item(
+            (assignment, course, target_class), submission, asset, expose_grade=False,
+            exam_id=await _assignment_exam_id(db, assignment.assignment_id),
+        ))
     await db.commit()
     return CourseworkAssignmentListResponse(data=data)
 
