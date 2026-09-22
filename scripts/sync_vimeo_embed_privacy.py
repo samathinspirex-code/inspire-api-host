@@ -20,17 +20,19 @@ async def main() -> None:
         ))).scalars().all()
     video_uris = sorted({uri for url in urls if (uri := video_uri_from_url(url))})
     updated = 0
-    failures: list[str] = []
+    failures: list[tuple[str, str]] = []
     async with VimeoClient() as vimeo:
         for video_uri in video_uris:
             try:
                 await vimeo.update_video_privacy(video_uri)
                 updated += 1
-            except ValidationError:
-                failures.append(video_uri)
+            except ValidationError as error:
+                failures.append((video_uri, str(error)))
     print(f"Updated embed privacy for {updated} LMS Vimeo video(s).")
     if failures:
-        print("Could not update: " + ", ".join(failures))
+        print("Could not update:")
+        for video_uri, reason in failures:
+            print(f"- {video_uri}: {reason}")
 
 
 if __name__ == "__main__":
