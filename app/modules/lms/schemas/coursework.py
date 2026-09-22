@@ -18,6 +18,7 @@ class CourseworkAssignmentCreate(BaseModel):
     max_marks: Decimal = Field(Decimal("100"), gt=0, le=100_000)
     allow_late: bool = False
     status: Literal["draft", "published"] = "draft"
+    question_paper_id: int | None = Field(None, gt=0)
 
     @model_validator(mode="after")
     def validate_timing(self):
@@ -63,6 +64,7 @@ class CourseworkAssignmentItem(BaseModel):
     attachment_url: str | None = None
     attachment_name: str | None = None
     remaining_seconds: int | None = None
+    exam_id: int | None = None
 
 
 class CourseworkAssignmentListResponse(BaseModel):

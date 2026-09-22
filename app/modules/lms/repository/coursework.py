@@ -38,7 +38,10 @@ class CourseworkRepository:
                     LmsClass.class_id == LmsCourseworkAssignment.target_id,
                 ),
             )
-            .where(~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)))
+            .where(~exists(select(LmsExam.exam_id).where(
+                LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsExam.assessment_kind != "assignment_question_paper",
+            )))
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -54,7 +57,10 @@ class CourseworkRepository:
                     LmsClass.class_id == LmsCourseworkAssignment.target_id,
                 ),
             )
-            .where(~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)))
+            .where(~exists(select(LmsExam.exam_id).where(
+                LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsExam.assessment_kind != "assignment_question_paper",
+            )))
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -100,7 +106,10 @@ class CourseworkRepository:
         )
         if not include_exams:
             stmt = stmt.where(
-                ~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id))
+                ~exists(select(LmsExam.exam_id).where(
+                    LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                    LmsExam.assessment_kind != "assignment_question_paper",
+                ))
             )
         return list((await self.db.execute(stmt)).all())
 
