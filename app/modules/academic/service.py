@@ -1047,9 +1047,11 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
         new_assignment_id = await db.scalar(text("""
             INSERT INTO lms_coursework_assignments
               (learning_item_id,course_id,target_type,target_id,title,instructions,assignment_type,
-               available_from,due_at,duration_minutes,max_marks,allow_late,grades_released,status,created_by)
+               submission_type,question_paper_asset_id,available_from,due_at,duration_minutes,max_marks,
+               allow_late,grades_released,status,created_by)
             VALUES (:learning_item_id,:course_id,'class',:class_id,:title,:instructions,:assignment_type,
-                    :available_from,:due_at,:duration_minutes,:max_marks,:allow_late,:grades_released,:status,:user_id)
+                    :submission_type,:question_paper_asset_id,:available_from,:due_at,:duration_minutes,
+                    :max_marks,:allow_late,:grades_released,:status,:user_id)
             RETURNING assignment_id
         """), {**assignment, "learning_item_id": item_map.get(assignment.get("learning_item_id")),
                  "course_id": copied_course_id, "class_id": class_id, "user_id": user_id})

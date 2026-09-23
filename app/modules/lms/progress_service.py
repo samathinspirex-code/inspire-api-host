@@ -137,7 +137,7 @@ async def get_course_progress(
 
     modules = [
         module for module in await ModuleRepository(db).list_by_course(course_id)
-        if module.status == "active"
+        if module.status == "active" and not content_service.is_practice_test_module(module)
     ]
     progress_by_item = await ProgressRepository(db).list_course_progress(
         course_id, student_user_id
@@ -231,7 +231,12 @@ async def get_course_progress_summary(
     await content_service._ensure_course_access(db, course_id, requester_user_id, "LECTURER")
     published_items = select(LmsLearningItem.learning_item_id).join(
         LmsModule, LmsModule.module_id == LmsLearningItem.module_id,
-    ).where(LmsModule.course_id == course_id, LmsModule.status == "active", LmsLearningItem.status == "published")
+    ).where(
+        LmsModule.course_id == course_id,
+        LmsModule.status == "active",
+        func.lower(func.trim(LmsModule.title)) != "practice test",
+        LmsLearningItem.status == "published",
+    )
     total_items = await db.scalar(select(func.count()).select_from(published_items.subquery()))
     totals = select(
         LmsLearningProgress.student_user_id,

@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ExamCreate(BaseModel):
@@ -17,6 +17,14 @@ class ExamCreate(BaseModel):
     randomize_questions: bool = True
     randomize_options: bool = True
 
+    @field_validator("title", "instructions")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Must contain at least 2 non-space characters")
+        return value
+
     @model_validator(mode="after")
     def validate_exam(self):
         if self.available_from and self.due_at and self.due_at <= self.available_from:
@@ -27,6 +35,8 @@ class ExamCreate(BaseModel):
 
 
 class PracticeTestCreate(BaseModel):
+    target_type: Literal["course", "class"] = "course"
+    target_id: int | None = Field(None, gt=0)
     title: str = Field(..., min_length=2, max_length=255)
     instructions: str = Field("Answer every question and submit when finished.", min_length=2, max_length=20_000)
     available_from: datetime | None = None
@@ -35,10 +45,30 @@ class PracticeTestCreate(BaseModel):
     randomize_questions: bool = True
     randomize_options: bool = True
 
+    @field_validator("title", "instructions")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Must contain at least 2 non-space characters")
+        return value
+
     @model_validator(mode="after")
     def validate_practice_test(self):
         if self.available_from and self.due_at and self.due_at <= self.available_from:
             raise ValueError("Due time must be after the available time")
+        return self
+
+
+class ExamScheduleUpdate(BaseModel):
+    available_from: datetime | None = None
+    due_at: datetime | None = None
+    duration_minutes: int = Field(..., ge=1, le=1440)
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.available_from and self.due_at and self.due_at <= self.available_from:
+            raise ValueError("Deadline must be after the available time")
         return self
 
 
@@ -51,6 +81,14 @@ class ExamQuestionUpsert(BaseModel):
     correct_option_index: int | None = Field(None, ge=0)
     correct_option_indices: list[int] | None = None
     accepted_answers: list[str] | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def strip_prompt(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Question must contain at least 2 non-space characters")
+        return value
 
     @model_validator(mode="after")
     def validate_answer_configuration(self):
@@ -75,6 +113,11 @@ class ExamQuestionUpsert(BaseModel):
         else:
             self.accepted_answers = None
         return self
+
+
+class ExamQuestionImportRequest(BaseModel):
+    raw_text: str = Field(..., min_length=10, max_length=200_000)
+    marks_per_question: Decimal = Field(Decimal("1"), gt=0, le=100_000)
 
 
 class ExamQuestionEditorItem(BaseModel):
@@ -169,6 +212,14 @@ class ExamAnswerUpdate(BaseModel):
     selected_option_index: int | None = Field(None, ge=0)
     selected_option_indices: list[int] | None = None
     answer_text: str | None = Field(None, max_length=100_000)
+
+    @model_validator(mode="after")
+    def validate_multiple_answer_indices(self):
+        if self.selected_option_indices is not None:
+            if any(index < 0 for index in self.selected_option_indices):
+                raise ValueError("Selected option indices cannot be negative")
+            self.selected_option_indices = sorted(set(self.selected_option_indices))
+        return self
 
 
 class ExamAnswersUpdate(BaseModel):

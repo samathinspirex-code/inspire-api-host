@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
+from decimal import Decimal
+
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth import service as auth_service
 from app.modules.auth.models import AuthenticatorCredential, User
 from app.modules.auth.repository.authenticator import AuthenticatorRepository
@@ -12,6 +14,7 @@ from app.modules.cms.models import MediaAsset
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
 from app.modules.lms.models import (
     AttendanceRecord,
+    AttendanceSession,
     ClassLecturer,
     ClassStudent,
     CourseEnrollment,
@@ -21,6 +24,9 @@ from app.modules.lms.models import (
     LmsCourse,
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
+    LmsExam,
+    LmsExamAttempt,
+    LmsExamQuestion,
     LmsLearningItem,
     LmsLearningProgress,
     LmsModule,
@@ -33,6 +39,12 @@ from app.modules.lms.schemas import (
     ProfileStatistics,
     ProfileUpcomingItem,
     RecoveryCodesResponse,
+    StudentAcademicActivity,
+    StudentAcademicAssessment,
+    StudentAcademicAttendance,
+    StudentAcademicClass,
+    StudentAcademicCourse,
+    StudentAcademicProfileResponse,
 )
 
 
@@ -90,7 +102,7 @@ async def _student_statistics(
             .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
             .where(
                 LmsModule.course_id.in_(course_ids),
-                LmsModule.status == "published",
+                LmsModule.status == "active",
                 LmsLearningItem.status == "published",
                 LmsLearningItem.is_required.is_(True),
             )
@@ -298,6 +310,230 @@ async def get_my_profile(db: AsyncSession, user_id: int, role: str) -> MyProfile
             recovery_codes_remaining=recovery_count, statistics=statistics, upcoming=upcoming,
         )
     raise ValidationError("Profiles are available to students and lecturers")
+
+
+def _percent(earned, possible) -> float | None:
+    if earned is None or not possible or Decimal(possible) <= 0:
+        return None
+    return round(float(Decimal(earned) * 100 / Decimal(possible)), 1)
+
+
+async def _ensure_student_profile_access(
+    db: AsyncSession, student_user_id: int, viewer_user_id: int, viewer_role: str
+) -> None:
+    if viewer_role in {"SUPER_ADMIN", "ADMIN"} or (
+        viewer_role == "STUDENT" and viewer_user_id == student_user_id
+    ):
+        return
+    if viewer_role != "LECTURER":
+        raise ForbiddenError("You cannot view this student profile")
+    course_access = await db.scalar(
+        select(func.count()).select_from(CourseEnrollment)
+        .join(CourseLecturer, CourseLecturer.course_id == CourseEnrollment.course_id)
+        .where(
+            CourseEnrollment.student_user_id == student_user_id,
+            CourseEnrollment.status == "enrolled",
+            CourseLecturer.lecturer_user_id == viewer_user_id,
+        )
+    )
+    class_access = await db.scalar(
+        select(func.count()).select_from(ClassStudent)
+        .join(ClassLecturer, ClassLecturer.class_id == ClassStudent.class_id)
+        .where(
+            ClassStudent.student_user_id == student_user_id,
+            ClassLecturer.lecturer_user_id == viewer_user_id,
+        )
+    )
+    if not course_access and not class_access:
+        raise ForbiddenError("You can view profiles only for students you teach")
+
+
+async def get_student_academic_profile(
+    db: AsyncSession, student_user_id: int, viewer_user_id: int, viewer_role: str
+) -> StudentAcademicProfileResponse:
+    await _ensure_student_profile_access(db, student_user_id, viewer_user_id, viewer_role)
+    user = await db.get(User, student_user_id)
+    profile = await db.get(StudentProfile, student_user_id)
+    if user is None or profile is None:
+        raise NotFoundError("Student profile not found")
+
+    course_rows = (await db.execute(
+        select(CourseEnrollment, LmsCourse)
+        .join(LmsCourse, LmsCourse.course_id == CourseEnrollment.course_id)
+        .where(CourseEnrollment.student_user_id == student_user_id,
+               CourseEnrollment.status == "enrolled")
+        .order_by(LmsCourse.code)
+    )).all()
+    course_ids = [course.course_id for _enrolment, course in course_rows]
+    course_map = {course.course_id: course for _enrolment, course in course_rows}
+
+    class_rows = (await db.execute(
+        select(LmsClass, LmsCourse)
+        .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
+        .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+        .where(ClassStudent.student_user_id == student_user_id)
+        .order_by(LmsClass.start_date.desc(), LmsClass.code)
+    )).all()
+    class_ids = [class_.class_id for class_, _course in class_rows]
+    class_map = {class_.class_id: class_ for class_, _course in class_rows}
+
+    progress_rows = []
+    if course_ids:
+        progress_rows = (await db.execute(
+            select(LmsLearningItem, LmsModule, LmsLearningProgress)
+            .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
+            .outerjoin(LmsLearningProgress, and_(
+                LmsLearningProgress.learning_item_id == LmsLearningItem.learning_item_id,
+                LmsLearningProgress.student_user_id == student_user_id,
+            ))
+            .where(
+                LmsModule.course_id.in_(course_ids),
+                LmsModule.status == "active",
+                LmsLearningItem.status == "published",
+                LmsLearningItem.is_required.is_(True),
+                func.lower(func.trim(LmsModule.title)) != "practice test",
+            )
+            .order_by(LmsModule.course_id, LmsModule.position, LmsLearningItem.position)
+        )).all()
+
+    progress_by_course = {course_id: {"total": 0, "completed": 0, "sum": 0.0, "last": None} for course_id in course_ids}
+    activities = []
+    for item, module, progress in progress_rows:
+        summary = progress_by_course[module.course_id]
+        summary["total"] += 1
+        if progress is not None:
+            summary["completed"] += int(progress.is_completed)
+            summary["sum"] += progress.completion_percent
+            if summary["last"] is None or progress.last_activity_at > summary["last"]:
+                summary["last"] = progress.last_activity_at
+            activities.append(StudentAcademicActivity(
+                learning_item_id=item.learning_item_id, item_title=item.title,
+                item_type=item.item_type, course_code=course_map[module.course_id].code,
+                section_title=module.title, completion_percent=progress.completion_percent,
+                is_completed=progress.is_completed, last_activity_at=progress.last_activity_at,
+            ))
+    activities.sort(key=lambda item: item.last_activity_at, reverse=True)
+
+    eligibility = []
+    if course_ids:
+        eligibility.append(and_(LmsCourseworkAssignment.target_type == "course",
+                                LmsCourseworkAssignment.target_id.in_(course_ids)))
+    if class_ids:
+        eligibility.append(and_(LmsCourseworkAssignment.target_type == "class",
+                                LmsCourseworkAssignment.target_id.in_(class_ids)))
+
+    assignment_rows = []
+    exam_rows = []
+    if eligibility:
+        assignment_rows = (await db.execute(
+            select(LmsCourseworkAssignment, LmsCourseworkSubmission)
+            .outerjoin(LmsCourseworkSubmission, and_(
+                LmsCourseworkSubmission.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsCourseworkSubmission.student_user_id == student_user_id,
+            ))
+            .where(LmsCourseworkAssignment.status == "published", or_(*eligibility))
+            .order_by(LmsCourseworkAssignment.due_at.desc())
+        )).all()
+        exam_rows = (await db.execute(
+            select(LmsExam, LmsExamAttempt)
+            .outerjoin(LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id,
+                                           LmsExamAttempt.student_user_id == student_user_id))
+            .where(LmsExam.status == "published", or_(
+                and_(LmsExam.target_type == "course", LmsExam.target_id.in_(course_ids or [-1])),
+                and_(LmsExam.target_type == "class", LmsExam.target_id.in_(class_ids or [-1])),
+            )).order_by(LmsExam.due_at.desc())
+        )).all()
+
+    exam_assignment_ids = {exam.assignment_id for exam, _attempt in exam_rows}
+    show_private_marks = viewer_role != "STUDENT"
+    assignments = []
+    for assignment, submission in assignment_rows:
+        if assignment.assignment_id in exam_assignment_ids:
+            continue
+        visible = show_private_marks or assignment.grades_released
+        marks = submission.marks_awarded if submission and visible else None
+        assignments.append(StudentAcademicAssessment(
+            assessment_id=assignment.assignment_id, kind="assignment", title=assignment.title,
+            course_code=course_map[assignment.course_id].code,
+            course_title=course_map[assignment.course_id].title,
+            class_name=class_map.get(assignment.target_id).name if assignment.target_type == "class" and assignment.target_id in class_map else None,
+            status=submission.status if submission else "not_started", marks_awarded=marks,
+            max_marks=assignment.max_marks, percentage=_percent(marks, assignment.max_marks),
+            feedback=submission.feedback if submission and visible else None,
+            submitted_at=submission.submitted_at if submission else None, due_at=assignment.due_at,
+            grades_released=assignment.grades_released,
+        ))
+
+    question_totals = {}
+    exam_ids = [exam.exam_id for exam, _attempt in exam_rows]
+    if exam_ids:
+        question_totals = dict((await db.execute(
+            select(LmsExamQuestion.exam_id, func.sum(LmsExamQuestion.marks))
+            .where(LmsExamQuestion.exam_id.in_(exam_ids)).group_by(LmsExamQuestion.exam_id)
+        )).all())
+    practice_tests, question_papers = [], []
+    for exam, attempt in exam_rows:
+        maximum = Decimal(question_totals.get(exam.exam_id) or 0)
+        visible = show_private_marks or exam.grades_released
+        marks = attempt.total_marks if attempt and visible else None
+        target = practice_tests if exam.assessment_kind == "practice_test" else question_papers
+        target.append(StudentAcademicAssessment(
+            assessment_id=exam.exam_id, kind=exam.assessment_kind, title=exam.title,
+            course_code=course_map[exam.course_id].code, course_title=course_map[exam.course_id].title,
+            class_name=class_map.get(exam.target_id).name if exam.target_type == "class" and exam.target_id in class_map else None,
+            status=attempt.status if attempt else "not_started", marks_awarded=marks, max_marks=maximum,
+            percentage=_percent(marks, maximum), feedback=attempt.feedback if attempt and visible else None,
+            submitted_at=attempt.submitted_at if attempt else None, due_at=exam.due_at,
+            grades_released=exam.grades_released,
+        ))
+
+    attendance_rows = (await db.execute(
+        select(AttendanceRecord, AttendanceSession, OnlineMeeting, LmsClass, LmsCourse)
+        .join(AttendanceSession, AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id)
+        .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
+        .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
+        .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+        .where(AttendanceRecord.student_user_id == student_user_id)
+        .order_by(OnlineMeeting.start_time.desc())
+    )).all()
+    attendance = [StudentAcademicAttendance(
+        attendance_record_id=record.attendance_record_id, meeting_title=meeting.title,
+        course_code=course.code, class_name=class_.name, started_at=meeting.start_time,
+        status=record.status, attendance_percentage=record.attendance_percentage,
+        attended_seconds=record.attended_seconds,
+    ) for record, _session, meeting, class_, course in attendance_rows]
+
+    graded_assignments = [item for item in assignments if item.percentage is not None]
+    graded_practice = [item for item in practice_tests if item.percentage is not None]
+    present = sum(item.status == "present" for item in attendance)
+    overall_total = sum(value["total"] for value in progress_by_course.values())
+    overall_progress = round(sum(value["sum"] for value in progress_by_course.values()) / overall_total, 1) if overall_total else None
+    return StudentAcademicProfileResponse(
+        user_id=user.user_id, full_name=user.full_name or user.email,
+        preferred_name=profile.preferred_name, email=user.email, student_number=profile.student_number,
+        profile_image_url=profile.profile_image_url, phone=profile.phone, city=profile.city,
+        country=profile.country, bio=profile.bio,
+        last_activity_at=activities[0].last_activity_at if activities else None,
+        course_progress=overall_progress,
+        attendance_percentage=round(present * 100 / len(attendance), 1) if attendance else None,
+        assignment_average=round(sum(item.percentage for item in graded_assignments) / len(graded_assignments), 1) if graded_assignments else None,
+        practice_average=round(sum(item.percentage for item in graded_practice) / len(graded_practice), 1) if graded_practice else None,
+        courses=[StudentAcademicCourse(
+            course_id=course.course_id, course_code=course.code, course_title=course.title,
+            status=course.status,
+            completion_percent=round(progress_by_course[course.course_id]["sum"] / progress_by_course[course.course_id]["total"], 1) if progress_by_course[course.course_id]["total"] else 0,
+            completed_items=progress_by_course[course.course_id]["completed"],
+            total_items=progress_by_course[course.course_id]["total"],
+            last_activity_at=progress_by_course[course.course_id]["last"],
+        ) for _enrolment, course in course_rows],
+        classes=[StudentAcademicClass(
+            class_id=class_.class_id, course_id=course.course_id, class_code=class_.code,
+            class_name=class_.name, course_code=course.code, course_title=course.title,
+            status=class_.status, start_date=class_.start_date, end_date=class_.end_date,
+        ) for class_, course in class_rows],
+        assignments=assignments, practice_tests=practice_tests, question_papers=question_papers,
+        attendance=attendance, recent_activity=activities[:30],
+    )
 
 
 async def update_my_profile(

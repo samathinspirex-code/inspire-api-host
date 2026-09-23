@@ -13,6 +13,8 @@ from app.modules.lms.models import (
     CourseEnrollment,
     CourseLecturer,
     LmsClass,
+    LmsCourseworkAssignment,
+    LmsExam,
     LmsLearningItem,
     LmsModule,
     LmsModuleAccess,
@@ -122,6 +124,41 @@ def _student_access(rules, course_id: int, user_id: int, class_ids: set[int]) ->
     return True, None
 
 
+def is_practice_test_module(module) -> bool:
+    return module.title.strip().casefold() == "practice test"
+
+
+async def _student_visible_practice_item_ids(
+    db: AsyncSession,
+    course_id: int,
+    student_id: int,
+    item_ids: list[int],
+    class_ids: set[int],
+) -> set[int]:
+    """Use the assessment release as the source of truth for practice cards.
+
+    The learning item is only the Course Studio container. Older data can have
+    a stale item status even though the linked practice test was published, so
+    student visibility must follow the assessment and its intended audience.
+    """
+    if not item_ids:
+        return set()
+    audience = [LmsExam.target_type == "course"]
+    if class_ids:
+        audience.append(and_(LmsExam.target_type == "class", LmsExam.target_id.in_(class_ids)))
+    return set((await db.execute(
+        select(LmsCourseworkAssignment.learning_item_id)
+        .join(LmsExam, LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)
+        .where(
+            LmsExam.course_id == course_id,
+            LmsExam.assessment_kind == "practice_test",
+            LmsExam.status.in_(("published", "closed")),
+            LmsCourseworkAssignment.learning_item_id.in_(item_ids),
+            or_(*audience),
+        )
+    )).scalars().all())
+
+
 def _student_stream_url(item) -> str | None:
     if item.item_type != "video" or not item.resource_url:
         return item.resource_url
@@ -158,7 +195,23 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
     item, module, enrollment_status = target
     if enrollment_status != "enrolled":
         raise ForbiddenError("You are not enrolled in this course")
-    if module.status != "active" or item.status != "published":
+    if module.status != "active":
+        raise ForbiddenError("This learning item is not published")
+
+    if is_practice_test_module(module):
+        class_ids = set((await db.execute(
+            select(ClassStudent.class_id)
+            .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+            .where(LmsClass.course_id == module.course_id, ClassStudent.student_user_id == student_id)
+        )).scalars().all())
+        visible = await _student_visible_practice_item_ids(
+            db, module.course_id, student_id, [item.learning_item_id], class_ids,
+        )
+        if item.learning_item_id not in visible:
+            raise ForbiddenError("This practice test has not been released to you")
+        return item
+
+    if item.status != "published":
         raise ForbiddenError("This learning item is not published")
 
     student_classes = select(ClassStudent.class_id).join(
@@ -246,6 +299,17 @@ async def get_course_studio(
     module_ids = [module.module_id for module in visible_modules]
     rules_by_module = await repo.list_access_for_modules(module_ids)
     items_by_module = await repo.list_items_for_modules(module_ids)
+    visible_practice_item_ids: set[int] = set()
+    if role == "STUDENT":
+        practice_item_ids = [
+            item.learning_item_id
+            for module in visible_modules if is_practice_test_module(module)
+            for item in items_by_module.get(module.module_id, [])
+            if item.item_type == "quiz" and (item.resource_url or "").startswith("practice-test:")
+        ]
+        visible_practice_item_ids = await _student_visible_practice_item_ids(
+            db, course_id, user_id, practice_item_ids, class_ids,
+        )
     progress_by_item = (
         await ProgressRepository(db).list_course_progress(course_id, user_id)
         if role == "STUDENT" else {}
@@ -272,13 +336,21 @@ async def get_course_studio(
     for module in visible_modules:
         rules = rules_by_module.get(module.module_id, [])
         privileged_viewer = role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
-        unlocked, reason = (True, None) if privileged_viewer else _student_access(rules, course_id, user_id, class_ids)
+        independent_practice = is_practice_test_module(module)
+        unlocked, reason = (True, None) if privileged_viewer or independent_practice else _student_access(rules, course_id, user_id, class_ids)
         items = items_by_module.get(module.module_id, [])
         if role == "STUDENT":
-            items = [item for item in items if item.status == "published"]
+            items = [
+                item for item in items
+                if (
+                    item.learning_item_id in visible_practice_item_ids
+                    if independent_practice
+                    else item.status == "published"
+                )
+            ]
         item_responses = []
         for item in items:
-            accessible = unlocked and blocked_by_video is None
+            accessible = unlocked and (independent_practice or blocked_by_video is None)
             item_reason = reason if not unlocked else (
                 f"Complete the knowledge check for {blocked_by_video} first."
                 if blocked_by_video else None
@@ -392,6 +464,8 @@ async def update_module_access(
     db: AsyncSession, module_id: int, payload: ModuleAccessUpdate, user_id: int
 ) -> ModuleAccessResponse:
     module = await _ensure_module_manager(db, module_id, user_id)
+    if is_practice_test_module(module):
+        raise ValidationError("Practice Tests use their own release plan and cannot be locked as a course section")
     if payload.scope_type == "course" and payload.scope_id != module.course_id:
         raise ValidationError("Course access scope must use this section's course_id")
     if payload.scope_type == "class":

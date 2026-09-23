@@ -8,8 +8,11 @@ from app.modules.lms import vimeo_service
 class FakeDatabase:
     def __init__(self):
         self.events = []
-        self.item = SimpleNamespace(item_type="video", resource_url="https://vimeo.com/12345",
-                                    thumbnail_url="https://images.example/old.jpg")
+        self.item = SimpleNamespace(
+            item_type="video",
+            resource_url="https://vimeo.com/12345",
+            thumbnail_url="https://images.example/old.jpg",
+        )
 
     async def get(self, _model, _item_id):
         self.events.append("db_get")
@@ -43,6 +46,7 @@ class VimeoConnectionSafetyTests(unittest.IsolatedAsyncioTestCase):
         FakeVimeoClient.events = db.events
         with patch.object(vimeo_service, "VimeoClient", FakeVimeoClient):
             refreshed = await vimeo_service.refresh_learning_item_thumbnail(db, 100)
+
         self.assertTrue(refreshed)
         self.assertLess(db.events.index("db_release"), db.events.index("vimeo_get"))
         self.assertEqual(db.item.thumbnail_url, "https://images.example/final.jpg")

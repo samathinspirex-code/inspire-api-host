@@ -42,6 +42,7 @@ class PortalRepository:
             select(func.count(LmsModule.module_id))
             .where(
                 LmsModule.course_id == LmsCourse.course_id,
+                func.lower(func.trim(LmsModule.title)) != "practice test",
                 *([LmsModule.status == "active"] if role == "STUDENT" else []),
             )
             .correlate(LmsCourse)

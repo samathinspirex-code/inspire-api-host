@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS lms_coursework_assignments (
     target_id BIGINT NOT NULL,
     title VARCHAR(255) NOT NULL,
     instructions TEXT NOT NULL,
+    material_asset_id BIGINT REFERENCES media_assets(media_asset_id) ON DELETE SET NULL,
     assignment_type VARCHAR(20) NOT NULL DEFAULT 'regular' CHECK (assignment_type IN ('regular', 'timed')),
     available_from TIMESTAMPTZ,
     due_at TIMESTAMPTZ,
@@ -23,6 +24,19 @@ CREATE TABLE IF NOT EXISTS lms_coursework_assignments (
 
 ALTER TABLE lms_coursework_assignments
     ADD COLUMN IF NOT EXISTS grades_released BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE lms_coursework_assignments
+    ADD COLUMN IF NOT EXISTS submission_type VARCHAR(30) NOT NULL DEFAULT 'written';
+ALTER TABLE lms_coursework_assignments
+    ADD COLUMN IF NOT EXISTS question_paper_asset_id BIGINT REFERENCES media_assets(media_asset_id) ON DELETE SET NULL;
+ALTER TABLE lms_coursework_assignments
+    ADD COLUMN IF NOT EXISTS material_asset_id BIGINT REFERENCES media_assets(media_asset_id) ON DELETE SET NULL;
+
+DO $$ BEGIN
+    ALTER TABLE lms_coursework_assignments ADD CONSTRAINT chk_lms_coursework_submission_type
+        CHECK (submission_type IN ('written', 'pdf_annotation', 'multimedia', 'coding'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_lms_coursework_course_status
     ON lms_coursework_assignments(course_id, status);

@@ -3,7 +3,7 @@ from collections import defaultdict
 from decimal import Decimal
 from io import StringIO
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
@@ -67,10 +67,6 @@ async def lecturer_gradebook(
     ).where(
         LmsCourseworkAssignment.course_id == course_id,
         LmsCourseworkAssignment.status.in_(("published", "closed")),
-        ~exists(select(LmsExam.exam_id).where(
-            LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
-            LmsExam.assessment_kind.in_(("practice_test", "exam", "question_paper")),
-        )),
     )
     if class_id is not None:
         assignment_stmt = assignment_stmt.where(or_(
