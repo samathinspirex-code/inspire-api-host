@@ -28,6 +28,13 @@ class LmsCourseworkAssignment(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     assignment_type: Mapped[str] = mapped_column(String(20), nullable=False, default="regular")
+    submission_type: Mapped[str] = mapped_column(String(30), nullable=False, default="written")
+    question_paper_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media_assets.media_asset_id", ondelete="SET NULL")
+    )
+    material_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media_assets.media_asset_id", ondelete="SET NULL")
+    )
     available_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_minutes: Mapped[int | None] = mapped_column(Integer)

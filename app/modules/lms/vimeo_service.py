@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import logging
 import asyncio
-from html.parser import HTMLParser
+from html import unescape
 from urllib.parse import quote
 
 import httpx
@@ -40,33 +40,14 @@ logger = logging.getLogger(__name__)
 _thumbnail_refresh_slots = asyncio.Semaphore(2)
 
 
-class _RichTextToPlainText(HTMLParser):
-    block_tags = {"blockquote", "br", "div", "h1", "h2", "h3", "li", "ol", "p", "pre", "ul"}
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-
-    def handle_starttag(self, tag: str, _attrs) -> None:
-        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in self.block_tags and self.parts and not self.parts[-1].endswith("\n"):
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        self.parts.append(data)
-
-
 def _vimeo_description(value: str | None) -> str | None:
-    if not value:
+    """Convert the LMS rich-text description to Vimeo-safe plain text."""
+    if not value or not value.strip():
         return None
-    parser = _RichTextToPlainText()
-    parser.feed(value)
-    lines = [" ".join(line.split()) for line in "".join(parser.parts).splitlines()]
-    plain = "\n".join(line for line in lines if line).strip()
-    return plain or None
+    text = re.sub(r"</?(?:p|div|h[1-6]|li|ol|ul|br)[^>]*>", "\n", value, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in unescape(text).splitlines()]
+    return "\n".join(line for line in lines if line) or None
 
 
 class VimeoPermissionError(ValidationError):
@@ -405,7 +386,9 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     video_uri = video_uri_from_url(resource_url)
     if not video_uri:
         return False
-    # Release the scarce PostgreSQL session before waiting on Vimeo.
+    # Do not hold a scarce PostgreSQL session while Vimeo performs network I/O.
+    # The fresh lookup below also protects against an item being deleted while
+    # the remote request is in flight.
     await db.rollback()
     async with VimeoClient() as vimeo:
         video = await vimeo.get_video(video_uri)

@@ -501,10 +501,18 @@ async def refresh_tokens(db: AsyncSession, refresh_token_plain: str) -> TokenRes
         raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
 
     if token_row.revoked_at is not None:
-        await refresh_repo.revoke_all_for_user(token_row.user_id)
-        raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
-
-    await refresh_repo.revoke(token_row)
+        revoked_at = token_row.revoked_at
+        if revoked_at.tzinfo is None:
+            revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+        reuse_age = (now - revoked_at).total_seconds()
+        if reuse_age < 0 or reuse_age > settings.REFRESH_TOKEN_REUSE_GRACE_SECONDS:
+            await refresh_repo.revoke_all_for_user(token_row.user_id)
+            raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
+        # Multiple browser tabs can refresh the same session at once. Permit a
+        # brief overlap so the slower tab does not revoke the token just issued
+        # to the faster tab. Reuse outside this window still triggers revocation.
+    else:
+        await refresh_repo.revoke(token_row)
 
     user = await UserRepository(db).get(token_row.user_id)
     if user is None or not user.is_active:

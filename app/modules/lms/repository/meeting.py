@@ -1,10 +1,13 @@
-from sqlalchemy import func, select
+from datetime import datetime, timezone
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import User
 from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
+    CourseEnrollment,
     LmsClass,
     LmsCourse,
     OnlineMeeting,
@@ -88,8 +91,25 @@ class MeetingRepository:
         elif role == "LECTURER":
             stmt = stmt.where(OnlineMeeting.lecturer_user_id == user_id)
         else:
-            stmt = stmt.join(ClassStudent, ClassStudent.class_id == OnlineMeeting.class_id).where(
-                ClassStudent.student_user_id == user_id
+            now = datetime.now(timezone.utc)
+            stmt = stmt.join(
+                ClassStudent,
+                and_(
+                    ClassStudent.class_id == OnlineMeeting.class_id,
+                    ClassStudent.student_user_id == user_id,
+                ),
+            ).join(
+                CourseEnrollment,
+                and_(
+                    CourseEnrollment.course_id == LmsCourse.course_id,
+                    CourseEnrollment.student_user_id == user_id,
+                    CourseEnrollment.status == "enrolled",
+                ),
+            ).where(
+                LmsCourse.status == "active",
+                LmsClass.status.in_(("planned", "active")),
+                OnlineMeeting.status == "scheduled",
+                OnlineMeeting.end_time >= now,
             )
         stmt = stmt.order_by(OnlineMeeting.start_time.desc())
         return list((await self.db.execute(stmt)).all())

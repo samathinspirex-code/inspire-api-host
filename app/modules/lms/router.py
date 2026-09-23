@@ -137,8 +137,10 @@ from app.modules.lms.schemas import (
     ExamItem,
     ExamGradeReleaseUpdate,
     ExamListResponse,
+    ExamQuestionImportRequest,
     ExamQuestionUpsert,
     ExamResultResponse,
+    ExamScheduleUpdate,
     ExamStatusUpdate,
     AnnouncementCreate,
     AnnouncementItem,
@@ -149,6 +151,7 @@ from app.modules.lms.schemas import (
     NotificationReadUpdate,
     MyProfileResponse,
     MyProfileUpdate,
+    StudentAcademicProfileResponse,
     AnalyticsDashboardResponse,
     VimeoCourseLibraryResponse,
     VimeoUploadFinalizeRequest,
@@ -231,6 +234,17 @@ async def get_my_profile(
     )
 
 
+@router.get("/students/{student_user_id}/academic-profile", response_model=StudentAcademicProfileResponse)
+async def get_student_academic_profile(
+    student_user_id: int,
+    current_user: CurrentUser = Depends(portal_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentAcademicProfileResponse:
+    return await profile_service.get_student_academic_profile(
+        db, student_user_id, current_user.user_id, service.resolve_role(current_user.access)
+    )
+
+
 @router.get("/analytics/dashboard", response_model=AnalyticsDashboardResponse)
 async def get_analytics_dashboard(
     response: Response,
@@ -293,6 +307,35 @@ async def create_coursework_assignment(
     db: AsyncSession = Depends(get_db),
 ) -> CourseworkAssignmentItem:
     return await coursework_service.create_assignment(db, payload, current_user.user_id)
+
+
+@router.put("/coursework/assignments/{assignment_id}", response_model=CourseworkAssignmentItem)
+async def update_coursework_assignment(
+    assignment_id: int,
+    payload: CourseworkAssignmentCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.update_assignment(db, assignment_id, payload, current_user.user_id)
+
+
+@router.delete("/coursework/assignments/{assignment_id}", status_code=204)
+async def delete_coursework_assignment(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await coursework_service.delete_assignment(db, assignment_id, current_user.user_id)
+    return Response(status_code=204)
+
+
+@router.patch("/coursework/assignments/{assignment_id}/activate", response_model=CourseworkAssignmentItem)
+async def activate_coursework_assignment(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.activate_assignment(db, assignment_id, current_user.user_id)
 
 
 @router.post("/coursework/assignments/{assignment_id}/start", response_model=CourseworkAssignmentItem)
@@ -368,6 +411,25 @@ async def complete_coursework_upload(
     return await coursework_service.complete_student_upload(db, asset_id, current_user.user_id)
 
 
+@router.post("/coursework/materials/uploads", response_model=MediaUploadTicket)
+async def request_coursework_material_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    material_payload = payload.model_copy(update={"folder": "assignment-materials"})
+    return await media_service.request_upload(db, material_payload, current_user.user_id)
+
+
+@router.post("/coursework/materials/{asset_id}/complete", response_model=MediaAssetResponse)
+async def complete_coursework_material_upload(
+    asset_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAssetResponse:
+    return await coursework_service.complete_material_upload(db, asset_id, current_user.user_id)
+
+
 @router.patch(
     "/coursework/assignments/{assignment_id}/grade-release",
     response_model=CourseworkAssignmentItem,
@@ -429,7 +491,7 @@ async def get_student_grades(
 async def list_exams(
     course_id: int | None = Query(None, gt=0),
     class_id: int | None = Query(None, gt=0),
-    current_user: CurrentUser = Depends(lecturer_access),
+    current_user: CurrentUser = Depends(exam_access),
     db: AsyncSession = Depends(get_db),
 ) -> ExamListResponse:
     return await exam_service.list_exams(db, current_user.user_id, service.resolve_role(current_user.access) or "", course_id, class_id)
@@ -484,6 +546,16 @@ async def add_exam_question(
     return await exam_service.add_question(db, exam_id, payload, current_user.user_id)
 
 
+@router.post("/exams/{exam_id}/questions/import", response_model=ExamEditorResponse)
+async def import_exam_questions(
+    exam_id: int,
+    payload: ExamQuestionImportRequest,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.import_questions(db, exam_id, payload, current_user.user_id)
+
+
 @router.put("/exam-questions/{question_id}", response_model=ExamEditorResponse)
 async def update_exam_question(
     question_id: int,
@@ -511,6 +583,16 @@ async def update_exam_status(
     db: AsyncSession = Depends(get_db),
 ) -> ExamEditorResponse:
     return await exam_service.update_status(db, exam_id, payload.status, current_user.user_id)
+
+
+@router.patch("/exams/{exam_id}/schedule", response_model=ExamEditorResponse)
+async def update_exam_schedule(
+    exam_id: int,
+    payload: ExamScheduleUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ExamEditorResponse:
+    return await exam_service.update_schedule(db, exam_id, payload, current_user.user_id)
 
 
 @router.patch("/exams/{exam_id}/grade-release", response_model=ExamEditorResponse)

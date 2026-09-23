@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
@@ -60,6 +61,93 @@ class MyProfileResponse(BaseModel):
     recovery_codes_remaining: int
     statistics: ProfileStatistics
     upcoming: list[ProfileUpcomingItem]
+
+
+class StudentAcademicCourse(BaseModel):
+    course_id: int
+    course_code: str
+    course_title: str
+    status: str
+    completion_percent: float
+    completed_items: int
+    total_items: int
+    last_activity_at: datetime | None = None
+
+
+class StudentAcademicClass(BaseModel):
+    class_id: int
+    course_id: int
+    class_code: str
+    class_name: str
+    course_code: str
+    course_title: str
+    status: str
+    start_date: date
+    end_date: date
+
+
+class StudentAcademicAssessment(BaseModel):
+    assessment_id: int
+    kind: str
+    title: str
+    course_code: str
+    course_title: str
+    class_name: str | None = None
+    status: str
+    marks_awarded: Decimal | None = None
+    max_marks: Decimal
+    percentage: float | None = None
+    feedback: str | None = None
+    submitted_at: datetime | None = None
+    due_at: datetime | None = None
+    grades_released: bool = False
+
+
+class StudentAcademicAttendance(BaseModel):
+    attendance_record_id: int
+    meeting_title: str
+    course_code: str
+    class_name: str
+    started_at: datetime
+    status: str
+    attendance_percentage: float
+    attended_seconds: int
+
+
+class StudentAcademicActivity(BaseModel):
+    learning_item_id: int
+    item_title: str
+    item_type: str
+    course_code: str
+    section_title: str
+    completion_percent: float
+    is_completed: bool
+    last_activity_at: datetime
+
+
+class StudentAcademicProfileResponse(BaseModel):
+    user_id: int
+    full_name: str
+    preferred_name: str | None = None
+    email: str
+    student_number: str
+    profile_image_url: str | None = None
+    phone: str | None = None
+    city: str | None = None
+    country: str | None = None
+    bio: str | None = None
+    last_activity_at: datetime | None = None
+    course_progress: float | None = None
+    attendance_percentage: float | None = None
+    assignment_average: float | None = None
+    practice_average: float | None = None
+    courses: list[StudentAcademicCourse]
+    classes: list[StudentAcademicClass]
+    assignments: list[StudentAcademicAssessment]
+    practice_tests: list[StudentAcademicAssessment]
+    question_papers: list[StudentAcademicAssessment]
+    attendance: list[StudentAcademicAttendance]
+    recent_activity: list[StudentAcademicActivity]
 
 
 class RecoveryCodesRegenerateRequest(BaseModel):

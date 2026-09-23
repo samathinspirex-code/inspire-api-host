@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -13,8 +13,6 @@ from app.modules.lms.models import (
     LmsClass,
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
-    LmsExam,
-    LmsExamQuestion,
 )
 from app.modules.lms.repository import CourseworkRepository
 from app.modules.lms.schemas import (
@@ -57,6 +55,18 @@ def remaining_seconds(expires_at: datetime | None, now: datetime | None = None) 
     return max(0, seconds)
 
 
+def assignment_is_available(available_from: datetime | None, now: datetime | None = None) -> bool:
+    return available_from is None or as_utc(available_from) <= (as_utc(now) or utc_now())
+
+
+def _expire_with_zero(submission: LmsCourseworkSubmission, closed_at: datetime | None = None) -> None:
+    submission.status = "expired"
+    submission.submitted_at = as_utc(closed_at) or utc_now()
+    submission.marks_awarded = Decimal("0")
+    submission.feedback = "Automatically graded zero because the submission deadline passed."
+    submission.marked_at = utc_now()
+
+
 async def _ensure_lecturer_course(db: AsyncSession, course_id: int, user_id: int) -> None:
     from app.modules.lms import content_service
     await content_service.ensure_course_manager(db, course_id, user_id)
@@ -77,7 +87,9 @@ def _asset_url(asset: MediaAsset | None) -> str | None:
     return media_service._public_url(asset.object_key)
 
 
-def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True, exam_id: int | None = None) -> CourseworkAssignmentItem:
+def _assignment_item(
+    row, submission=None, asset=None, question_paper=None, expose_grade: bool = True, material=None
+) -> CourseworkAssignmentItem:
     assignment, course, target_class = row
     return CourseworkAssignmentItem(
         assignment_id=assignment.assignment_id,
@@ -90,6 +102,13 @@ def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True
         title=assignment.title,
         instructions=assignment.instructions,
         assignment_type=assignment.assignment_type,
+        submission_type=assignment.submission_type,
+        question_paper_asset_id=assignment.question_paper_asset_id,
+        question_paper_url=_asset_url(question_paper),
+        question_paper_name=question_paper.original_filename if question_paper else None,
+        material_asset_id=assignment.material_asset_id,
+        material_url=_asset_url(material),
+        material_name=material.original_filename if material else None,
         available_from=assignment.available_from,
         due_at=assignment.due_at,
         duration_minutes=assignment.duration_minutes,
@@ -110,15 +129,20 @@ def _assignment_item(row, submission=None, asset=None, expose_grade: bool = True
         attachment_url=_asset_url(asset),
         attachment_name=asset.original_filename if asset else None,
         remaining_seconds=remaining_seconds(submission.expires_at) if submission else None,
-        exam_id=exam_id,
     )
 
 
-async def _assignment_exam_id(db: AsyncSession, assignment_id: int) -> int | None:
-    return await db.scalar(select(LmsExam.exam_id).where(
-        LmsExam.assignment_id == assignment_id,
-        LmsExam.assessment_kind == "assignment_question_paper",
-    ))
+async def _assignment_material(db: AsyncSession, assignment: LmsCourseworkAssignment) -> MediaAsset | None:
+    return await db.get(MediaAsset, assignment.material_asset_id) if assignment.material_asset_id else None
+
+
+async def _validate_general_material(db: AsyncSession, asset_id: int | None, user_id: int) -> MediaAsset | None:
+    if asset_id is None:
+        return None
+    asset = await db.get(MediaAsset, asset_id)
+    if asset is None or asset.status != "ready" or asset.created_by != user_id or asset.folder != "assignment-materials":
+        raise ValidationError("Choose a completed assignment material uploaded by your account")
+    return asset
 
 
 async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreate, user_id: int):
@@ -127,59 +151,88 @@ async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreat
         target = await db.get(LmsClass, payload.target_id)
         if target is None or target.course_id != payload.course_id:
             raise ValidationError("The selected class does not belong to this course")
-    values = payload.model_dump()
-    question_paper_id = values.pop("question_paper_id", None)
-    template = None
-    questions = []
-    if question_paper_id is not None:
-        template = await db.get(LmsExam, question_paper_id)
-        if template is None or template.assessment_kind not in {"exam", "question_paper"}:
-            raise ValidationError("Select a valid question paper")
-        if (
-            template.course_id != payload.course_id
-            or template.target_type != payload.target_type
-            or template.target_id != payload.target_id
-        ):
-            raise ValidationError("Question papers can only be used in their original course or class workspace")
-        questions = list((await db.execute(
-            select(LmsExamQuestion).where(LmsExamQuestion.exam_id == template.exam_id)
-            .order_by(LmsExamQuestion.position, LmsExamQuestion.question_id)
-        )).scalars().all())
-        if not questions:
-            raise ValidationError("Add at least one question to the question paper first")
-        values["assignment_type"] = "timed"
-        values["duration_minutes"] = values.get("duration_minutes") or template.duration_minutes
-        values["max_marks"] = sum((Decimal(item.marks) for item in questions), Decimal("0"))
-    row = LmsCourseworkAssignment(**values, created_by=user_id)
+    question_paper = await _validate_assignment_material(db, payload.question_paper_asset_id, user_id)
+    material = await _validate_general_material(db, payload.material_asset_id, user_id)
+    row = LmsCourseworkAssignment(**payload.model_dump(), created_by=user_id)
     db.add(row)
-    await db.flush()
-    linked_exam = None
-    if template is not None:
-        linked_exam = LmsExam(
-            assessment_kind="assignment_question_paper", assignment_id=row.assignment_id,
-            course_id=row.course_id, target_type=row.target_type, target_id=row.target_id,
-            title=row.title, instructions=row.instructions, available_from=row.available_from,
-            due_at=row.due_at, duration_minutes=row.duration_minutes,
-            randomize_questions=template.randomize_questions,
-            randomize_options=template.randomize_options, grades_released=False,
-            status=row.status, created_by=user_id,
-        )
-        db.add(linked_exam)
-        await db.flush()
-        for source in questions:
-            db.add(LmsExamQuestion(
-                exam_id=linked_exam.exam_id, question_type=source.question_type,
-                prompt=source.prompt, marks=source.marks, position=source.position,
-                options=source.options, correct_option_index=source.correct_option_index,
-                correct_option_indices=source.correct_option_indices,
-                accepted_answers=source.accepted_answers,
-            ))
     await db.commit()
     await db.refresh(row)
     if row.status == "published":
         await notification_service.notify_assessment_published(db, row, "assignment")
     context = await CourseworkRepository(db).get_assignment_context(row.assignment_id)
-    return _assignment_item(context, exam_id=linked_exam.exam_id if linked_exam else None)
+    return _assignment_item(context, question_paper=question_paper, material=material)
+
+
+async def update_assignment(
+    db: AsyncSession, assignment_id: int, payload: CourseworkAssignmentCreate, user_id: int,
+):
+    context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+    if context is None:
+        raise NotFoundError("Assignment not found")
+    assignment = context[0]
+    await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if assignment.status == "published":
+        raise ValidationError("Active assignments cannot be edited")
+    if payload.course_id != assignment.course_id:
+        await _ensure_lecturer_course(db, payload.course_id, user_id)
+    submission_count = int(await db.scalar(
+        select(func.count()).select_from(LmsCourseworkSubmission).where(
+            LmsCourseworkSubmission.assignment_id == assignment_id
+        )
+    ) or 0)
+    protected_fields = ("course_id", "target_type", "target_id", "assignment_type", "duration_minutes")
+    if submission_count and any(getattr(assignment, field) != getattr(payload, field) for field in protected_fields):
+        raise ValidationError("Course, audience, and timing cannot be changed after students have started")
+    if payload.target_type == "class":
+        target = await db.get(LmsClass, payload.target_id)
+        if target is None or target.course_id != payload.course_id:
+            raise ValidationError("The selected class does not belong to this course")
+    question_paper = await _validate_assignment_material(db, payload.question_paper_asset_id, user_id)
+    material = await _validate_general_material(db, payload.material_asset_id, user_id)
+    was_published = assignment.status == "published"
+    for field, value in payload.model_dump().items():
+        setattr(assignment, field, value)
+    await db.commit()
+    await db.refresh(assignment)
+    if not was_published and assignment.status == "published":
+        await notification_service.notify_assessment_published(db, assignment, "assignment")
+    context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+    return _assignment_item(context, question_paper=question_paper, material=material)
+
+
+async def delete_assignment(db: AsyncSession, assignment_id: int, user_id: int) -> None:
+    context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+    if context is None:
+        raise NotFoundError("Assignment not found")
+    assignment = context[0]
+    await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if assignment.status == "published":
+        raise ValidationError("Active assignments cannot be deleted")
+    submission_count = int(await db.scalar(
+        select(func.count()).select_from(LmsCourseworkSubmission).where(
+            LmsCourseworkSubmission.assignment_id == assignment_id
+        )
+    ) or 0)
+    if submission_count:
+        raise ValidationError("This assignment has student attempts and cannot be deleted")
+    await db.delete(assignment)
+    await db.commit()
+
+
+async def activate_assignment(db: AsyncSession, assignment_id: int, user_id: int):
+    context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+    if context is None:
+        raise NotFoundError("Assignment not found")
+    assignment = context[0]
+    await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if assignment.status != "published":
+        assignment.status = "published"
+        await db.commit()
+        await db.refresh(assignment)
+        await notification_service.notify_assessment_published(db, assignment, "assignment")
+    material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+    context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+    return _assignment_item(context, question_paper=material, material=await _assignment_material(db, assignment))
 
 
 async def list_assignments(
@@ -195,31 +248,41 @@ async def list_assignments(
     if role in {"LECTURER", "ADMIN", "SUPER_ADMIN"}:
         raw_rows = await repo.list_for_lecturer(user_id) if role == "LECTURER" else await repo.list_for_manager()
         rows = [row for row in raw_rows if belongs_to_workspace(row[0])]
-        return CourseworkAssignmentListResponse(data=[
-            _assignment_item(row, exam_id=await _assignment_exam_id(db, row[0].assignment_id)) for row in rows
-        ])
+        data = []
+        for row in rows:
+            material = await db.get(MediaAsset, row[0].question_paper_asset_id) if row[0].question_paper_asset_id else None
+            data.append(_assignment_item(row, question_paper=material, material=await _assignment_material(db, row[0])))
+        return CourseworkAssignmentListResponse(data=data)
     if role != "STUDENT":
         raise ForbiddenError("This LMS role cannot access coursework assignments")
     data = []
     for assignment, course, target_class, submission in await repo.list_for_student(user_id):
         if not belongs_to_workspace(assignment):
             continue
+        now = utc_now()
+        if not assignment_is_available(assignment.available_from, now):
+            continue
         timer_finished = submission and submission.expires_at and remaining_seconds(submission.expires_at) == 0
-        deadline_finished = (
-            submission
-            and assignment.assignment_type == "regular"
-            and assignment.due_at
-            and as_utc(assignment.due_at) <= utc_now()
-            and not assignment.allow_late
+        deadline_finished = bool(
+            assignment.due_at and as_utc(assignment.due_at) <= now and not assignment.allow_late
         )
-        if submission and submission.status == "in_progress" and (timer_finished or deadline_finished):
-            submission.status = "expired"
-            submission.submitted_at = submission.expires_at or as_utc(assignment.due_at) or utc_now()
+        if submission is None and deadline_finished:
+            submission = LmsCourseworkSubmission(
+                assignment_id=assignment.assignment_id,
+                student_user_id=user_id,
+                status="expired",
+                started_at=as_utc(assignment.due_at) or now,
+            )
+            _expire_with_zero(submission, assignment.due_at)
+            db.add(submission)
+            await db.flush()
+        elif submission and submission.status == "in_progress" and (timer_finished or deadline_finished):
+            _expire_with_zero(submission, submission.expires_at or assignment.due_at)
+        elif submission and submission.status == "expired" and submission.marks_awarded is None:
+            _expire_with_zero(submission, submission.expires_at or assignment.due_at)
         asset = await db.get(MediaAsset, submission.attachment_asset_id) if submission and submission.attachment_asset_id else None
-        data.append(_assignment_item(
-            (assignment, course, target_class), submission, asset, expose_grade=False,
-            exam_id=await _assignment_exam_id(db, assignment.assignment_id),
-        ))
+        material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+        data.append(_assignment_item((assignment, course, target_class), submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment)))
     await db.commit()
     return CourseworkAssignmentListResponse(data=data)
 
@@ -245,7 +308,18 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
         if assignment.available_from and as_utc(assignment.available_from) > now:
             raise ValidationError("This assignment is not available yet")
         if assignment.due_at and as_utc(assignment.due_at) <= now and not assignment.allow_late:
-            raise ValidationError("The deadline for this assignment has passed")
+            submission = LmsCourseworkSubmission(
+                assignment_id=assignment_id,
+                student_user_id=user_id,
+                status="expired",
+                started_at=as_utc(assignment.due_at),
+            )
+            _expire_with_zero(submission, assignment.due_at)
+            db.add(submission)
+            await db.commit()
+            await db.refresh(submission)
+            material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+            return _assignment_item(context, submission, question_paper=material, expose_grade=False, material=await _assignment_material(db, assignment))
         submission = LmsCourseworkSubmission(
             assignment_id=assignment_id,
             student_user_id=user_id,
@@ -261,11 +335,11 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
         await db.commit()
         await db.refresh(submission)
     elif submission.status == "in_progress" and remaining_seconds(submission.expires_at) == 0:
-        submission.status = "expired"
-        submission.submitted_at = submission.expires_at or utc_now()
+        _expire_with_zero(submission, submission.expires_at)
         await db.commit()
     asset = await db.get(MediaAsset, submission.attachment_asset_id) if submission.attachment_asset_id else None
-    return _assignment_item(context, submission, asset, expose_grade=False)
+    material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+    return _assignment_item(context, submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment))
 
 
 async def _active_submission(db: AsyncSession, assignment_id: int, user_id: int):
@@ -277,18 +351,15 @@ async def _active_submission(db: AsyncSession, assignment_id: int, user_id: int)
     if submission.status != "in_progress":
         raise ValidationError("This attempt is already finished")
     if remaining_seconds(submission.expires_at) == 0:
-        submission.status = "expired"
-        submission.submitted_at = submission.expires_at or utc_now()
+        _expire_with_zero(submission, submission.expires_at)
         await db.commit()
         raise ValidationError("The assignment timer has expired")
     if (
-        assignment.assignment_type == "regular"
-        and assignment.due_at
+        assignment.due_at
         and as_utc(assignment.due_at) <= utc_now()
         and not assignment.allow_late
     ):
-        submission.status = "expired"
-        submission.submitted_at = as_utc(assignment.due_at)
+        _expire_with_zero(submission, assignment.due_at)
         await db.commit()
         raise ValidationError("The deadline for this assignment has passed")
     return context, submission
@@ -305,6 +376,21 @@ async def _validate_attachment(db: AsyncSession, asset_id: int | None, user_id: 
     return asset
 
 
+async def _validate_assignment_material(
+    db: AsyncSession, asset_id: int | None, user_id: int
+) -> MediaAsset | None:
+    if asset_id is None:
+        return None
+    asset = await db.get(MediaAsset, asset_id)
+    if asset is None or asset.status != "ready":
+        raise ValidationError("The question paper is not ready")
+    if asset.created_by != user_id or asset.folder != "assignment-materials":
+        raise ForbiddenError("This question paper does not belong to your assignment")
+    if asset.content_type != "application/pdf":
+        raise ValidationError("Question papers must be PDF files")
+    return asset
+
+
 async def save_draft(db: AsyncSession, assignment_id: int, payload: CourseworkDraftUpdate, user_id: int):
     context, submission = await _active_submission(db, assignment_id, user_id)
     asset = await _validate_attachment(db, payload.attachment_asset_id, user_id)
@@ -312,7 +398,9 @@ async def save_draft(db: AsyncSession, assignment_id: int, payload: CourseworkDr
     submission.attachment_asset_id = asset.media_asset_id if asset else None
     await db.commit()
     await db.refresh(submission)
-    return _assignment_item(context, submission, asset, expose_grade=False)
+    assignment = context[0]
+    material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+    return _assignment_item(context, submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment))
 
 
 async def submit_assignment(db: AsyncSession, assignment_id: int, payload: CourseworkDraftUpdate, user_id: int):
@@ -327,7 +415,9 @@ async def submit_assignment(db: AsyncSession, assignment_id: int, payload: Cours
     submission.submitted_at = utc_now()
     await db.commit()
     await db.refresh(submission)
-    return _assignment_item(context, submission, asset, expose_grade=False)
+    assignment = context[0]
+    material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
+    return _assignment_item(context, submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment))
 
 
 async def list_submissions(db: AsyncSession, assignment_id: int, user_id: int):
@@ -384,4 +474,13 @@ async def complete_student_upload(db: AsyncSession, asset_id: int, user_id: int)
         raise NotFoundError("Media asset not found")
     if asset.created_by != user_id or asset.folder != "assignment-submissions":
         raise ForbiddenError("This upload does not belong to your account")
+    return await media_service.complete_upload(db, asset_id)
+
+
+async def complete_material_upload(db: AsyncSession, asset_id: int, user_id: int):
+    asset = await db.get(MediaAsset, asset_id)
+    if asset is None:
+        raise NotFoundError("Media asset not found")
+    if asset.created_by != user_id or asset.folder != "assignment-materials":
+        raise ForbiddenError("This question paper upload does not belong to your account")
     return await media_service.complete_upload(db, asset_id)

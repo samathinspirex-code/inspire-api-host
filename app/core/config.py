@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
-    # Keep each web/worker process below the hosted session-pool limit.
+    # Hosted session poolers commonly have small hard limits. Keep each API or
+    # worker process bounded so one process cannot consume every DB session.
     DATABASE_POOL_SIZE: int = 3
     DATABASE_MAX_OVERFLOW: int = 0
     DATABASE_POOL_TIMEOUT_SECONDS: int = 20
@@ -39,7 +40,8 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY_PATH: str = "keys/jwt_public.pem"
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 90
+    REFRESH_TOKEN_REUSE_GRACE_SECONDS: int = 60
     SSO_TICKET_EXPIRE_SECONDS: int = 60
 
     AUTHENTICATOR_ENCRYPTION_KEY: str = ""

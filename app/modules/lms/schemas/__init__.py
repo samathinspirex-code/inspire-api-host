@@ -140,9 +140,11 @@ from app.modules.lms.schemas.exam import (
     ExamItem,
     ExamListResponse,
     ExamQuestionEditorItem,
+    ExamQuestionImportRequest,
     ExamQuestionUpsert,
     PracticeTestCreate,
     ExamResultResponse,
+    ExamScheduleUpdate,
     ExamStatusUpdate,
 )
 from app.modules.lms.schemas.notification import (
@@ -160,6 +162,12 @@ from app.modules.lms.schemas.profile import (
     MyProfileUpdate,
     ProfileStatistics,
     ProfileUpcomingItem,
+    StudentAcademicActivity,
+    StudentAcademicAssessment,
+    StudentAcademicAttendance,
+    StudentAcademicClass,
+    StudentAcademicCourse,
+    StudentAcademicProfileResponse,
     RecoveryCodesRegenerateRequest,
     RecoveryCodesResponse,
 )
@@ -304,6 +312,7 @@ __all__ = [
     "StudentCourseGrade",
     "StudentGradesResponse",
     "ExamCreate",
+    "ExamQuestionImportRequest",
     "ExamQuestionUpsert",
     "PracticeTestCreate",
     "ExamQuestionEditorItem",

@@ -12,13 +12,15 @@ class CourseworkAssignmentCreate(BaseModel):
     title: str = Field(..., min_length=2, max_length=255)
     instructions: str = Field(..., min_length=2, max_length=20_000)
     assignment_type: Literal["regular", "timed"] = "regular"
+    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding"] = "written"
+    question_paper_asset_id: int | None = Field(None, gt=0)
+    material_asset_id: int | None = Field(None, gt=0)
     available_from: datetime | None = None
     due_at: datetime | None = None
     duration_minutes: int | None = Field(None, ge=1, le=1440)
     max_marks: Decimal = Field(Decimal("100"), gt=0, le=100_000)
     allow_late: bool = False
     status: Literal["draft", "published"] = "draft"
-    question_paper_id: int | None = Field(None, gt=0)
 
     @model_validator(mode="after")
     def validate_timing(self):
@@ -26,6 +28,8 @@ class CourseworkAssignmentCreate(BaseModel):
             raise ValueError("Timed assignments require a duration")
         if self.assignment_type == "timed" and self.allow_late:
             raise ValueError("Timed assignments cannot allow late submissions")
+        if self.submission_type == "pdf_annotation" and self.question_paper_asset_id is None:
+            raise ValueError("PDF assignments require a question paper")
         if self.available_from and self.due_at and self.due_at <= self.available_from:
             raise ValueError("Due time must be after the available time")
         if self.target_type == "course" and self.target_id != self.course_id:
@@ -44,6 +48,13 @@ class CourseworkAssignmentItem(BaseModel):
     title: str
     instructions: str
     assignment_type: str
+    submission_type: str
+    question_paper_asset_id: int | None = None
+    question_paper_url: str | None = None
+    question_paper_name: str | None = None
+    material_asset_id: int | None = None
+    material_url: str | None = None
+    material_name: str | None = None
     available_from: datetime | None
     due_at: datetime | None
     duration_minutes: int | None
@@ -64,7 +75,6 @@ class CourseworkAssignmentItem(BaseModel):
     attachment_url: str | None = None
     attachment_name: str | None = None
     remaining_seconds: int | None = None
-    exam_id: int | None = None
 
 
 class CourseworkAssignmentListResponse(BaseModel):

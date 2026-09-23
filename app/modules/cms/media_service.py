@@ -28,6 +28,32 @@ ALLOWED_MEDIA_TYPES = {
     "application/pdf": ("document", ".pdf"),
 }
 
+ASSIGNMENT_DOCUMENT_TYPES = {
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".csv": "text/csv",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip": "application/zip",
+}
+ASSIGNMENT_FOLDERS = {"assignment-submissions", "assignment-materials"}
+
+
+def allowed_upload_type(payload: MediaUploadRequest) -> tuple[str, str]:
+    extension = Path(payload.filename).suffix.lower()
+    content_type = payload.content_type.lower()
+    if payload.folder in ASSIGNMENT_FOLDERS and extension in ASSIGNMENT_DOCUMENT_TYPES:
+        if content_type != ASSIGNMENT_DOCUMENT_TYPES[extension]:
+            raise ValidationError("The file type does not match its extension")
+        return "document", extension
+    media = ALLOWED_MEDIA_TYPES.get(content_type)
+    allowed_extension = media and (media[1] == extension or (media[1] == ".jpg" and extension == ".jpeg"))
+    if not allowed_extension or (payload.folder in ASSIGNMENT_FOLDERS and media[0] == "video"):
+        raise ValidationError("Unsupported file type. Use images, PDF, Word, Excel, PowerPoint, CSV, or ZIP")
+    return media
+
 
 def _client():
     try:
@@ -68,10 +94,7 @@ def _asset_response(row: MediaAsset) -> MediaAssetResponse:
 
 
 async def request_upload(db: AsyncSession, payload: MediaUploadRequest, user_id: int) -> MediaUploadTicket:
-    media = ALLOWED_MEDIA_TYPES.get(payload.content_type.lower())
-    if media is None:
-        raise ValidationError("Only JPG, PNG, WebP, GIF, PDF, MP4, and WebM files are supported")
-    kind, extension = media
+    kind, extension = allowed_upload_type(payload)
     if kind != "video" and payload.size_bytes > 52_428_800:
         raise ValidationError("Images and documents must be 50 MB or smaller")
     existing_name = await db.scalar(

@@ -11,6 +11,7 @@ from app.modules.lms import assistant_service, content_service
 from app.modules.lms.models import (
     ClassStudent, CourseEnrollment, LmsClass, LmsCourse, LmsLearningItem, LmsLearningProgress,
     LmsModule, LmsModuleAccess, LmsLectureQuestion, LmsLectureQuizAttempt, LmsLectureQuizAttemptQuestion,
+    LmsCourseworkAssignment, LmsExam,
 )
 from app.modules.lms.repository import ContentRepository
 from app.modules.lms.schemas import LectureQuizAnswerRequest, LectureQuizSubmitRequest
@@ -52,7 +53,8 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.engine.dispose)
         for model in [LmsCourse, LmsModule, LmsLearningItem, CourseEnrollment, LmsClass,
                       ClassStudent, LmsModuleAccess, LmsLearningProgress, LmsLectureQuestion,
-                      LmsLectureQuizAttempt, LmsLectureQuizAttemptQuestion]:
+                      LmsLectureQuizAttempt, LmsLectureQuizAttemptQuestion,
+                      LmsCourseworkAssignment, LmsExam]:
             model.__table__.create(self.engine)
         # PostgreSQL returns aware timestamps; SQLite needs this normalization in the fixture.
         def normalize_rule(row, _context):
@@ -128,6 +130,32 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         current = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
         self.assertEqual(old, current)
         self.assertLessEqual(len(self.queries), 9)
+
+    async def test_published_practice_test_is_visible_even_when_container_status_is_stale(self):
+        with Session(self.engine) as db:
+            db.add(LmsModule(module_id=13, course_id=1, title="Practice Test", position=13, status="active"))
+            db.add(LmsLearningItem(
+                learning_item_id=113, module_id=13, title="Released practice",
+                position=1, item_type="quiz", resource_url="practice-test:1", status="draft",
+            ))
+            db.flush()
+            db.add(LmsCourseworkAssignment(
+                assignment_id=1, learning_item_id=113, course_id=1, target_type="course",
+                target_id=1, title="Released practice", instructions="Try it", assignment_type="timed",
+                duration_minutes=30, status="published", created_by=1,
+            ))
+            db.flush()
+            db.add(LmsExam(
+                exam_id=1, assessment_kind="practice_test", assignment_id=1, course_id=1,
+                target_type="course", target_id=1, title="Released practice", instructions="Try it",
+                duration_minutes=30, status="published", created_by=1,
+            ))
+            db.commit()
+        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        practice = next(section for section in studio.sections if section.title == "Practice Test")
+        self.assertEqual([item.learning_item_id for item in practice.items], [113])
+        accessible = await content_service.get_accessible_student_item(self.db(), 113, 7)
+        self.assertEqual(accessible.learning_item_id, 113)
 
     async def test_draft_withdrawn_and_foreign_students_remain_denied(self):
         await self.assert_access(False, student_id=8)
