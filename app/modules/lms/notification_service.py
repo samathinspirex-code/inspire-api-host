@@ -16,7 +16,8 @@ from app.modules.lms.schemas import AnnouncementItem, AnnouncementListResponse, 
 
 COLOMBO = timezone(timedelta(hours=5, minutes=30), "Asia/Colombo")
 ASSIGNMENT_REMINDERS = (1440, 60)
-MEETING_REMINDERS = (1440, 15, 0)
+# 1 day, 30 minutes, 15 minutes before, and at start time.
+MEETING_REMINDERS = (1440, 30, 15, 0)
 
 
 def utc_now() -> datetime:
@@ -241,7 +242,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
                 label = "now" if offset == 0 else ("24 hours" if offset == 1440 else "15 minutes")
                 title = f"Join online class now: {meeting.title}" if offset == 0 else f"Online class in {label}: {meeting.title}"
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
-                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{course.code} · {class_.name} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", (f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings" if meeting.provider == "zoom" else meeting.google_meeting_uri) if offset == 0 else f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset == 0 else "important", now, True)
+                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{course.code} · {class_.name} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True)
     await db.commit(); return created, published
 
 
@@ -260,23 +261,6 @@ async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, 
 
 
 async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> NotificationDispatchSummary:
-    # The dispatcher is called by the existing recurring notification job.  Keeping
-    # attendance here means a completed class is collected without a lecturer click.
-    from app.modules.lms import attendance_service
-    from app.modules.lms.repository import AttendanceRepository, IntegrationRepository
-
-    current_time = now or utc_now()
-    integration = await IntegrationRepository(db).get_google_settings()
-    if integration and integration.enabled and integration.attendance_sync_enabled:
-        for meeting in await AttendanceRepository(db).list_due_automatic_syncs(current_time):
-            try:
-                await attendance_service.sync_meeting_attendance(
-                    db, meeting.meeting_id, meeting.lecturer_user_id
-                )
-            except Exception:
-                # Google can take several minutes to publish a conference record.
-                # sync_meeting_attendance records the safe error and this dispatcher retries later.
-                pass
     # This worker is also the durable retry point for Vimeo's asynchronous
     # transcoding thumbnails. It makes newly uploaded lecture previews appear
     # even when the first upload response arrived before Vimeo was ready.
@@ -287,12 +271,24 @@ async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> Notif
     except Exception:
         # Thumbnail processing must never delay notification delivery.
         pass
-    try:
-        from app.modules.lms import zoom_service
+    from app.modules.lms import zoom_service
 
+    try:
         await zoom_service.process_jobs(db)
     except Exception:
         # Zoom reports and recordings can remain pending until the next worker cycle.
+        pass
+    # Attendance is normally imported from the meeting.ended webhook. This sweep
+    # is the safety net for a webhook that never arrived, so a finished class is
+    # still collected without anyone clicking sync.
+    try:
+        await zoom_service.sweep_missing_attendance(db, now or utc_now())
+    except Exception:
+        pass
+    try:
+        await zoom_service.purge_expired_cloud_recordings(db, now or utc_now())
+    except Exception:
+        # Retention cleanup retries on the next cycle.
         pass
     created, published = await generate_reminders(db, now)
     sent, failed = await deliver_pending_emails(db, now)

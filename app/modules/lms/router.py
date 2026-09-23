@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from urllib.parse import urlencode
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.errors import APIError, ForbiddenError
+from app.core.errors import APIError, ForbiddenError, ValidationError
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import AuthenticatorInvitationResponse, CurrentUser
 from app.modules.lms import service
@@ -19,7 +19,6 @@ from app.modules.lms.student_excel_import import MAX_EXCEL_BYTES, parse_excel_st
 from app.modules.lms.schemas.student_import import StudentImportRequest, StudentImportResponse
 from app.modules.lms import assignment_service
 from app.modules.lms import portal_service
-from app.modules.lms import integration_service
 from app.modules.lms import meeting_service
 from app.modules.lms import attendance_service
 from app.modules.lms import content_service
@@ -74,15 +73,11 @@ from app.modules.lms.schemas import (
     StudentItem,
     StudentListResponse,
     StudentUpdate,
-    GoogleIntegrationItem,
-    GoogleIntegrationUpdate,
-    GoogleConnectResponse,
-    GoogleCentralConnectionItem,
-    GoogleConnectionItem,
     MeetingCreate,
     MeetingItem,
     MeetingListResponse,
     MeetingUpdate,
+    SchedulableClassListResponse,
     AttendanceRecordItem,
     AttendanceRecordUpdate,
     AttendanceReportOptionsResponse,
@@ -208,13 +203,6 @@ async def get_student_population(
 ) -> StudentPopulationResponse:
     response.headers["Cache-Control"] = "no-store"
     return await dashboard_service.get_student_population(db)
-
-
-def _google_ui_redirect(status: str, message: str = "", view: str = "meetings") -> str:
-    params = {"view": view, "google": status}
-    if message:
-        params["message"] = message
-    return f"{settings.LMS_UI_URL.rstrip('/')}?{urlencode(params)}"
 
 
 def _zoom_ui_redirect(status: str, message: str = "") -> str:
@@ -723,102 +711,6 @@ async def dispatch_notifications_now(
     return await notification_service.dispatch_cycle(db)
 
 
-@router.get("/integrations/google", response_model=GoogleIntegrationItem)
-async def get_google_integration(
-    _current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
-) -> GoogleIntegrationItem:
-    return await integration_service.get_google_integration(db)
-
-
-@router.put("/integrations/google", response_model=GoogleIntegrationItem)
-async def update_google_integration(
-    payload: GoogleIntegrationUpdate,
-    current_user: CurrentUser = Depends(super_admin_access),
-    db: AsyncSession = Depends(get_db),
-) -> GoogleIntegrationItem:
-    return await integration_service.update_google_integration(db, payload, current_user.user_id)
-
-
-@router.get("/integrations/google/central-connection", response_model=GoogleCentralConnectionItem)
-async def get_central_google_connection(
-    _current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
-) -> GoogleCentralConnectionItem:
-    return await integration_service.get_central_google_connection(db)
-
-
-@router.post("/integrations/google/central-connection", response_model=GoogleConnectResponse)
-async def connect_central_google_account(
-    current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
-) -> GoogleConnectResponse:
-    return await integration_service.begin_central_google_connection(
-        db, current_user.user_id, current_user.email
-    )
-
-
-@router.delete("/integrations/google/central-connection", status_code=204)
-async def disconnect_central_google_account(
-    _current_user: CurrentUser = Depends(super_admin_access), db: AsyncSession = Depends(get_db)
-) -> None:
-    await integration_service.disconnect_central_google_account(db)
-
-
-@router.get("/integrations/google/connection", response_model=GoogleConnectionItem)
-async def get_google_connection(
-    current_user: CurrentUser = Depends(lecturer_access),
-    db: AsyncSession = Depends(get_db),
-) -> GoogleConnectionItem:
-    return await integration_service.get_google_connection(db, current_user.user_id)
-
-
-@router.post("/integrations/google/connect", response_model=GoogleConnectResponse)
-async def connect_google_account(
-    current_user: CurrentUser = Depends(lecturer_access),
-    db: AsyncSession = Depends(get_db),
-) -> GoogleConnectResponse:
-    return await integration_service.begin_google_connection(
-        db, current_user.user_id, current_user.email
-    )
-
-
-@router.delete("/integrations/google/connection", status_code=204)
-async def disconnect_google_account(
-    current_user: CurrentUser = Depends(lecturer_access),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    await integration_service.disconnect_google_account(db, current_user.user_id)
-
-
-@router.get("/integrations/google/callback", include_in_schema=False)
-async def google_oauth_callback(
-    code: str | None = Query(None),
-    state: str | None = Query(None),
-    error: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    if not state:
-        return RedirectResponse(_google_ui_redirect("error", "The Google connection state is missing."))
-    try:
-        central_state = await integration_service.is_central_google_connection_state(db, state)
-        if error:
-            if central_state:
-                await integration_service.cancel_central_google_connection(db, state)
-                return RedirectResponse(_google_ui_redirect("cancelled", "Central Google account connection was cancelled.", "settings"))
-            await integration_service.cancel_google_connection(db, state)
-            return RedirectResponse(_google_ui_redirect("cancelled", "Google account connection was cancelled."))
-        if not code:
-            return RedirectResponse(_google_ui_redirect("error", "Google did not return an authorization code."))
-        google_email = (
-            await integration_service.complete_central_google_connection(db, code, state)
-            if central_state
-            else await integration_service.complete_google_connection(db, code, state)
-        )
-        return RedirectResponse(
-            _google_ui_redirect("connected", f"Connected {google_email} successfully.", "settings" if central_state else "meetings")
-        )
-    except APIError as exc:
-        return RedirectResponse(_google_ui_redirect("error", exc.message))
-
-
 @router.get("/integrations/zoom")
 async def get_zoom_integration(
     _current_user: CurrentUser = Depends(super_admin_access),
@@ -834,6 +726,27 @@ async def update_zoom_integration(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     return await zoom_service.update_settings(db, payload, current_user.user_id)
+
+
+@router.get("/integrations/zoom/live")
+async def get_zoom_live_status(
+    _current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_service.live_status(db)
+
+
+@router.get("/integrations/zoom/availability")
+async def get_zoom_availability(
+    start_time: datetime,
+    end_time: datetime,
+    exclude_meeting_id: int | None = Query(None, gt=0),
+    _current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if end_time <= start_time:
+        raise ValidationError("The end time must be after the start time")
+    return await zoom_service.window_availability(db, start_time, end_time, exclude_meeting_id)
 
 
 @router.post("/integrations/zoom/connect")
@@ -1393,13 +1306,23 @@ async def list_my_meetings(
     return await meeting_service.list_my_meetings(db, current_user.user_id, role)
 
 
+@router.get("/meetings/classes", response_model=SchedulableClassListResponse)
+async def list_schedulable_classes(
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> SchedulableClassListResponse:
+    role = service.resolve_role(current_user.access)
+    return await meeting_service.list_schedulable_classes(db, current_user.user_id, role)
+
+
 @router.post("/meetings", response_model=MeetingItem, status_code=201)
 async def create_online_meeting(
     payload: MeetingCreate,
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingItem:
-    return await meeting_service.create_meeting(db, payload, current_user.user_id)
+    role = service.resolve_role(current_user.access)
+    return await meeting_service.create_meeting(db, payload, current_user.user_id, role)
 
 
 @router.put("/meetings/{meeting_id}", response_model=MeetingItem)
@@ -1409,7 +1332,8 @@ async def update_online_meeting(
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingItem:
-    return await meeting_service.update_meeting(db, meeting_id, payload, current_user.user_id)
+    role = service.resolve_role(current_user.access)
+    return await meeting_service.update_meeting(db, meeting_id, payload, current_user.user_id, role)
 
 
 @router.post("/meetings/{meeting_id}/cancel", response_model=MeetingItem)
@@ -1418,7 +1342,8 @@ async def cancel_online_meeting(
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingItem:
-    return await meeting_service.cancel_meeting(db, meeting_id, current_user.user_id)
+    role = service.resolve_role(current_user.access)
+    return await meeting_service.cancel_meeting(db, meeting_id, current_user.user_id, role)
 
 
 @router.post("/meetings/{meeting_id}/zoom/join")
@@ -1448,8 +1373,9 @@ async def sync_online_meeting_attendance(
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> AttendanceSessionItem:
+    role = service.resolve_role(current_user.access)
     return await attendance_service.sync_meeting_attendance(
-        db, meeting_id, current_user.user_id
+        db, meeting_id, current_user.user_id, role
     )
 
 
@@ -1849,6 +1775,15 @@ async def set_student_active(
     return await service.set_student_active(db, user_id, payload.is_active)
 
 
+@router.delete("/students/{user_id}", status_code=204)
+async def delete_student(
+    user_id: int,
+    _current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.delete_student(db, user_id)
+
+
 @router.get("/lecturers", response_model=LecturerListResponse)
 async def list_lecturers(
     search: str | None = Query(None),
@@ -1885,6 +1820,15 @@ async def set_lecturer_active(
     db: AsyncSession = Depends(get_db),
 ) -> LecturerItem:
     return await service.set_lecturer_active(db, user_id, payload.is_active)
+
+
+@router.delete("/lecturers/{user_id}", status_code=204)
+async def delete_lecturer(
+    user_id: int,
+    _current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.delete_lecturer(db, user_id)
 
 
 @router.post(
@@ -1988,6 +1932,27 @@ async def assign_class_students_bulk(
     return await assignment_service.assign_class_students_bulk(db, class_id, payload.user_ids, current_user.user_id)
 
 
+@router.post("/classes/{class_id}/students/copy-from/{source_class_id}", response_model=AssignmentListResponse, status_code=201)
+async def copy_class_students(
+    class_id: int,
+    source_class_id: int,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentListResponse:
+    return await assignment_service.copy_class_students(db, class_id, source_class_id, current_user.user_id)
+
+
+@router.post("/classes/{class_id}/students/import", response_model=AssignmentListResponse, status_code=201)
+async def import_class_students(
+    class_id: int,
+    request: Request,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentListResponse:
+    content = await request.body()
+    return await assignment_service.enrol_class_students_from_excel(db, class_id, content, current_user.user_id)
+
+
 @router.delete("/classes/{class_id}/students/{user_id}", status_code=204)
 async def remove_class_student(
     class_id: int,
@@ -2015,6 +1980,16 @@ async def assign_class_lecturer(
     db: AsyncSession = Depends(get_db),
 ) -> AssignmentPersonItem:
     return await assignment_service.assign_class_lecturer(db, class_id, payload.user_id, current_user.user_id)
+
+
+@router.post("/classes/{class_id}/lecturers/bulk", response_model=AssignmentListResponse, status_code=201)
+async def assign_class_lecturers_bulk(
+    class_id: int,
+    payload: BulkAssignPeopleRequest,
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentListResponse:
+    return await assignment_service.assign_class_lecturers_bulk(db, class_id, payload.user_ids, current_user.user_id)
 
 
 @router.delete("/classes/{class_id}/lecturers/{user_id}", status_code=204)

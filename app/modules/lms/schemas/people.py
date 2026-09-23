@@ -11,7 +11,7 @@ class ActiveUpdate(BaseModel):
 class StudentCreate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    student_number: str = Field(..., min_length=1, max_length=100)
+    student_number: str | None = Field(None, max_length=100)
     phone: str | None = Field(None, max_length=50)
     profile_image_url: str | None = Field(None, max_length=5000)
     notes: str | None = Field(None, max_length=5000)
@@ -25,7 +25,7 @@ class StudentItem(BaseModel):
     user_id: int
     full_name: str
     email: str
-    student_number: str
+    student_number: str | None
     phone: str | None
     profile_image_url: str | None
     notes: str | None
@@ -45,7 +45,7 @@ class StudentListResponse(BaseModel):
 class LecturerCreate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    staff_number: str = Field(..., min_length=1, max_length=100)
+    staff_number: str | None = Field(None, max_length=100)
     job_title: str | None = Field(None, max_length=150)
     phone: str | None = Field(None, max_length=50)
     profile_image_url: str | None = Field(None, max_length=5000)
@@ -60,7 +60,7 @@ class LecturerItem(BaseModel):
     user_id: int
     full_name: str
     email: str
-    staff_number: str
+    staff_number: str | None
     job_title: str | None
     phone: str | None
     profile_image_url: str | None

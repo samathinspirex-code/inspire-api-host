@@ -1,6 +1,6 @@
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -65,13 +65,17 @@ class PeopleRepository:
     async def get_lecturer_profile(self, user_id: int) -> LecturerProfile | None:
         return await self.db.get(LecturerProfile, user_id)
 
-    async def student_number_exists(self, number: str, exclude_user_id: int | None = None) -> bool:
+    async def student_number_exists(self, number: str | None, exclude_user_id: int | None = None) -> bool:
+        if not number:
+            return False
         stmt = select(StudentProfile.user_id).where(func.lower(StudentProfile.student_number) == number.lower())
         if exclude_user_id is not None:
             stmt = stmt.where(StudentProfile.user_id != exclude_user_id)
         return (await self.db.execute(stmt)).scalar_one_or_none() is not None
 
-    async def staff_number_exists(self, number: str, exclude_user_id: int | None = None) -> bool:
+    async def staff_number_exists(self, number: str | None, exclude_user_id: int | None = None) -> bool:
+        if not number:
+            return False
         stmt = select(LecturerProfile.user_id).where(func.lower(LecturerProfile.staff_number) == number.lower())
         if exclude_user_id is not None:
             stmt = stmt.where(LecturerProfile.user_id != exclude_user_id)
@@ -141,3 +145,26 @@ class PeopleRepository:
         await self.db.commit()
         await self.db.refresh(user)
         return user
+
+    async def remove_from_lms(self, user: User, kind: str) -> None:
+        """Remove an LMS-only directory identity without erasing academic audit data."""
+        profile = StudentProfile if kind == "student" else LecturerProfile
+        await self.db.execute(delete(profile).where(profile.user_id == user.user_id))
+        access_keys = ["LMS", "STUDENT"] if kind == "student" else ["LMS", "LECTURER"]
+        levels = await self.access_levels(access_keys)
+        await self.db.execute(delete(UserAccessLevel).where(
+            UserAccessLevel.user_id == user.user_id,
+            UserAccessLevel.access_level_id.in_([level.access_level_id for level in levels]),
+        ))
+        remaining_access = await self.db.scalar(
+            select(func.count()).select_from(UserAccessLevel).where(
+                UserAccessLevel.user_id == user.user_id
+            )
+        )
+        if not remaining_access:
+            # Keep the user row for audit/history, but release the unique email
+            # so the same person can be registered again later.
+            user.email = f"deleted+{user.user_id}@deleted.inspire.college"
+            user.full_name = f"Deleted LMS user {user.user_id}"
+            user.is_active = False
+        await self.db.commit()

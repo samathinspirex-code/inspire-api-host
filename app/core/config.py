@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     AUTHENTICATOR_ENCRYPTION_KEY: str = ""
     AUTHENTICATOR_ISSUER: str = "Inspire College"
-    AUTHENTICATOR_SETUP_EXPIRE_MINUTES: int = 2880  # Two days; setup links remain single-use.
+    AUTHENTICATOR_SETUP_EXPIRE_MINUTES: int = 10080  # Seven days; setup links remain single-use.
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
     AUTHENTICATOR_MAX_ATTEMPTS: int = 5
     AUTHENTICATOR_LOCK_MINUTES: int = 5
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     MAILJET_SECRET_KEY: str = ""
     MAILJET_FROM_EMAIL: str = ""
     MAILJET_FROM_NAME: str = "Inspire College"
-    PUBLIC_FORM_FROM_EMAIL: str = "website@inspire.college"
+    PUBLIC_FORM_FROM_EMAIL: str = "enrol@inspire.college"
     PUBLIC_FORM_FROM_NAME: str = "Inspire College"
     PUBLIC_FORM_RECIPIENT_EMAIL: str = "enrol@inspire.college"
     AUTHENTICATOR_INVITATION_SUBJECT: str = "Set up your Inspire College Authenticator"

@@ -47,7 +47,15 @@ from app.modules.lms.schemas.integration import (
     GoogleIntegrationItem,
     GoogleIntegrationUpdate,
 )
-from app.modules.lms.schemas.meeting import MeetingCreate, MeetingItem, MeetingListResponse, MeetingUpdate
+from app.modules.lms.schemas.meeting import (
+    MeetingCreate,
+    MeetingItem,
+    MeetingListResponse,
+    MeetingOptions,
+    MeetingUpdate,
+    SchedulableClassItem,
+    SchedulableClassListResponse,
+)
 from app.modules.lms.schemas.attendance import (
     AttendanceReportItem,
     AttendanceReportOption,
@@ -239,7 +247,10 @@ __all__ = [
     "MeetingCreate",
     "MeetingItem",
     "MeetingListResponse",
+    "MeetingOptions",
     "MeetingUpdate",
+    "SchedulableClassItem",
+    "SchedulableClassListResponse",
     "AttendanceRecordItem",
     "AttendanceRecordUpdate",
     "AttendanceReportItem",

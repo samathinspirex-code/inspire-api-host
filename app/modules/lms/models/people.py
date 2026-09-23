@@ -12,7 +12,7 @@ class StudentProfile(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
-    student_number: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    student_number: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     preferred_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -35,7 +35,7 @@ class LecturerProfile(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
-    staff_number: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    staff_number: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
     job_title: Mapped[str | None] = mapped_column(String(150), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)

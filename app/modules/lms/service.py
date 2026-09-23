@@ -1,6 +1,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.auth.schemas import CurrentUser
 from app.modules.auth import service as auth_service
@@ -539,10 +540,11 @@ async def list_students(db: AsyncSession, search: str | None) -> StudentListResp
 async def create_student(db: AsyncSession, payload: StudentCreate, created_by: int) -> StudentItem:
     repo = PeopleRepository(db)
     email = payload.email.strip().lower()
-    number = payload.student_number.strip().upper()
+    number = _clean_optional(payload.student_number)
+    number = number.upper() if number else None
     if await repo.get_user_by_email(email) is not None:
         raise ConflictError(f"Email '{email}' is already in use")
-    if await repo.student_number_exists(number):
+    if number and await repo.student_number_exists(number):
         raise ConflictError(f"Student number '{number}' is already in use")
     access = await repo.access_levels(["LMS", "STUDENT"])
     if {item.access_key for item in access} != {"LMS", "STUDENT"}:
@@ -562,10 +564,11 @@ async def update_student(db: AsyncSession, user_id: int, payload: StudentUpdate)
     if user is None or profile is None:
         raise NotFoundError(f"Student {user_id} not found")
     email = payload.email.strip().lower()
-    number = payload.student_number.strip().upper()
+    number = _clean_optional(payload.student_number)
+    number = number.upper() if number else None
     if await repo.get_user_by_email(email, exclude_user_id=user_id) is not None:
         raise ConflictError(f"Email '{email}' is already in use")
-    if await repo.student_number_exists(number, exclude_user_id=user_id):
+    if number and await repo.student_number_exists(number, exclude_user_id=user_id):
         raise ConflictError(f"Student number '{number}' is already in use")
     user, profile = await repo.update_person(
         user,
@@ -588,6 +591,15 @@ async def set_student_active(db: AsyncSession, user_id: int, is_active: bool) ->
     return _student_item(user, profile)
 
 
+async def delete_student(db: AsyncSession, user_id: int) -> None:
+    repo = PeopleRepository(db)
+    user = await repo.get_user(user_id)
+    if user is None or await repo.get_student_profile(user_id) is None:
+        raise NotFoundError(f"Student {user_id} not found")
+    await RefreshTokenRepository(db).revoke_all_for_user(user_id)
+    await repo.remove_from_lms(user, "student")
+
+
 async def list_lecturers(db: AsyncSession, search: str | None) -> LecturerListResponse:
     rows = await PeopleRepository(db).list_lecturers(search)
     statuses = await AuthenticatorRepository(db).setup_statuses(
@@ -604,10 +616,11 @@ async def list_lecturers(db: AsyncSession, search: str | None) -> LecturerListRe
 async def create_lecturer(db: AsyncSession, payload: LecturerCreate, created_by: int) -> LecturerItem:
     repo = PeopleRepository(db)
     email = payload.email.strip().lower()
-    number = payload.staff_number.strip().upper()
+    number = _clean_optional(payload.staff_number)
+    number = number.upper() if number else None
     if await repo.get_user_by_email(email) is not None:
         raise ConflictError(f"Email '{email}' is already in use")
-    if await repo.staff_number_exists(number):
+    if number and await repo.staff_number_exists(number):
         raise ConflictError(f"Staff number '{number}' is already in use")
     access = await repo.access_levels(["LMS", "LECTURER"])
     if {item.access_key for item in access} != {"LMS", "LECTURER"}:
@@ -633,10 +646,11 @@ async def update_lecturer(db: AsyncSession, user_id: int, payload: LecturerUpdat
     if user is None or profile is None:
         raise NotFoundError(f"Lecturer {user_id} not found")
     email = payload.email.strip().lower()
-    number = payload.staff_number.strip().upper()
+    number = _clean_optional(payload.staff_number)
+    number = number.upper() if number else None
     if await repo.get_user_by_email(email, exclude_user_id=user_id) is not None:
         raise ConflictError(f"Email '{email}' is already in use")
-    if await repo.staff_number_exists(number, exclude_user_id=user_id):
+    if number and await repo.staff_number_exists(number, exclude_user_id=user_id):
         raise ConflictError(f"Staff number '{number}' is already in use")
     user, profile = await repo.update_person(
         user,
@@ -665,6 +679,15 @@ async def set_lecturer_active(db: AsyncSession, user_id: int, is_active: bool) -
     return _lecturer_item(user, profile)
 
 
+async def delete_lecturer(db: AsyncSession, user_id: int) -> None:
+    repo = PeopleRepository(db)
+    user = await repo.get_user(user_id)
+    if user is None or await repo.get_lecturer_profile(user_id) is None:
+        raise NotFoundError(f"Lecturer {user_id} not found")
+    await RefreshTokenRepository(db).revoke_all_for_user(user_id)
+    await repo.remove_from_lms(user, "lecturer")
+
+
 async def send_person_authenticator_invitation(
     db: AsyncSession, user_id: int, created_by: int
 ):
@@ -674,4 +697,8 @@ async def send_person_authenticator_invitation(
     access = {item.access_level.access_key for item in user.access_levels if item.access_level.is_active}
     if not ({"STUDENT", "LECTURER"} & access):
         raise NotFoundError(f"Student or lecturer {user_id} not found")
-    return await auth_service.issue_student_password_setup_invitation(db, user_id, created_by)
+    # Invitations started from the LMS directory must land in the LMS password
+    # screen, even when a lecturer also has a CMS role.
+    return await auth_service.issue_student_password_setup_invitation(
+        db, user_id, created_by, settings.LMS_UI_URL
+    )

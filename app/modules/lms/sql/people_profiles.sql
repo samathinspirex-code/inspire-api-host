@@ -1,7 +1,7 @@
 -- Step 4: academic profiles attached one-to-one to existing user accounts.
 CREATE TABLE IF NOT EXISTS lms_student_profiles (
     user_id        INT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-    student_number VARCHAR(100) NOT NULL UNIQUE,
+    student_number VARCHAR(100) UNIQUE,
     phone           VARCHAR(50),
     profile_image_url TEXT,
     notes           TEXT,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS lms_student_profiles (
 
 CREATE TABLE IF NOT EXISTS lms_lecturer_profiles (
     user_id      INT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-    staff_number VARCHAR(100) NOT NULL UNIQUE,
+    staff_number VARCHAR(100) UNIQUE,
     job_title    VARCHAR(150),
     phone        VARCHAR(50),
     profile_image_url TEXT,
