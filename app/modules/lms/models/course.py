@@ -14,7 +14,8 @@ class LmsCourse(Base):
     )
 
     course_id: Mapped[int] = mapped_column(primary_key=True)
-    program_id: Mapped[int] = mapped_column(ForeignKey("programs.program_id", ondelete="RESTRICT"), nullable=False)
+    program_id: Mapped[int | None] = mapped_column(ForeignKey("programs.program_id", ondelete="RESTRICT"), nullable=True)
+    is_orientation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # The academic catalogue is managed by SQL migrations rather than ORM
     # models. Its database foreign key is installed by the catalogue-link
     # migration, while this plain mapped column keeps isolated LMS metadata

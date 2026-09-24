@@ -232,6 +232,69 @@ async def _access_token(db: AsyncSession, host: dict) -> str:
     await db.commit(); return tokens["access_token"]
 
 
+async def window_availability(db: AsyncSession, start: datetime, end: datetime, exclude_meeting: int|None=None) -> dict:
+    """Concurrent live-class capacity for a time window.
+
+    The simultaneous limit is the sum of the capacity of every enabled host
+    account, so connecting another Zoom account raises it with no code change.
+    A host already at its own capacity cannot absorb more, so availability is
+    aggregated per host rather than compared against the pool total.
+    """
+    hosts=(await db.execute(text("""
+      SELECT h.connection_id, h.email, h.capacity,
+        (SELECT count(*) FROM lms_online_meetings m WHERE m.zoom_host_connection_id=h.connection_id
+          AND m.provider='zoom' AND m.status='scheduled' AND m.start_time<:end_time AND m.end_time>:start_time
+          AND (CAST(:exclude_id AS BIGINT) IS NULL OR m.meeting_id<>CAST(:exclude_id AS BIGINT))) AS concurrent
+      FROM lms_zoom_host_connections h WHERE h.enabled=TRUE ORDER BY h.connection_id
+    """),{"start_time":start,"end_time":end,"exclude_id":exclude_meeting})).mappings().all()
+    clashes=(await db.execute(text("""
+      SELECT m.meeting_id,m.title,m.start_time,m.end_time,lc.code AS course_code,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
+      FROM lms_online_meetings m JOIN lms_classes c ON c.class_id=m.class_id
+      JOIN lms_courses lc ON lc.course_id=c.course_id
+      LEFT JOIN users u ON u.user_id=m.lecturer_user_id
+      WHERE m.provider='zoom' AND m.status='scheduled' AND m.start_time<:end_time AND m.end_time>:start_time
+        AND (CAST(:exclude_id AS BIGINT) IS NULL OR m.meeting_id<>CAST(:exclude_id AS BIGINT))
+      ORDER BY m.start_time
+    """),{"start_time":start,"end_time":end,"exclude_id":exclude_meeting})).mappings().all()
+    total=sum(host["capacity"] for host in hosts)
+    available=sum(max(0,host["capacity"]-host["concurrent"]) for host in hosts)
+    return {
+        "host_count":len(hosts),
+        "total_capacity":total,
+        "used":min(len(clashes),total),
+        "available":available,
+        "overlapping":[{
+            "meeting_id":row["meeting_id"],"title":row["title"],
+            "start_time":row["start_time"],"end_time":row["end_time"],
+            "course_code":row["course_code"],"class_code":row["class_code"],"class_name":row["class_name"],
+            "lecturer_name":row["lecturer_name"],
+        } for row in clashes],
+    }
+
+
+async def live_status(db: AsyncSession) -> dict:
+    """Classes running right now, plus the pool's simultaneous limit."""
+    now=datetime.now(timezone.utc)
+    rows=(await db.execute(text("""
+      SELECT m.meeting_id,m.title,m.start_time,m.end_time,lc.code AS course_code,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
+      FROM lms_online_meetings m JOIN lms_classes c ON c.class_id=m.class_id
+      JOIN lms_courses lc ON lc.course_id=c.course_id
+      LEFT JOIN users u ON u.user_id=m.lecturer_user_id
+      WHERE m.provider='zoom' AND m.status='scheduled' AND m.start_time<=:now AND m.end_time>=:now
+      ORDER BY m.start_time
+    """),{"now":now})).mappings().all()
+    capacity=(await db.execute(text("""
+      SELECT count(*) AS hosts, COALESCE(sum(capacity),0) AS total
+      FROM lms_zoom_host_connections WHERE enabled=TRUE
+    """))).mappings().first()
+    return {
+        "live_count":len(rows),
+        "host_count":capacity["hosts"],
+        "total_capacity":int(capacity["total"]),
+        "live":[dict(row) for row in rows],
+    }
+
+
 async def _claim_host(db: AsyncSession, lecturer_id: int, start: datetime, end: datetime, exclude_meeting: int|None=None) -> dict:
     rows=(await db.execute(text("""
       SELECT h.*, CASE WHEN EXISTS(SELECT 1 FROM lms_online_meetings prior WHERE prior.zoom_host_connection_id=h.connection_id
@@ -242,7 +305,15 @@ async def _claim_host(db: AsyncSession, lecturer_id: int, start: datetime, end: 
       FROM lms_zoom_host_connections h WHERE h.enabled=TRUE ORDER BY preference,h.connection_id FOR UPDATE OF h
     """), {"lecturer":lecturer_id,"start_time":start,"end_time":end,"exclude_id":exclude_meeting})).mappings().all()
     host=next((dict(row) for row in rows if row["concurrent"] < row["capacity"]),None)
-    if host is None: raise ValidationError("All Zoom host accounts are at capacity for this time. Choose another time or connect another host.")
+    if host is None:
+        if not rows:
+            raise ValidationError("No Zoom host account is connected. Connect a host in LMS Settings before scheduling a live class.")
+        limit=sum(row["capacity"] for row in rows)
+        raise ValidationError(
+            f"This time clashes with other live classes. All {limit} simultaneous "
+            f"class slots across {len(rows)} connected Zoom host account(s) are already booked. "
+            "Choose another time or connect another Zoom account to raise the limit."
+        )
     return host
 
 
@@ -251,11 +322,19 @@ async def create_zoom_meeting(db: AsyncSession, payload, lecturer_id: int, class
     if not zoom_settings or not zoom_settings["enabled"]: raise ValidationError("Zoom integration is not enabled")
     host=await _claim_host(db,lecturer_id,payload.start_time,payload.end_time); token=await _access_token(db,host)
     duration=max(1,round((payload.end_time-payload.start_time).total_seconds()/60))
-    passcode=secrets.token_hex(4)
+    options=payload.options
+    passcode=options.passcode or secrets.token_hex(4)
+    # The integration setting is the default; the schedule form may override it.
+    recording=options.auto_recording or ("cloud" if zoom_settings["automatic_recording"] else "none")
     body={"topic":payload.title.strip(),"type":2,"start_time":payload.start_time.isoformat(),"duration":duration,"password":passcode,
-      "timezone":class_.timezone,"agenda":(payload.description or "").strip(),
-      "settings":{"registration_type":1,"approval_type":0,"waiting_room":True,"join_before_host":False,
-        "meeting_authentication":False,"auto_recording":"cloud" if zoom_settings["automatic_recording"] else "none"}}
+      "timezone":payload.timezone or class_.timezone,"agenda":(payload.description or "").strip(),
+      # No registration: students are already authenticated LMS users and join
+      # through the embedded Meeting SDK, so Zoom must not demand a registrant.
+      "settings":{"approval_type":2,"waiting_room":options.waiting_room,
+        "join_before_host":options.join_before_host,"jbh_time":0,
+        "mute_upon_entry":options.mute_upon_entry,"host_video":options.host_video,
+        "participant_video":options.participant_video,"audio":"both",
+        "meeting_authentication":False,"auto_recording":recording}}
     async with httpx.AsyncClient(timeout=30) as client:
         response=await client.post(f"{ZOOM_API}/users/me/meetings",headers={"Authorization":f"Bearer {token}"},json=body)
     if response.is_error: raise ValidationError("Zoom could not schedule the meeting. Check the host licence and app scopes.")
@@ -278,17 +357,28 @@ async def update_zoom_meeting(db: AsyncSession, meeting, payload) -> dict:
       AND meeting_id<>:meeting AND start_time<:end_time AND end_time>:start_time"""),
       {"host":host["connection_id"],"meeting":meeting.meeting_id,"start_time":payload.start_time,"end_time":payload.end_time})
     if conflicts >= host["capacity"]:
-        raise ValidationError("This Zoom host is already at capacity for the new time. Choose another time.")
+        # The remote meeting belongs to this host account, so it cannot be moved
+        # to a different host in the pool the way a new booking can.
+        raise ValidationError(
+            f"The Zoom account hosting this class ({host['email']}) already runs "
+            f"{host['capacity']} class(es) at the new time. Choose another time, or cancel "
+            "this class and schedule it again to have it allocated to a free host."
+        )
     token=await _access_token(db,dict(host))
+    options=payload.options
     body={"topic":payload.title.strip(),"start_time":payload.start_time.isoformat(),
       "duration":max(1,round((payload.end_time-payload.start_time).total_seconds()/60)),
-      "timezone":meeting.timezone,"agenda":(payload.description or "").strip()}
+      "timezone":payload.timezone or meeting.timezone,"agenda":(payload.description or "").strip(),
+      "settings":{"waiting_room":options.waiting_room,"join_before_host":options.join_before_host,
+        "mute_upon_entry":options.mute_upon_entry,"host_video":options.host_video,
+        "participant_video":options.participant_video}}
     async with httpx.AsyncClient(timeout=25) as client:
         response=await client.patch(f"{ZOOM_API}/meetings/{meeting.provider_meeting_id}",headers={"Authorization":f"Bearer {token}"},json=body)
     if response.is_error:
         raise ValidationError("Zoom could not update this meeting. Check the host connection and try again.")
     return {"title":payload.title.strip(),"description":(payload.description or "").strip() or None,
-      "start_time":payload.start_time,"end_time":payload.end_time,"processing_error":None}
+      "start_time":payload.start_time,"end_time":payload.end_time,
+      "timezone":payload.timezone or meeting.timezone,"processing_error":None}
 
 
 async def cancel_zoom_meeting(db: AsyncSession, meeting) -> None:
@@ -300,37 +390,6 @@ async def cancel_zoom_meeting(db: AsyncSession, meeting) -> None:
         response=await client.delete(f"{ZOOM_API}/meetings/{meeting.provider_meeting_id}",headers={"Authorization":f"Bearer {token}"})
     if response.is_error and response.status_code != 404:
         raise ValidationError("Zoom could not cancel this meeting. Try again.")
-
-
-async def register_class_students(db: AsyncSession, meeting_id: int) -> None:
-    student_ids=(await db.execute(text("""SELECT cs.student_user_id FROM lms_online_meetings m
-      JOIN lms_class_students cs ON cs.class_id=m.class_id WHERE m.meeting_id=:id"""),{"id":meeting_id})).scalars().all()
-    for student_id in student_ids:
-        try:
-            await register_student(db,meeting_id,student_id)
-        except Exception:
-            # Registration is retried lazily when the student opens the meeting.
-            # A single stale student profile must not orphan the scheduled meeting.
-            await db.rollback()
-
-
-async def register_student(db: AsyncSession, meeting_id: int, student_id: int) -> dict:
-    existing=(await db.execute(text("SELECT * FROM lms_zoom_registrations WHERE meeting_id=:m AND student_user_id=:s"),{"m":meeting_id,"s":student_id})).mappings().first()
-    if existing: return dict(existing)
-    row=(await db.execute(text("""SELECT m.provider_meeting_id,m.zoom_host_connection_id,u.email,u.full_name
-      FROM lms_online_meetings m JOIN lms_class_students cs ON cs.class_id=m.class_id
-      JOIN users u ON u.user_id=cs.student_user_id WHERE m.meeting_id=:m AND cs.student_user_id=:s AND u.is_active"""),{"m":meeting_id,"s":student_id})).mappings().first()
-    if not row: raise ForbiddenError("You are not enrolled in this meeting's class")
-    host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":row["zoom_host_connection_id"]})).mappings().first(); token=await _access_token(db,dict(host))
-    names=(row["full_name"] or "Student").strip().split(" ",1)
-    async with httpx.AsyncClient(timeout=20) as client:
-        response=await client.post(f"{ZOOM_API}/meetings/{row['provider_meeting_id']}/registrants",headers={"Authorization":f"Bearer {token}"},json={"email":row["email"],"first_name":names[0],"last_name":names[1] if len(names)>1 else "Student"})
-    if response.is_error: raise ValidationError("Zoom could not register this student for the meeting")
-    data=response.json(); join_token=data.get("tk")
-    await db.execute(text("""INSERT INTO lms_zoom_registrations(meeting_id,student_user_id,zoom_registrant_id,encrypted_join_token,join_url)
-      VALUES(:m,:s,:r,:t,:url) ON CONFLICT(meeting_id,student_user_id) DO UPDATE SET zoom_registrant_id=EXCLUDED.zoom_registrant_id,
-      encrypted_join_token=EXCLUDED.encrypted_join_token,join_url=EXCLUDED.join_url"""),{"m":meeting_id,"s":student_id,"r":data.get("registrant_id"),"t":_encrypt(join_token) if join_token else None,"url":data["join_url"]})
-    await db.commit(); return {"join_url":data["join_url"],"join_token":join_token}
 
 
 def _sdk_signature(meeting_number: str, role: int) -> str:
@@ -359,8 +418,8 @@ async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str
         async with httpx.AsyncClient(timeout=20) as client: response=await client.get(_zak_token_url(dict(host)),params={"type":"zak"},headers={"Authorization":f"Bearer {token}"})
         if response.is_error: raise ValidationError(f"Zoom could not issue the lecturer host token ({_zoom_error(response)}). Reconnect this host after granting user:read:zak.")
         result["zak"]=response.json().get("token")
-    else:
-        registration=await register_student(db,meeting_id,user_id); result["registrant_token"]=registration.get("join_token")
+    # Students join through the embedded SDK using the signature alone. Meetings
+    # are created without Zoom registration, so no registrant token is involved.
     return result
 
 
@@ -423,18 +482,25 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
       VALUES(:m,:c,:ref,:start,:end,:threshold,'synced',CAST(:unmatched AS jsonb),:by,now()) ON CONFLICT(meeting_id) DO UPDATE SET provider_reference=EXCLUDED.provider_reference,
       actual_start_time=EXCLUDED.actual_start_time,actual_end_time=EXCLUDED.actual_end_time,threshold_percentage=EXCLUDED.threshold_percentage,sync_status='synced',sync_error=NULL,unmatched_participants=EXCLUDED.unmatched_participants,synced_by=EXCLUDED.synced_by,synced_at=now() RETURNING attendance_session_id"""),
       {"m":meeting_id,"c":context["class_id"],"ref":context["provider_meeting_uuid"],"start":actual_start,"end":actual_end,"threshold":context["attendance_threshold_percentage"],"unmatched":json.dumps(unmatched),"by":synced_by})
+    from app.modules.lms.attendance_service import _attendance_status, _merge_duration
     for student in roster:
-        entries=buckets[student["email"]]; seconds=sum(int(p.get("duration") or 0) for p in entries); percentage=min(100,round(seconds*100/window,2)); status="present" if percentage>=context["attendance_threshold_percentage"] else "absent"
-        joins=[_dt(p.get("join_time")) for p in entries if p.get("join_time")]; leaves=[_dt(p.get("leave_time")) for p in entries if p.get("leave_time")]
+        entries=buckets[student["email"]]
+        # Zoom reports one row per join, so a student who reconnects or is signed
+        # in on two devices appears several times. Merge the intervals instead of
+        # summing durations so overlapping sessions are not counted twice.
+        intervals=[(_dt(p.get("join_time")),_dt(p.get("leave_time")) or actual_end) for p in entries if p.get("join_time")]
+        seconds,first_join,last_leave=_merge_duration(intervals,actual_start,actual_end)
+        percentage=min(100,round(seconds*100/window,2))
+        status=_attendance_status(seconds,window,context["attendance_threshold_percentage"])
         await db.execute(text("""INSERT INTO lms_attendance_records(attendance_session_id,student_user_id,status,attended_seconds,attendance_percentage,first_join_time,last_leave_time,google_participant_name,source)
           VALUES(:session,:student,:status,:seconds,:percentage,:first,:last,:name,'zoom') ON CONFLICT(attendance_session_id,student_user_id) DO UPDATE SET status=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.status ELSE EXCLUDED.status END,
           attended_seconds=EXCLUDED.attended_seconds,attendance_percentage=EXCLUDED.attendance_percentage,first_join_time=EXCLUDED.first_join_time,last_leave_time=EXCLUDED.last_leave_time,google_participant_name=EXCLUDED.google_participant_name,source=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.source ELSE 'zoom' END"""),
-          {"session":session,"student":student["user_id"],"status":status,"seconds":seconds,"percentage":percentage,"first":min(joins) if joins else None,"last":max(leaves) if leaves else None,"name":", ".join(str(p.get("name") or "") for p in entries) or None})
+          {"session":session,"student":student["user_id"],"status":status,"seconds":seconds,"percentage":percentage,"first":first_join,"last":last_leave,"name":", ".join(str(p.get("name") or "") for p in entries) or None})
     await db.execute(text("UPDATE lms_online_meetings SET status='completed',processing_status='attendance_ready',processing_error=NULL WHERE meeting_id=:id"),{"id":meeting_id}); await db.commit()
 
 
-def _dt(value: str|None) -> datetime:
-    return datetime.fromisoformat(value.replace("Z","+00:00")) if value else datetime.now(timezone.utc)
+def _dt(value: str|None) -> datetime|None:
+    return datetime.fromisoformat(value.replace("Z","+00:00")) if value else None
 
 
 async def process_jobs(db: AsyncSession, limit: int=5) -> dict:
@@ -510,12 +576,80 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
                             response=await upload_client.patch(ticket.upload_link,content=chunk,headers={"Tus-Resumable":"1.0.0","Upload-Offset":str(offset),"Content-Type":"application/offset+octet-stream"}); response.raise_for_status(); offset=int(response.headers.get('Upload-Offset',offset+len(chunk)))
                 video=await vimeo.get_video(ticket.video_uri); await vimeo.add_video_to_folder(folder,ticket.video_uri)
             resource=str(video.get('link') or '')
-            await db.execute(text("""INSERT INTO lms_zoom_recordings(meeting_id,zoom_recording_file_id,recording_type,part_number,status,vimeo_video_uri,title,description,resource_url,thumbnail_url,duration_minutes)
-              VALUES(:m,:file,:type,:part,'published',:vimeo,:title,'Automatic Zoom class recording',:url,:thumb,:duration)
-              ON CONFLICT(zoom_recording_file_id) DO UPDATE SET status='published',vimeo_video_uri=EXCLUDED.vimeo_video_uri,title=EXCLUDED.title,description=EXCLUDED.description,resource_url=EXCLUDED.resource_url,thumbnail_url=EXCLUDED.thumbnail_url,duration_minutes=EXCLUDED.duration_minutes,learning_item_id=NULL,error=NULL"""),
+            # zoom_published_at starts the cloud retention clock: the file is only
+            # removed from Zoom storage once it is safely published to Vimeo.
+            await db.execute(text("""INSERT INTO lms_zoom_recordings(meeting_id,zoom_recording_file_id,recording_type,part_number,status,vimeo_video_uri,title,description,resource_url,thumbnail_url,duration_minutes,zoom_published_at)
+              VALUES(:m,:file,:type,:part,'published',:vimeo,:title,'Automatic Zoom class recording',:url,:thumb,:duration,now())
+              ON CONFLICT(zoom_recording_file_id) DO UPDATE SET status='published',vimeo_video_uri=EXCLUDED.vimeo_video_uri,title=EXCLUDED.title,description=EXCLUDED.description,resource_url=EXCLUDED.resource_url,thumbnail_url=EXCLUDED.thumbnail_url,duration_minutes=EXCLUDED.duration_minutes,learning_item_id=NULL,error=NULL,zoom_published_at=COALESCE(lms_zoom_recordings.zoom_published_at,now())"""),
               {"m":meeting_id,"file":file["id"],"type":file.get("recording_type"),"part":part,"vimeo":ticket.video_uri,"title":title,"url":resource,"thumb":vimeo_service._thumbnail_url(video),"duration":max(1,round(int(video.get('duration') or 0)/60))}); await db.commit()
         finally:
             if temp and os.path.exists(temp): os.unlink(temp)
+
+
+async def sweep_missing_attendance(db: AsyncSession, now: datetime, limit: int=10) -> int:
+    """Queue attendance for finished classes Zoom never reported as ended.
+
+    Zoom webhooks can be lost or misconfigured, which would otherwise leave a
+    finished class without attendance until someone pressed sync by hand.
+    """
+    enabled=await db.scalar(text("SELECT attendance_sync_enabled FROM lms_zoom_settings WHERE settings_id=1"))
+    if not enabled: return 0
+    # A short grace period lets Zoom's participant report become available.
+    rows=(await db.execute(text("""SELECT m.meeting_id FROM lms_online_meetings m
+      LEFT JOIN lms_attendance_sessions s ON s.meeting_id=m.meeting_id
+      WHERE m.provider='zoom' AND m.status<>'cancelled' AND m.end_time < :cutoff
+        AND (s.attendance_session_id IS NULL OR s.sync_status<>'synced')
+        AND NOT EXISTS (SELECT 1 FROM lms_zoom_jobs j WHERE j.meeting_id=m.meeting_id
+          AND j.job_type='attendance' AND j.status IN ('pending','processing'))
+      ORDER BY m.end_time DESC LIMIT :limit"""),
+      {"cutoff":now-timedelta(minutes=10),"limit":limit})).mappings().all()
+    for row in rows:
+        await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
+          VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
+          {"key":f"sweep:{row['meeting_id']}:attendance","meeting":row["meeting_id"]})
+    await db.commit(); return len(rows)
+
+
+async def purge_expired_cloud_recordings(db: AsyncSession, now: datetime, limit: int=10) -> int:
+    """Delete published recordings from Zoom cloud storage after the retention window.
+
+    Zoom cloud storage is a paid quota, and the authoritative copy now lives on
+    Vimeo. Only rows that reached 'published' are considered, so a failed upload
+    never destroys the sole copy of a class.
+    """
+    settings_row=(await db.execute(text("SELECT cloud_retention_days FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
+    retention_days=int((settings_row or {}).get("cloud_retention_days") or 2)
+    cutoff=now-timedelta(days=retention_days)
+    rows=(await db.execute(text("""SELECT zr.recording_id,zr.zoom_recording_file_id,m.provider_meeting_uuid,m.provider_meeting_id,m.zoom_host_connection_id
+      FROM lms_zoom_recordings zr JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id
+      WHERE zr.status='published' AND zr.zoom_cloud_deleted_at IS NULL
+        AND zr.zoom_published_at IS NOT NULL AND zr.zoom_published_at <= :cutoff
+      ORDER BY zr.zoom_published_at LIMIT :limit"""),{"cutoff":cutoff,"limit":limit})).mappings().all()
+    deleted=0
+    for row in rows:
+        try:
+            host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":row["zoom_host_connection_id"]})).mappings().first()
+            if not host:
+                raise ValidationError("The Zoom host account for this recording is no longer connected")
+            token=await _access_token(db,dict(host))
+            meeting_ref=_recording_api_ref(row["provider_meeting_uuid"] or row["provider_meeting_id"])
+            async with httpx.AsyncClient(timeout=30) as client:
+                response=await client.delete(
+                    f"{ZOOM_API}/meetings/{meeting_ref}/recordings/{row['zoom_recording_file_id']}",
+                    params={"action":"delete"},headers={"Authorization":f"Bearer {token}"})
+            # 404 means Zoom already removed the file, which satisfies the goal.
+            if response.is_error and response.status_code != 404:
+                raise ValidationError(f"Zoom refused the recording delete (HTTP {response.status_code})")
+            await db.execute(text("""UPDATE lms_zoom_recordings
+              SET zoom_cloud_deleted_at=now(),zoom_cloud_delete_error=NULL,updated_at=now() WHERE recording_id=:id"""),{"id":row["recording_id"]})
+            await db.commit(); deleted+=1
+        except Exception as exc:
+            await db.rollback()
+            await db.execute(text("""UPDATE lms_zoom_recordings
+              SET zoom_cloud_delete_error=:error,updated_at=now() WHERE recording_id=:id"""),
+              {"error":str(exc)[:500],"id":row["recording_id"]})
+            await db.commit()
+    return deleted
 
 
 async def list_class_recordings(db: AsyncSession, class_id: int, user_id: int, role: str) -> list[dict]:

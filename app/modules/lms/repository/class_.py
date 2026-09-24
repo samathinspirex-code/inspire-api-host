@@ -35,14 +35,14 @@ class ClassRepository:
         base = (
             select(LmsClass)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .where(*filters)
         )
         total = (await self.db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
         stmt = (
             select(LmsClass, LmsCourse.code, LmsCourse.title, Program.title)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .where(*filters)
             .order_by(LmsClass.start_date.desc(), LmsClass.name)
             .offset((page - 1) * size)

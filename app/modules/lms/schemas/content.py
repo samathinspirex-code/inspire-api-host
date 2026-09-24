@@ -213,6 +213,7 @@ class CourseAssistantPublicResponse(BaseModel):
 
 class CourseAssistantQuestion(BaseModel):
     question: str = Field(..., min_length=2, max_length=1000)
+    class_id: int | None = Field(None, gt=0)
 
 
 class CourseAssistantCitation(BaseModel):

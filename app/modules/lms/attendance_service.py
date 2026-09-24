@@ -3,13 +3,16 @@ import math
 from datetime import date, datetime, timezone
 from io import StringIO
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
-from app.modules.lms import integration_service, zoom_service
-from app.modules.lms.repository import AttendanceRepository, IntegrationRepository, MeetingRepository
+from app.modules.lms import zoom_service
+from app.modules.lms.repository import AttendanceRepository, MeetingRepository
 from app.modules.lms.schemas import (
+    AttendanceAnalyticsResponse,
+    AttendanceClassAnalytic,
+    AttendanceMeetingAnalytic,
+    AttendanceMonthAnalytic,
     AttendanceRecordItem,
     AttendanceRecordUpdate,
     AttendanceReportItem,
@@ -18,24 +21,20 @@ from app.modules.lms.schemas import (
     AttendanceReportResponse,
     AttendanceReportSummary,
     AttendanceSessionItem,
+    AttendanceStudentAnalytic,
     StudentAttendanceItem,
     StudentAttendanceResponse,
     UnmatchedParticipantItem,
 )
 
-GOOGLE_CONFERENCE_RECORDS_URL = "https://meet.googleapis.com/v2/conferenceRecords"
-GOOGLE_PEOPLE_BATCH_URL = "https://people.googleapis.com/v1/people:batchGet"
-
-
-def _parse_google_time(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
 def _merge_duration(
     intervals: list[tuple[datetime, datetime]], window_start: datetime, window_end: datetime
 ) -> tuple[int, datetime | None, datetime | None]:
+    """Attended seconds inside the class window, counting overlaps only once.
+
+    A student who rejoins, or is connected from a phone and a laptop at the same
+    time, produces overlapping sessions that must not inflate their attendance.
+    """
     clipped = []
     for start, end in intervals:
         start = max(start, window_start)
@@ -60,73 +59,6 @@ def _merge_duration(
 def _attendance_status(attended_seconds: int, window_seconds: int, threshold: int) -> str:
     required_seconds = math.ceil(max(1, window_seconds) * threshold / 100)
     return "present" if attended_seconds >= required_seconds else "absent"
-
-
-def _google_message(response: httpx.Response, fallback: str) -> str:
-    try:
-        detail = response.json().get("error", {}).get("message")
-    except ValueError:
-        detail = None
-    return str(detail or fallback)
-
-
-async def _get_all_pages(
-    client: httpx.AsyncClient,
-    url: str,
-    collection_key: str,
-    access_token: str,
-    params: dict | None = None,
-) -> list[dict]:
-    output: list[dict] = []
-    page_token = None
-    while True:
-        request_params = dict(params or {})
-        if page_token:
-            request_params["pageToken"] = page_token
-        response = await client.get(
-            url,
-            params=request_params,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        if response.is_error:
-            raise ValidationError(_google_message(response, "Google Meet attendance data could not be read"))
-        payload = response.json()
-        output.extend(payload.get(collection_key, []))
-        page_token = payload.get("nextPageToken")
-        if not page_token:
-            return output
-
-
-async def _resolve_google_emails(
-    client: httpx.AsyncClient, access_token: str, google_users: set[str]
-) -> dict[str, str]:
-    resolved: dict[str, str] = {}
-    resources = [f"people/{item.rsplit('/', 1)[-1]}" for item in sorted(google_users)]
-    for offset in range(0, len(resources), 50):
-        params: list[tuple[str, str]] = [("personFields", "emailAddresses")]
-        params.extend(("resourceNames", item) for item in resources[offset : offset + 50])
-        response = await client.get(
-            GOOGLE_PEOPLE_BATCH_URL,
-            params=params,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        if response.is_error:
-            raise ValidationError(
-                _google_message(
-                    response,
-                    "Google participant identities could not be resolved. Enable the Google People API and reconnect the lecturer account.",
-                )
-            )
-        for item in response.json().get("responses", []):
-            person = item.get("person") or {}
-            resource_name = item.get("requestedResourceName") or person.get("resourceName")
-            emails = person.get("emailAddresses") or []
-            primary = next((email for email in emails if email.get("metadata", {}).get("primary")), None)
-            selected = primary or (emails[0] if emails else None)
-            if resource_name and selected and selected.get("value"):
-                google_id = resource_name.rsplit("/", 1)[-1]
-                resolved[google_id] = selected["value"].lower()
-    return resolved
 
 
 def _record_item(row) -> AttendanceRecordItem:
@@ -166,9 +98,9 @@ def _report_item(row) -> AttendanceReportItem:
         meeting_title=meeting.title,
         meeting_start_time=meeting.start_time,
         meeting_end_time=meeting.end_time,
-        program_id=program.program_id,
-        program_code=program.code,
-        program_title=program.title,
+        program_id=program.program_id if program else None,
+        program_code=program.code if program else "",
+        program_title=program.title if program else ("Orientation" if course.is_orientation else ""),
         course_id=course.course_id,
         course_code=course.code,
         course_title=course.title,
@@ -221,168 +153,28 @@ async def _session_item(repository: AttendanceRepository, context) -> Attendance
 
 
 async def sync_meeting_attendance(
-    db: AsyncSession, meeting_id: int, lecturer_user_id: int
+    db: AsyncSession, meeting_id: int, user_id: int, role: str
 ) -> AttendanceSessionItem:
-    meeting_row = await MeetingRepository(db).get_for_lecturer(meeting_id, lecturer_user_id)
+    """Re-import attendance on demand.
+
+    Attendance is imported automatically when Zoom reports that the meeting
+    ended; this is the manual retry for when that import failed.
+    """
+    meeting_row = await MeetingRepository(db).get_for_organiser(meeting_id, user_id, role)
     if meeting_row is None:
-        raise NotFoundError("Meeting not found or it is not assigned to your lecturer profile")
+        raise NotFoundError("Live class not found, or it is not one of your classes")
     meeting, _class, _course, _attendee_count = meeting_row
     if meeting.status == "cancelled":
-        raise ValidationError("Cancelled meetings do not have attendance")
+        raise ValidationError("Cancelled live classes do not have attendance")
     if meeting.end_time > datetime.now(timezone.utc):
-        raise ValidationError("Attendance can be synchronized after the scheduled meeting end time")
+        raise ValidationError("Attendance can be imported after the scheduled end time")
+    if meeting.provider != "zoom":
+        raise ValidationError(
+            "This live class was created with a retired meeting provider, so attendance cannot be imported"
+        )
 
-    if meeting.provider == "zoom":
-        await zoom_service.sync_attendance(db, meeting_id, lecturer_user_id)
-        repository = AttendanceRepository(db)
-        context = await repository.get_session_context(meeting_id)
-        return await _session_item(repository, context)
-
-    integration = await IntegrationRepository(db).get_google_settings()
-    if integration is None or not integration.enabled or not integration.attendance_sync_enabled:
-        raise ValidationError("Google Meet attendance synchronization is not enabled")
-    threshold = integration.attendance_threshold_percentage
+    await zoom_service.sync_attendance(db, meeting_id, user_id)
     repository = AttendanceRepository(db)
-
-    try:
-        access_token = await integration_service.get_central_google_access_token(db)
-        async with httpx.AsyncClient(timeout=30) as client:
-            conferences = await _get_all_pages(
-                client,
-                GOOGLE_CONFERENCE_RECORDS_URL,
-                "conferenceRecords",
-                access_token,
-                {"pageSize": 100, "filter": f'space.name = "{meeting.google_space_name}"'},
-            )
-            ended = [item for item in conferences if item.get("endTime")]
-            if not ended:
-                raise ValidationError(
-                    "Google has not produced an ended conference record yet. Wait a few minutes and sync again."
-                )
-            conference = min(
-                ended,
-                key=lambda item: abs(
-                    ((_parse_google_time(item.get("startTime")) or meeting.start_time) - meeting.start_time).total_seconds()
-                ),
-            )
-            conference_start = _parse_google_time(conference.get("startTime"))
-            conference_end = _parse_google_time(conference.get("endTime"))
-            if conference_start is None or conference_end is None:
-                raise ValidationError("Google returned incomplete conference times")
-
-            window_start = max(conference_start, meeting.start_time)
-            window_end = min(conference_end, meeting.end_time)
-            if window_end <= window_start:
-                window_start, window_end = conference_start, conference_end
-            window_seconds = max(1, int((window_end - window_start).total_seconds()))
-
-            participants = await _get_all_pages(
-                client,
-                f"https://meet.googleapis.com/v2/{conference['name']}/participants",
-                "participants",
-                access_token,
-                {"pageSize": 250},
-            )
-            google_users = {
-                item["signedinUser"]["user"]
-                for item in participants
-                if item.get("signedinUser", {}).get("user")
-            }
-            email_by_google_id = await _resolve_google_emails(client, access_token, google_users)
-
-            participant_data = []
-            for participant in participants:
-                sessions = await _get_all_pages(
-                    client,
-                    f"https://meet.googleapis.com/v2/{participant['name']}/participantSessions",
-                    "participantSessions",
-                    access_token,
-                    {"pageSize": 250},
-                )
-                intervals = []
-                for item in sessions:
-                    start = _parse_google_time(item.get("startTime"))
-                    end = _parse_google_time(item.get("endTime")) or conference_end
-                    if start and end:
-                        intervals.append((start, end))
-                seconds, first_join, last_leave = _merge_duration(
-                    intervals, window_start, window_end
-                )
-                signed_in = participant.get("signedinUser")
-                anonymous = participant.get("anonymousUser")
-                phone = participant.get("phoneUser")
-                google_id = signed_in.get("user", "").rsplit("/", 1)[-1] if signed_in else ""
-                participant_data.append(
-                    {
-                        "participant_name": participant["name"],
-                        "email": email_by_google_id.get(google_id),
-                        "display_name": (signed_in or anonymous or phone or {}).get("displayName", "Unknown participant"),
-                        "participant_type": "signed_in" if signed_in else "anonymous" if anonymous else "phone",
-                        "seconds": seconds,
-                        "intervals": intervals,
-                        "first_join": first_join,
-                        "last_leave": last_leave,
-                    }
-                )
-    except (httpx.HTTPError, ValidationError) as exc:
-        message = exc.message if isinstance(exc, ValidationError) else "Google is temporarily unavailable. Try syncing again."
-        await repository.save_failed_sync(meeting, threshold, lecturer_user_id, message)
-        raise ValidationError(message) from exc
-
-    students = await repository.list_class_students(meeting.class_id, meeting.end_time)
-    roster = {user.email.lower(): (user, profile) for user, profile in students}
-    connection = await IntegrationRepository(db).get_central_google_connection()
-    central_owner_email = connection.google_email.lower() if connection else ""
-
-    participation_by_email: dict[str, dict] = {}
-    unmatched: list[dict] = []
-    for item in participant_data:
-        email = item["email"]
-        if email and email == central_owner_email:
-            continue
-        if email and email in roster:
-            bucket = participation_by_email.setdefault(
-                email, {"intervals": [], "participant_names": []}
-            )
-            bucket["intervals"].extend(item["intervals"])
-            bucket["participant_names"].append(item["participant_name"])
-        else:
-            unmatched.append(
-                {
-                    "display_name": item["display_name"],
-                    "participant_type": item["participant_type"],
-                    "attended_seconds": item["seconds"],
-                }
-            )
-
-    calculated_records = []
-    for email, (user, _profile) in roster.items():
-        data = participation_by_email.get(email, {"intervals": [], "participant_names": []})
-        seconds, first_join, last_leave = _merge_duration(
-            data["intervals"], window_start, window_end
-        )
-        calculated_records.append(
-            {
-                "student_user_id": user.user_id,
-                "status": _attendance_status(seconds, window_seconds, threshold),
-                "attended_seconds": seconds,
-                "attendance_percentage": min(100.0, round(seconds * 100 / window_seconds, 2)),
-                "first_join_time": first_join,
-                "last_leave_time": last_leave,
-                "google_participant_name": ",".join(data["participant_names"]) or None,
-            }
-        )
-
-    await repository.save_google_sync(
-        meeting,
-        threshold,
-        conference["name"],
-        conference_start,
-        conference_end,
-        unmatched,
-        calculated_records,
-        lecturer_user_id,
-    )
     context = await repository.get_session_context(meeting_id)
     return await _session_item(repository, context)
 
@@ -541,6 +333,86 @@ async def list_attendance_report(
     )
 
 
+def _rate(present: int, total: int) -> float:
+    return round(present * 100 / total, 2) if total else 0
+
+
+async def attendance_analytics(
+    db: AsyncSession,
+    user_id: int,
+    role: str,
+    program_id: int | None = None,
+    course_id: int | None = None,
+    class_id: int | None = None,
+    student_user_id: int | None = None,
+    lecturer_user_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status: str | None = None,
+    search: str | None = None,
+) -> AttendanceAnalyticsResponse:
+    filters = _report_filters(
+        user_id, role, program_id, course_id, class_id, student_user_id,
+        lecturer_user_id, date_from, date_to, status, search,
+    )
+    repository = AttendanceRepository(db)
+    summary_row = await repository.report_summary(**filters)
+    total, present, absent, average_percentage, student_count, meeting_count = summary_row
+    total, present, absent = int(total or 0), int(present or 0), int(absent or 0)
+    grouped = await repository.report_analytics(**filters)
+    return AttendanceAnalyticsResponse(
+        summary=AttendanceReportSummary(
+            total_records=total,
+            present_count=present,
+            absent_count=absent,
+            present_rate=_rate(present, total),
+            average_attendance_percentage=round(float(average_percentage or 0), 2),
+            student_count=int(student_count or 0),
+            meeting_count=int(meeting_count or 0),
+        ),
+        classes=[
+            AttendanceClassAnalytic(
+                class_id=row[0], class_code=row[1], class_name=row[2],
+                course_code=row[3], course_title=row[4],
+                total_records=int(row[5] or 0), present_count=int(row[6] or 0), absent_count=int(row[7] or 0),
+                present_rate=_rate(int(row[6] or 0), int(row[5] or 0)),
+                student_count=int(row[8] or 0), meeting_count=int(row[9] or 0),
+            )
+            for row in grouped["classes"]
+        ],
+        students=sorted(
+            (
+                AttendanceStudentAnalytic(
+                    student_user_id=row[0], student_name=row[1], student_number=row[2], student_email=row[3],
+                    total_records=int(row[4] or 0), present_count=int(row[5] or 0), absent_count=int(row[6] or 0),
+                    present_rate=_rate(int(row[5] or 0), int(row[4] or 0)),
+                    average_attendance_percentage=round(float(row[7] or 0), 2),
+                )
+                for row in grouped["students"]
+            ),
+            key=lambda item: (item.present_rate, item.student_name.lower()),
+        ),
+        months=[
+            AttendanceMonthAnalytic(
+                month=row[0],
+                total_records=int(row[1] or 0), present_count=int(row[2] or 0), absent_count=int(row[3] or 0),
+                present_rate=_rate(int(row[2] or 0), int(row[1] or 0)),
+                student_count=int(row[4] or 0), meeting_count=int(row[5] or 0),
+            )
+            for row in grouped["months"]
+        ],
+        meetings=[
+            AttendanceMeetingAnalytic(
+                meeting_id=row[0], meeting_title=row[1], meeting_start_time=row[2],
+                class_id=row[3], class_code=row[4], class_name=row[5], course_title=row[6],
+                present_count=int(row[7] or 0), absent_count=int(row[8] or 0),
+                present_rate=_rate(int(row[7] or 0), int(row[7] or 0) + int(row[8] or 0)),
+            )
+            for row in grouped["meetings"]
+        ],
+    )
+
+
 async def get_attendance_report_options(
     db: AsyncSession, user_id: int, role: str
 ) -> AttendanceReportOptionsResponse:
@@ -559,7 +431,13 @@ async def get_attendance_report_options(
             for item in rows["courses"]
         ],
         classes=[
-            AttendanceReportOption(value=item[0], label=f"{item[3]} → {item[2]} · {item[1]}")
+            AttendanceReportOption(
+                value=item[0],
+                label=(
+                    f"{item[1]} | {item[2]} - {item[3]} "
+                    f"({int(item[4] or 0)} student{'' if int(item[4] or 0) == 1 else 's'})"
+                ),
+            )
             for item in rows["classes"]
         ],
         lecturers=[

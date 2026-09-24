@@ -12,7 +12,7 @@ class CourseworkAssignmentCreate(BaseModel):
     title: str = Field(..., min_length=2, max_length=255)
     instructions: str = Field(..., min_length=2, max_length=20_000)
     assignment_type: Literal["regular", "timed"] = "regular"
-    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding"] = "written"
+    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding", "mcq"] = "written"
     question_paper_asset_id: int | None = Field(None, gt=0)
     material_asset_id: int | None = Field(None, gt=0)
     available_from: datetime | None = None
@@ -24,6 +24,11 @@ class CourseworkAssignmentCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_timing(self):
+        if self.submission_type == "mcq":
+            self.assignment_type = "timed"
+            self.allow_late = False
+            if self.duration_minutes is None:
+                raise ValueError("Multiple-choice assignments require a duration")
         if self.assignment_type == "timed" and self.duration_minutes is None:
             raise ValueError("Timed assignments require a duration")
         if self.assignment_type == "timed" and self.allow_late:
@@ -69,7 +74,9 @@ class CourseworkAssignmentItem(BaseModel):
     expires_at: datetime | None = None
     submitted_at: datetime | None = None
     marks_awarded: Decimal | None = None
+    grade_band: str | None = None
     feedback: str | None = None
+    exam_id: int | None = None
     answer_text: str | None = None
     attachment_asset_id: int | None = None
     attachment_url: str | None = None
@@ -102,6 +109,8 @@ class CourseworkSubmissionItem(BaseModel):
     attachment_url: str | None
     attachment_name: str | None
     marks_awarded: Decimal | None
+    grade_band: str | None = None
+    auto_marks: Decimal | None = None
     feedback: str | None
     marked_at: datetime | None
 
@@ -111,8 +120,15 @@ class CourseworkSubmissionListResponse(BaseModel):
 
 
 class CourseworkMarkUpdate(BaseModel):
-    marks_awarded: Decimal = Field(..., ge=0, le=100_000)
+    marks_awarded: Decimal | None = Field(None, ge=0, le=100_000)
+    grade_band: Literal["pass", "merit", "distinction"] | None = None
     feedback: str | None = Field(None, max_length=20_000)
+
+    @model_validator(mode="after")
+    def require_a_grade(self):
+        if self.grade_band is None and self.marks_awarded is None:
+            raise ValueError("Enter marks or choose Pass, Merit, or Distinction")
+        return self
 
 
 class GradeReleaseUpdate(BaseModel):

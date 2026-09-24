@@ -18,17 +18,45 @@ class MeetingRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_assigned_class(self, class_id: int, lecturer_user_id: int):
+    async def get_schedulable_class(self, class_id: int, user_id: int, role: str):
+        """Administrators can schedule any class; lecturers only their own."""
         stmt = (
             select(LmsClass, LmsCourse)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(ClassLecturer, ClassLecturer.class_id == LmsClass.class_id)
-            .where(
-                LmsClass.class_id == class_id,
-                ClassLecturer.lecturer_user_id == lecturer_user_id,
-            )
+            .where(LmsClass.class_id == class_id)
         )
+        if role not in {"SUPER_ADMIN", "ADMIN"}:
+            stmt = stmt.join(
+                ClassLecturer,
+                and_(
+                    ClassLecturer.class_id == LmsClass.class_id,
+                    ClassLecturer.lecturer_user_id == user_id,
+                ),
+            )
         return (await self.db.execute(stmt)).one_or_none()
+
+    async def list_schedulable_classes(self, user_id: int, role: str):
+        """Classes the caller may schedule a live class for."""
+        student_count = (
+            select(func.count(ClassStudent.student_user_id))
+            .where(ClassStudent.class_id == LmsClass.class_id)
+            .correlate(LmsClass)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(LmsClass, LmsCourse, student_count)
+            .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+            .where(LmsClass.status.in_(("planned", "active")))
+        )
+        if role not in {"SUPER_ADMIN", "ADMIN"}:
+            stmt = stmt.join(
+                ClassLecturer,
+                and_(
+                    ClassLecturer.class_id == LmsClass.class_id,
+                    ClassLecturer.lecturer_user_id == user_id,
+                ),
+            )
+        return list((await self.db.execute(stmt.order_by(LmsClass.code))).all())
 
     async def list_student_emails(self, class_id: int) -> list[str]:
         stmt = (
@@ -49,7 +77,8 @@ class MeetingRepository:
         await self.db.refresh(item)
         return item
 
-    async def get_for_lecturer(self, meeting_id: int, lecturer_user_id: int):
+    async def get_for_organiser(self, meeting_id: int, user_id: int, role: str):
+        """Administrators can manage any live class; lecturers only their own."""
         attendee_count = (
             select(func.count(ClassStudent.student_user_id))
             .where(ClassStudent.class_id == OnlineMeeting.class_id)
@@ -60,11 +89,10 @@ class MeetingRepository:
             select(OnlineMeeting, LmsClass, LmsCourse, attendee_count)
             .join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .where(
-                OnlineMeeting.meeting_id == meeting_id,
-                OnlineMeeting.lecturer_user_id == lecturer_user_id,
-            )
+            .where(OnlineMeeting.meeting_id == meeting_id)
         )
+        if role not in {"SUPER_ADMIN", "ADMIN"}:
+            stmt = stmt.where(OnlineMeeting.lecturer_user_id == user_id)
         return (await self.db.execute(stmt)).one_or_none()
 
     async def update(self, item: OnlineMeeting, data: dict) -> OnlineMeeting:

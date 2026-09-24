@@ -1,9 +1,12 @@
+import csv
+import io
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ForbiddenError, NotFoundError
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -14,6 +17,7 @@ from app.modules.lms.models import (
     LmsCourse,
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
+    LmsExam,
     LmsLearningItem,
     LmsLearningProgress,
     LmsModule,
@@ -86,9 +90,23 @@ async def _scope_courses(db: AsyncSession, user_id: int, role: str) -> list[LmsC
 
 
 async def get_dashboard(
-    db: AsyncSession, user_id: int, role: str
+    db: AsyncSession, user_id: int, role: str,
+    program_id: int | None = None, class_id: int | None = None,
 ) -> AnalyticsDashboardResponse:
     courses = await _scope_courses(db, user_id, role)
+    if program_id is not None:
+        courses = [course for course in courses if course.program_id == program_id]
+    roster: set[int] | None = None
+    if class_id is not None:
+        class_ = await db.get(LmsClass, class_id)
+        if class_ is None:
+            raise NotFoundError("Class not found")
+        if class_.course_id not in {course.course_id for course in courses}:
+            raise ForbiddenError("That class is outside this report")
+        courses = [course for course in courses if course.course_id == class_.course_id]
+        roster = set((await db.execute(
+            select(ClassStudent.student_user_id).where(ClassStudent.class_id == class_id)
+        )).scalars().all())
     course_ids = [course.course_id for course in courses]
     now = datetime.now(timezone.utc)
     is_student = role == "STUDENT"
@@ -100,7 +118,8 @@ async def get_dashboard(
                 CourseEnrollment.course_id.in_(course_ids), CourseEnrollment.status == "enrolled"
             )
         )).all():
-            enrolments[course_id].add(student_id)
+            if roster is None or student_id in roster:
+                enrolments[course_id].add(student_id)
 
     item_totals = dict((await db.execute(
         select(LmsModule.course_id, func.count(LmsLearningItem.learning_item_id))
@@ -139,6 +158,8 @@ async def get_dashboard(
         )
         if is_student:
             progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id == user_id)
+        elif roster is not None:
+            progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
         for course_id, percent, completed, completed_at, activity_at in (await db.execute(progress_stmt)).all():
             progress_by_course[course_id].append(float(percent))
             if activity_at:
@@ -156,6 +177,8 @@ async def get_dashboard(
         )
         if is_student:
             attendance_stmt = attendance_stmt.where(AttendanceRecord.student_user_id == user_id)
+        elif class_id is not None:
+            attendance_stmt = attendance_stmt.where(AttendanceSession.class_id == class_id)
         for course_id, status in (await db.execute(attendance_stmt)).all():
             attendance_by_course[course_id].append(status)
 
@@ -174,10 +197,16 @@ async def get_dashboard(
                 LmsCourseworkAssignment.course_id.in_(course_ids),
                 LmsCourseworkAssignment.grades_released.is_(True),
                 LmsCourseworkSubmission.marks_awarded.is_not(None),
+                ~exists(select(LmsExam.exam_id).where(
+                    LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                    LmsExam.assessment_kind == "practice_test",
+                )),
             )
         )
         if is_student:
             grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+        elif roster is not None:
+            grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
         for course_id, marks, maximum, submitted_at in (await db.execute(grade_stmt)).all():
             if float(maximum):
                 grades_by_course[course_id].append(round(float(marks) * 100 / float(maximum), 1))
@@ -278,14 +307,17 @@ async def get_dashboard(
         ]
     else:
         student_ids = {student for values in enrolments.values() for student in values}
+        unmarked_filters = [
+            LmsCourseworkAssignment.course_id.in_(course_ids) if course_ids else False,
+            LmsCourseworkSubmission.status.in_(["submitted", "expired"]),
+            LmsCourseworkSubmission.marks_awarded.is_(None),
+        ]
+        if roster is not None:
+            unmarked_filters.append(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
         unmarked = int(await db.scalar(
             select(func.count()).select_from(LmsCourseworkSubmission)
             .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
-            .where(
-                LmsCourseworkAssignment.course_id.in_(course_ids) if course_ids else False,
-                LmsCourseworkSubmission.status.in_(["submitted", "expired"]),
-                LmsCourseworkSubmission.marks_awarded.is_(None),
-            )
+            .where(*unmarked_filters)
         ) or 0)
         metrics = [
             AnalyticsMetric(key="students", label="Enrolled students", value=len(student_ids), display_value=str(len(student_ids)), hint=f"Unique students across {len(courses)} non-archived courses", tone="purple"),
@@ -305,3 +337,38 @@ async def get_dashboard(
         attendance_distribution=attendance_distribution,
         course_insights=insights,
     )
+
+
+def build_report_csv(report: AnalyticsDashboardResponse) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Inspire LMS academic report"])
+    writer.writerow(["Generated", report.generated_at.isoformat()])
+    writer.writerow(["Role", report.role])
+    writer.writerow(["Engagement score", report.engagement_score, report.engagement_label])
+    writer.writerow([])
+    writer.writerow(["Metric", "Value", "Detail"])
+    for metric in report.metrics:
+        writer.writerow([metric.label, metric.display_value, metric.hint])
+    writer.writerow([])
+    writer.writerow(["Course code", "Course", "Students", "Progress %", "Attendance %", "Grade average %"])
+    for course in report.course_insights:
+        writer.writerow([
+            course.course_code, course.course_title, course.students,
+            "" if course.progress is None else course.progress,
+            "" if course.attendance is None else course.attendance,
+            "" if course.grade_average is None else course.grade_average,
+        ])
+    writer.writerow([])
+    writer.writerow(["Week", "Learning activity", "Completions"])
+    for point in report.weekly_trend:
+        writer.writerow([point.label, point.activity, point.completions])
+    writer.writerow([])
+    writer.writerow(["Grade band", "Count", "Percentage"])
+    for item in report.grade_distribution:
+        writer.writerow([item.label, item.value, item.percentage])
+    writer.writerow([])
+    writer.writerow(["Attendance", "Count", "Percentage"])
+    for item in report.attendance_distribution:
+        writer.writerow([item.label, item.value, item.percentage])
+    return buffer.getvalue()

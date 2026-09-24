@@ -13,8 +13,8 @@ from app.modules.lms.schemas.people import StudentCreate
 from app.modules.lms.schemas.student_import import StudentImportRequest, StudentImportResponse, StudentImportRow
 
 MAX_ROWS = 100
-REQUIRED = {"full_name", "email", "student_number"}
-OPTIONAL = {"phone", "notes"}
+REQUIRED = {"full_name", "email"}
+OPTIONAL = {"student_number", "phone", "notes"}
 
 
 def parse_students(text: str) -> list[StudentImportRow]:
@@ -28,7 +28,7 @@ def parse_students(text: str) -> list[StudentImportRow]:
         if len(header) != len(set(header)):
             raise ValidationError("CSV has duplicate column headers.")
         if not REQUIRED.issubset(header) or set(header) - REQUIRED - OPTIONAL:
-            raise ValidationError("Use columns full_name, email, student_number, phone, notes. The first three are required.")
+            raise ValidationError("Use columns full_name, email, student_number, phone, notes. Only full_name and email are required.")
         for cells in reader:
             if not any(value.strip() for value in cells):
                 continue
@@ -41,7 +41,7 @@ def parse_students(text: str) -> list[StudentImportRow]:
                 continue
             values = {key: value.strip() for key, value in zip(header, cells)}
             values["email"] = values["email"].lower()
-            values["student_number"] = values["student_number"].upper()
+            values["student_number"] = (values.get("student_number") or "").upper() or None
             for key in OPTIONAL:
                 values[key] = values.get(key) or None
             for key, value in values.items():
@@ -78,7 +78,7 @@ async def import_student_rows(db: AsyncSession, rows: list[StudentImportRow], pr
     for row in rows:
         if row.email in existing_emails:
             row.errors.append("Email already belongs to an account; existing accounts will not be changed.")
-        if row.student_number.lower() in existing_numbers:
+        if row.student_number and row.student_number.lower() in existing_numbers:
             row.errors.append("Student number already exists.")
     access = await repo.access_levels(["LMS", "STUDENT"])
     if {item.access_key for item in access} != {"LMS", "STUDENT"}:

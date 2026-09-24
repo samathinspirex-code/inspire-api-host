@@ -70,6 +70,7 @@ class LmsExamAttempt(Base):
     auto_marks: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=0)
     manual_marks: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     total_marks: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    grade_band: Mapped[str | None] = mapped_column(String(20))
     feedback: Mapped[str | None] = mapped_column(Text)
     marked_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

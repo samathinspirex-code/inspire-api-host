@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, case, cast, func, or_, select
+from sqlalchemy import Date, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -203,7 +203,7 @@ class AttendanceRepository:
             .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
             .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .join(StudentUser, StudentUser.user_id == AttendanceRecord.student_user_id)
             .join(StudentProfile, StudentProfile.user_id == AttendanceRecord.student_user_id)
             .join(LecturerUser, LecturerUser.user_id == OnlineMeeting.lecturer_user_id)
@@ -326,6 +326,58 @@ class AttendanceRepository:
         ).where(*conditions)
         return (await self.db.execute(stmt)).one()
 
+    async def report_analytics(self, **filters) -> dict[str, list]:
+        """Grouped attendance for class, student, month, and meeting views.
+
+        The summary endpoint counts the whole filter set, but a paged record
+        list cannot build those breakdowns once a class has more than one page.
+        """
+        conditions = self._report_conditions(**filters)
+        present = func.coalesce(func.sum(case((AttendanceRecord.status == "present", 1), else_=0)), 0)
+        absent = func.coalesce(func.sum(case((AttendanceRecord.status == "absent", 1), else_=0)), 0)
+        records = func.count(AttendanceRecord.attendance_record_id)
+        students = func.count(func.distinct(AttendanceRecord.student_user_id))
+        meetings = func.count(func.distinct(AttendanceSession.meeting_id))
+        average = func.coalesce(func.avg(AttendanceRecord.attendance_percentage), 0)
+        month = func.to_char(OnlineMeeting.start_time, literal("YYYY-MM"))
+
+        async def grouped(stmt):
+            return list((await self.db.execute(stmt)).all())
+
+        return {
+            "classes": await grouped(
+                self._report_base(select(
+                    LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.code, LmsCourse.title,
+                    records, present, absent, students, meetings,
+                )).where(*conditions).group_by(
+                    LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.code, LmsCourse.title,
+                ).order_by(LmsCourse.title, LmsClass.code)
+            ),
+            "students": await grouped(
+                self._report_base(select(
+                    StudentUser.user_id, StudentUser.full_name, StudentProfile.student_number, StudentUser.email,
+                    records, present, absent, average,
+                )).where(*conditions).group_by(
+                    StudentUser.user_id, StudentUser.full_name, StudentProfile.student_number, StudentUser.email,
+                ).order_by(StudentUser.full_name, StudentUser.email)
+            ),
+            "months": await grouped(
+                self._report_base(select(
+                    month, records, present, absent, students, meetings,
+                )).where(*conditions).group_by(month).order_by(month)
+            ),
+            "meetings": await grouped(
+                self._report_base(select(
+                    OnlineMeeting.meeting_id, OnlineMeeting.title, OnlineMeeting.start_time,
+                    LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.title,
+                    present, absent,
+                )).where(*conditions).group_by(
+                    OnlineMeeting.meeting_id, OnlineMeeting.title, OnlineMeeting.start_time,
+                    LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.title,
+                ).order_by(OnlineMeeting.start_time.desc()).limit(120)
+            ),
+        }
+
     async def report_options(self, lecturer_scope_user_id: int | None = None) -> dict[str, list]:
         conditions = self._report_conditions(lecturer_scope_user_id=lecturer_scope_user_id)
 
@@ -333,10 +385,23 @@ class AttendanceRepository:
             stmt = self._report_base(select(*columns)).where(*conditions).distinct().order_by(*columns)
             return list((await self.db.execute(stmt)).all())
 
+        student_count = (
+            select(func.count(ClassStudent.student_user_id))
+            .where(ClassStudent.class_id == LmsClass.class_id)
+            .correlate(LmsClass)
+            .scalar_subquery()
+        )
+        class_rows = list((await self.db.execute(
+            self._report_base(select(
+                LmsClass.class_id, LmsCourse.code, LmsClass.code, LmsClass.name, student_count,
+            )).where(*conditions).distinct(LmsClass.class_id).order_by(LmsClass.class_id)
+        )).all())
+        class_rows.sort(key=lambda row: ((row[1] or ""), (row[2] or "")))
+
         return {
             "programmes": await distinct_rows(Program.program_id, Program.code, Program.title),
             "courses": await distinct_rows(LmsCourse.course_id, LmsCourse.code, LmsCourse.title),
-            "classes": await distinct_rows(LmsClass.class_id, LmsClass.code, LmsClass.name, LmsCourse.title),
+            "classes": class_rows,
             "lecturers": await distinct_rows(
                 LecturerUser.user_id,
                 LecturerProfile.staff_number,

@@ -104,7 +104,7 @@ class PortalRepository:
                 class_count,
                 people_count,
             )
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .order_by(LmsCourse.title)
         )
         if course_id is None and role != "STUDENT":
@@ -155,9 +155,10 @@ class PortalRepository:
                 LmsCourse.cover_image_url,
                 Program.title,
                 people_count,
+                LmsCourse.is_orientation,
             )
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .order_by(LmsClass.start_date.desc(), LmsClass.name)
         )
         stmt = stmt.where(LmsClass.status != "cancelled")

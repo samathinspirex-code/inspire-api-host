@@ -204,6 +204,8 @@ async def _ensure_editable(db: AsyncSession, exam: LmsExam) -> None:
 
 
 async def _sync_max_marks(db: AsyncSession, exam: LmsExam) -> None:
+    if exam.assessment_kind == "graded_mcq":
+        return
     total = await db.scalar(select(func.coalesce(func.sum(LmsExamQuestion.marks), 0)).where(LmsExamQuestion.exam_id == exam.exam_id))
     assignment = await db.get(LmsCourseworkAssignment, exam.assignment_id)
     assignment.max_marks = Decimal(total) if Decimal(total) > 0 else Decimal("1")
@@ -212,8 +214,8 @@ async def _sync_max_marks(db: AsyncSession, exam: LmsExam) -> None:
 async def add_question(db: AsyncSession, exam_id: int, payload: ExamQuestionUpsert, user_id: int) -> ExamEditorResponse:
     context = await _exam_context(db, exam_id); exam = context[0]
     await _ensure_lecturer_course(db, exam.course_id, user_id); await _ensure_editable(db, exam)
-    if exam.assessment_kind == "practice_test" and payload.question_type not in {"mcq", "multiple_answer"}:
-        raise ValidationError("Practice tests support multiple-choice questions only")
+    if exam.assessment_kind in {"practice_test", "graded_mcq"} and payload.question_type not in {"mcq", "multiple_answer"}:
+        raise ValidationError("This assessment supports multiple-choice questions only")
     db.add(LmsExamQuestion(exam_id=exam_id, **payload.model_dump()))
     await db.flush(); await _sync_max_marks(db, exam); await db.commit()
     return await get_editor(db, exam_id, user_id)
@@ -221,7 +223,31 @@ async def add_question(db: AsyncSession, exam_id: int, payload: ExamQuestionUpse
 
 _QUESTION_LINE = re.compile(r"^(?:question\s*(?:no\.?\s*)?)?(\d+)\s*[.)\-:]\s*(.+)$", re.I)
 _OPTION_LINE = re.compile(r"^(?:option\s*)?([A-Z]|\d+)\s*[.)\-:]\s*(.+)$", re.I)
-_ANSWER_LINE = re.compile(r"^(?:correct\s+)?answer\s*[:=\-]\s*(.+)$", re.I)
+_ANSWER_LINE = re.compile(r"^(?:correct\s+)?answers?\s*[:=\-]\s*(.+)$", re.I)
+_ANSWER_SPLIT = re.compile(r"\s*(?:,|&|/|\band\b)\s*", re.I)
+
+
+def _import_answer_indices(number: int, answer: str, labels: list[str], values: list[str]) -> list[int]:
+    indices: list[int] = []
+    for part in _ANSWER_SPLIT.split(answer):
+        token = part.strip()
+        if not token:
+            continue
+        normalized = token.upper().removeprefix("OPTION").strip()
+        if normalized in labels:
+            index = labels.index(normalized)
+        elif normalized.isdigit() and 1 <= int(normalized) <= len(values):
+            index = int(normalized) - 1
+        else:
+            matches = [item for item, value in enumerate(values) if value.casefold() == token.casefold()]
+            if len(matches) != 1:
+                raise ValidationError(f'Answer for question {number} must match an option')
+            index = matches[0]
+        if index not in indices:
+            indices.append(index)
+    if not indices:
+        raise ValidationError(f'Question {number} is missing an Answer line')
+    return indices
 
 
 def parse_mcq_import(raw_text: str, marks: Decimal) -> list[ExamQuestionUpsert]:
@@ -262,20 +288,17 @@ def parse_mcq_import(raw_text: str, marks: Decimal) -> list[ExamQuestionUpsert]:
         answer = str(record["answer"]).strip()
         labels = [label for label, _ in options]
         values = [value for _, value in options]
-        normalized = answer.upper().removeprefix("OPTION").strip()
-        if normalized in labels:
-            correct_index = labels.index(normalized)
-        elif normalized.isdigit() and 1 <= int(normalized) <= len(values):
-            correct_index = int(normalized) - 1
+        correct_indices = _import_answer_indices(record["number"], answer, labels, values)
+        if len(correct_indices) == 1:
+            questions.append(ExamQuestionUpsert(
+                question_type="mcq", prompt=record["prompt"], marks=marks,
+                position=position, options=values, correct_option_index=correct_indices[0],
+            ))
         else:
-            matches = [index for index, value in enumerate(values) if value.casefold() == answer.casefold()]
-            if len(matches) != 1:
-                raise ValidationError(f'Answer for question {record["number"]} must match an option')
-            correct_index = matches[0]
-        questions.append(ExamQuestionUpsert(
-            question_type="mcq", prompt=record["prompt"], marks=marks,
-            position=position, options=values, correct_option_index=correct_index,
-        ))
+            questions.append(ExamQuestionUpsert(
+                question_type="multiple_answer", prompt=record["prompt"], marks=marks,
+                position=position, options=values, correct_option_indices=correct_indices,
+            ))
     return questions
 
 
@@ -305,8 +328,8 @@ async def update_question(db: AsyncSession, question_id: int, payload: ExamQuest
     if question is None: raise NotFoundError("Exam question not found")
     context = await _exam_context(db, question.exam_id); exam = context[0]
     await _ensure_lecturer_course(db, exam.course_id, user_id); await _ensure_editable(db, exam)
-    if exam.assessment_kind == "practice_test" and payload.question_type not in {"mcq", "multiple_answer"}:
-        raise ValidationError("Practice tests support multiple-choice questions only")
+    if exam.assessment_kind in {"practice_test", "graded_mcq"} and payload.question_type not in {"mcq", "multiple_answer"}:
+        raise ValidationError("This assessment supports multiple-choice questions only")
     for key, value in payload.model_dump().items(): setattr(question, key, value)
     await db.flush(); await _sync_max_marks(db, exam); await db.commit()
     return await get_editor(db, exam.exam_id, user_id)
@@ -333,7 +356,7 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
             learning_item.status = "draft" if status == "draft" else "published"
     await db.commit()
     if status == "published":
-        await notification_service.notify_assessment_published(db, assignment, "exam")
+        await notification_service.notify_assessment_published(db, assignment, "assignment" if exam.assessment_kind == "graded_mcq" else "exam")
     return await get_editor(db, exam_id, user_id)
 
 
@@ -479,7 +502,7 @@ async def get_practice_test_for_item(
         # as soon as it is revisited, so a browser refresh can never restart it.
         if attempt is not None and attempt.status == "in_progress" and remaining_seconds(attempt.expires_at) == 0:
             await _finalize_attempt(db, exam, context[1], attempt, expired=True)
-        return await _exam_item(db, context, attempt, expose_grade=False)
+        return await _exam_item(db, context, attempt, expose_grade=True)
     if role == "LECTURER":
         await _ensure_lecturer_course(db, exam.course_id, user_id)
         return await _exam_item(db, context)
@@ -606,10 +629,19 @@ async def _finalize_attempt(db: AsyncSession, exam: LmsExam, assignment: LmsCour
         else:
             has_written = True; answer.auto_marks = Decimal("0")
     attempt.auto_marks = auto; attempt.submitted_at = attempt.expires_at if expired else utc_now()
+    mirror = (await db.execute(select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id, LmsCourseworkSubmission.student_user_id == attempt.student_user_id))).scalar_one()
+    mirror.submitted_at = attempt.submitted_at
+    if exam.assessment_kind == "graded_mcq":
+        attempt.status = "submitted"
+        attempt.total_marks = None
+        attempt.manual_marks = None
+        mirror.status = "submitted"
+        mirror.marks_awarded = None
+        await db.commit()
+        return
     attempt.status = "expired" if expired and has_written else ("submitted" if has_written else "reviewed")
     if not has_written: attempt.manual_marks = Decimal("0"); attempt.total_marks = auto; attempt.marked_at = utc_now()
-    mirror = (await db.execute(select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id, LmsCourseworkSubmission.student_user_id == attempt.student_user_id))).scalar_one()
-    mirror.status = "submitted" if has_written else "reviewed"; mirror.submitted_at = attempt.submitted_at
+    mirror.status = "submitted" if has_written else "reviewed"
     if not has_written: mirror.marks_awarded = auto; mirror.marked_at = attempt.marked_at
     await db.commit()
 
@@ -673,10 +705,33 @@ async def mark_attempt(db: AsyncSession, attempt_id: int, payload, user_id: int)
     return await list_attempts(db, exam.exam_id, user_id)
 
 
+def _option_label(question: LmsExamQuestion, index) -> str | None:
+    options = list(question.options or [])
+    if isinstance(index, int) and 0 <= index < len(options):
+        return options[index]
+    return None
+
+
+def _result_answer_text(question: LmsExamQuestion, answer: LmsExamAnswer | None) -> tuple[str | None, str | None]:
+    if question.question_type == "mcq":
+        yours = _option_label(question, answer.selected_option_index) if answer else None
+        return yours, _option_label(question, question.correct_option_index)
+    if question.question_type == "multiple_answer":
+        try:
+            selected = json.loads(answer.answer_text or "[]") if answer and answer.answer_text else []
+        except (TypeError, ValueError):
+            selected = []
+        yours = ", ".join(label for index in selected if (label := _option_label(question, index)))
+        correct = ", ".join(label for index in (question.correct_option_indices or []) if (label := _option_label(question, index)))
+        return yours or None, correct or None
+    return (answer.answer_text if answer else None), None
+
+
 async def get_result(db: AsyncSession, exam_id: int, user_id: int) -> ExamResultResponse:
     context = await _exam_context(db, exam_id); exam, assignment, course = context[:3]
     await _ensure_student_target(db, exam, user_id)
-    if not exam.grades_released: raise ForbiddenError("This exam result has not been released")
+    if exam.assessment_kind != "practice_test" and not exam.grades_released:
+        raise ForbiddenError("This exam result has not been released")
     attempt = await _get_attempt(db, exam_id, user_id)
     if attempt is None or attempt.total_marks is None: raise NotFoundError("No marked exam result is available")
     questions = {item.question_id: item for item in await _question_rows(db, exam_id)}
@@ -685,9 +740,11 @@ async def get_result(db: AsyncSession, exam_id: int, user_id: int) -> ExamResult
     for question_id in attempt.question_order:
         question = questions[int(question_id)]; answer = answers.get(question.question_id)
         awarded = Decimal(answer.auto_marks or 0) + Decimal(answer.manual_marks or 0) if answer else Decimal("0")
+        your_answer, correct_answer = _result_answer_text(question, answer)
         result_answers.append(ExamResultAnswer(question_id=question.question_id, prompt=question.prompt,
             question_type=question.question_type, marks=question.marks, marks_awarded=awarded,
-            feedback=answer.feedback if answer else None, is_correct=answer.is_correct if answer else None))
+            feedback=answer.feedback if answer else None, is_correct=answer.is_correct if answer else None,
+            your_answer=your_answer, correct_answer=correct_answer))
     return ExamResultResponse(exam_id=exam_id, title=exam.title, course_code=course.code, max_marks=assignment.max_marks,
         total_marks=attempt.total_marks, percentage=percentage(attempt.total_marks, assignment.max_marks),
-        feedback=attempt.feedback, answers=result_answers)
+        feedback=attempt.feedback, grade_band=attempt.grade_band, answers=result_answers)

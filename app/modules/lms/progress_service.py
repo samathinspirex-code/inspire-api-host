@@ -4,7 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.lms import content_service
-from app.modules.lms.models import CourseEnrollment, LmsLectureQuizAttempt, LmsLearningItem, LmsLearningProgress, LmsModule
+from app.modules.lms.models import ClassStudent, CourseEnrollment, LmsClass, LmsLectureQuizAttempt, LmsLearningItem, LmsLearningProgress, LmsModule
+from collections import defaultdict
+
 from sqlalchemy import func, select
 from app.modules.lms.schemas.progress import CourseProgressSummaryResponse, StudentProgressSummary
 from app.modules.lms.repository import ContentRepository, ModuleRepository, ProgressRepository
@@ -25,6 +27,22 @@ def completion_percent(watched_seconds: int, duration_seconds: int | None) -> fl
     if not duration_seconds:
         return 0
     return round(min(100, watched_seconds * 100 / duration_seconds), 2)
+
+
+def _module_is_open(rules, course_id: int, student_id: int, class_ids: set[int]) -> bool:
+    return content_service._student_access(rules, course_id, student_id, class_ids)[0]
+
+
+async def _class_ids_by_student(db: AsyncSession, course_id: int) -> dict[int, set[int]]:
+    rows = (await db.execute(
+        select(ClassStudent.student_user_id, ClassStudent.class_id)
+        .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+        .where(LmsClass.course_id == course_id)
+    )).all()
+    grouped: dict[int, set[int]] = defaultdict(set)
+    for student_id, class_id in rows:
+        grouped[student_id].add(class_id)
+    return grouped
 
 
 def allowed_watch_delta(
@@ -143,7 +161,10 @@ async def get_course_progress(
         course_id, student_user_id
     )
     content_repo = ContentRepository(db)
-    items_by_module = await content_repo.list_items_for_modules([module.module_id for module in modules])
+    module_ids = [module.module_id for module in modules]
+    items_by_module = await content_repo.list_items_for_modules(module_ids)
+    rules_by_module = await content_repo.list_access_for_modules(module_ids)
+    class_ids = (await _class_ids_by_student(db, course_id)).get(student_user_id, set())
     all_items = [
         item
         for module in modules
@@ -168,6 +189,7 @@ async def get_course_progress(
 
     for module in modules:
         items = [item for item in items_by_module[module.module_id] if item.status == "published"]
+        released = _module_is_open(rules_by_module.get(module.module_id, []), course_id, student_user_id, class_ids)
         response_items = []
         section_completed = 0
         section_progress_percent = 0.0
@@ -198,9 +220,10 @@ async def get_course_progress(
                     quiz_best_attempt_percent=max(quiz_percentages) if quiz_percentages else None,
                 )
             )
-        total_items += len(items)
-        completed_items += section_completed
-        total_progress_percent += section_progress_percent
+        if released:
+            total_items += len(items)
+            completed_items += section_completed
+            total_progress_percent += section_progress_percent
         sections.append(
             ProgressSection(
                 module_id=module.module_id,
@@ -209,6 +232,7 @@ async def get_course_progress(
                 total_items=len(items),
                 completed_items=section_completed,
                 completion_percent=round(section_progress_percent / len(items), 2) if items else 0,
+                is_unlocked=released,
                 items=response_items,
             )
         )
@@ -229,27 +253,47 @@ async def get_course_progress_summary(
 ) -> CourseProgressSummaryResponse:
     """Roster percentages in constant queries, without every student's full report."""
     await content_service._ensure_course_access(db, course_id, requester_user_id, "LECTURER")
-    published_items = select(LmsLearningItem.learning_item_id).join(
-        LmsModule, LmsModule.module_id == LmsLearningItem.module_id,
-    ).where(
-        LmsModule.course_id == course_id,
-        LmsModule.status == "active",
-        func.lower(func.trim(LmsModule.title)) != "practice test",
-        LmsLearningItem.status == "published",
-    )
-    total_items = await db.scalar(select(func.count()).select_from(published_items.subquery()))
-    totals = select(
-        LmsLearningProgress.student_user_id,
-        func.sum(LmsLearningProgress.completion_percent).label("progress_sum"),
-    ).where(LmsLearningProgress.learning_item_id.in_(published_items)).group_by(
-        LmsLearningProgress.student_user_id,
-    ).subquery()
-    rows = (await db.execute(select(
-        CourseEnrollment.student_user_id, func.coalesce(totals.c.progress_sum, 0),
-    ).outerjoin(totals, totals.c.student_user_id == CourseEnrollment.student_user_id).where(
+    modules = [
+        module for module in await ModuleRepository(db).list_by_course(course_id)
+        if module.status == "active" and not content_service.is_practice_test_module(module)
+    ]
+    module_ids = [module.module_id for module in modules]
+    content_repo = ContentRepository(db)
+    items_by_module = await content_repo.list_items_for_modules(module_ids)
+    rules_by_module = await content_repo.list_access_for_modules(module_ids)
+    published_by_module = {
+        module.module_id: [
+            item.learning_item_id for item in items_by_module.get(module.module_id, [])
+            if item.status == "published"
+        ]
+        for module in modules
+    }
+    published_ids = [item_id for ids in published_by_module.values() for item_id in ids]
+    classes_by_student = await _class_ids_by_student(db, course_id)
+    progress_by_student: dict[int, dict[int, float]] = defaultdict(dict)
+    if published_ids:
+        progress_rows = (await db.execute(select(
+            LmsLearningProgress.student_user_id,
+            LmsLearningProgress.learning_item_id,
+            LmsLearningProgress.completion_percent,
+        ).where(LmsLearningProgress.learning_item_id.in_(published_ids)))).all()
+        for student_id, item_id, percent in progress_rows:
+            progress_by_student[student_id][item_id] = float(percent or 0)
+    enrolled_ids = (await db.execute(select(CourseEnrollment.student_user_id).where(
         CourseEnrollment.course_id == course_id, CourseEnrollment.status == "enrolled",
-    ).order_by(CourseEnrollment.student_user_id))).all()
-    return CourseProgressSummaryResponse(course_id=course_id, data=[
-        StudentProgressSummary(student_user_id=student_id, completion_percent=round(float(progress_sum) / total_items, 2) if total_items else 0)
-        for student_id, progress_sum in rows
-    ])
+    ).order_by(CourseEnrollment.student_user_id))).scalars().all()
+    data = []
+    for student_id in enrolled_ids:
+        class_ids = classes_by_student.get(student_id, set())
+        accessible = [
+            item_id
+            for module in modules
+            if _module_is_open(rules_by_module.get(module.module_id, []), course_id, student_id, class_ids)
+            for item_id in published_by_module[module.module_id]
+        ]
+        gained = sum(progress_by_student[student_id].get(item_id, 0) for item_id in accessible)
+        data.append(StudentProgressSummary(
+            student_user_id=student_id,
+            completion_percent=round(gained / len(accessible), 2) if accessible else 0,
+        ))
+    return CourseProgressSummaryResponse(course_id=course_id, data=data)

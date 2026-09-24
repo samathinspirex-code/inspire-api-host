@@ -23,6 +23,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.cms.models import Program
 from app.modules.lms import content_service
 from app.modules.lms.models import (
+    LmsClass,
     LmsCourse,
     LmsCourseAssistantSettings,
     LmsCourseAssistantSystemSettings,
@@ -35,6 +36,7 @@ from app.modules.lms.models import (
     LmsLectureQuizAttemptQuestion,
     LmsModule,
 )
+from app.modules.lms.repository import ContentRepository, ModuleRepository
 from app.modules.lms.schemas import (
     CourseAssistantAdminResponse,
     CourseAssistantAnswer,
@@ -209,7 +211,7 @@ async def list_admin_courses(db: AsyncSession) -> CourseAssistantCatalogResponse
     ).label("source_count")
     stmt = (
         select(LmsCourse, Program.title, count)
-        .join(Program, Program.program_id == LmsCourse.program_id)
+        .outerjoin(Program, Program.program_id == LmsCourse.program_id)
         .outerjoin(LmsCourseKnowledgeSource, LmsCourseKnowledgeSource.course_id == LmsCourse.course_id)
         .group_by(LmsCourse.course_id, Program.title)
         .order_by(LmsCourse.title)
@@ -217,7 +219,7 @@ async def list_admin_courses(db: AsyncSession) -> CourseAssistantCatalogResponse
     rows = (await db.execute(stmt)).all()
     return CourseAssistantCatalogResponse(data=[CourseAssistantCatalogItem(
         course_id=course.course_id, course_code=course.code, course_title=course.title,
-        program_title=program_title, is_enabled=source_count > 0, source_count=source_count,
+        program_title=program_title or ("Orientation" if course.is_orientation else ""), is_enabled=source_count > 0, source_count=source_count,
     ) for course, program_title, source_count in rows])
 
 
@@ -230,7 +232,7 @@ async def _source_response(db: AsyncSession, source) -> CourseKnowledgeSourceRes
 
 
 async def get_admin_course(db: AsyncSession, course_id: int) -> CourseAssistantAdminResponse:
-    stmt = select(LmsCourse, Program.title).join(Program).where(LmsCourse.course_id == course_id)
+    stmt = select(LmsCourse, Program.title).outerjoin(Program, Program.program_id == LmsCourse.program_id).where(LmsCourse.course_id == course_id)
     row = (await db.execute(stmt)).one_or_none()
     if row is None:
         raise NotFoundError(f"Course {course_id} not found")
@@ -241,7 +243,7 @@ async def get_admin_course(db: AsyncSession, course_id: int) -> CourseAssistantA
     )).scalars().all())
     return CourseAssistantAdminResponse(
         course_id=course_id, course_code=course.code, course_title=course.title,
-        program_title=program_title, ai_generation_enabled=bool(settings.OPENAI_API_KEY),
+        program_title=program_title or ("Orientation" if course.is_orientation else ""), ai_generation_enabled=bool(settings.OPENAI_API_KEY),
         sources=[await _source_response(db, source) for source in sources],
     )
 
@@ -1040,11 +1042,49 @@ async def _openai_answer(question: str, matches) -> str | None:
     return answer or None
 
 
-async def answer_question(db: AsyncSession, course_id: int, question: str, user_id: int, role: str):
-    studio = await content_service.get_course_studio(db, course_id, user_id, role)
-    unlocked_ids = {
-        item.learning_item_id for section in studio.sections if section.is_unlocked for item in section.items
-    }
+async def _released_learning_item_ids(
+    db: AsyncSession, course_id: int, user_id: int, role: str, class_id: int | None,
+) -> set[int]:
+    """Lessons the asker can use. A later lock removes that section immediately."""
+    if class_id is not None:
+        class_ = await db.get(LmsClass, class_id)
+        if class_ is None or class_.course_id != course_id:
+            raise ValidationError("The selected class does not belong to this course")
+    modules = [
+        module for module in await ModuleRepository(db).list_by_course(course_id)
+        if module.status == "active" and not content_service.is_practice_test_module(module)
+    ]
+    module_ids = [module.module_id for module in modules]
+    content_repo = ContentRepository(db)
+    rules_by_module = await content_repo.list_access_for_modules(module_ids)
+    items_by_module = await content_repo.list_items_for_modules(module_ids)
+    if role == "STUDENT":
+        class_ids = await content_service._student_class_ids(db, course_id, user_id)
+        if class_id is not None and class_id in class_ids:
+            class_ids = {class_id}
+        audience_id = user_id
+    else:
+        class_ids = {class_id} if class_id is not None else set()
+        audience_id = 0
+    released: set[int] = set()
+    for module in modules:
+        if not content_service._student_access(
+            rules_by_module.get(module.module_id, []), course_id, audience_id, class_ids,
+        )[0]:
+            continue
+        released.update(
+            item.learning_item_id
+            for item in items_by_module.get(module.module_id, [])
+            if item.status == "published"
+        )
+    return released
+
+
+async def answer_question(
+    db: AsyncSession, course_id: int, question: str, user_id: int, role: str, class_id: int | None = None,
+):
+    await content_service._ensure_course_access(db, course_id, user_id, role)
+    released_ids = await _released_learning_item_ids(db, course_id, user_id, role, class_id)
     rows = list((await db.execute(
         select(LmsCourseKnowledgeChunk, LmsCourseKnowledgeSource)
         .join(LmsCourseKnowledgeSource, LmsCourseKnowledgeSource.knowledge_source_id == LmsCourseKnowledgeChunk.knowledge_source_id)
@@ -1054,14 +1094,20 @@ async def answer_question(db: AsyncSession, course_id: int, question: str, user_
             LmsCourseKnowledgeSource.ingestion_status.in_(["manual", "indexed"]),
         )
     )).all())
-    visible = [(chunk, source) for chunk, source in rows if source.learning_item_id is None or source.learning_item_id in unlocked_ids]
+    visible = [(chunk, source) for chunk, source in rows if source.learning_item_id in released_ids]
+    locked = [
+        (chunk, source) for chunk, source in rows
+        if source.learning_item_id is not None and source.learning_item_id not in released_ids
+    ]
     matches = rank_chunks(question, visible)
     if not matches:
-        return CourseAssistantAnswer(
-            answer="I don’t have enough information in the approved lecture content to answer that yet.",
-            grounded=False,
-            citations=[],
+        locked_match = bool(rank_chunks(question, locked)) if locked else False
+        answer = (
+            "That part of the course is locked, so I can’t answer from it."
+            if locked_match
+            else "I can only answer from sections that are currently released, and I don’t have enough released content to answer that yet."
         )
+        return CourseAssistantAnswer(answer=answer, grounded=False, citations=[])
     generated = await _openai_answer(question, matches)
     if not generated:
         return CourseAssistantAnswer(

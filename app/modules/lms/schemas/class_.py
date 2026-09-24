@@ -40,6 +40,7 @@ class ClassItem(BaseModel):
     course_code: str
     course_title: str
     cover_image_url: str | None = None
+    is_orientation: bool = False
     program_title: str
     code: str
     name: str

@@ -223,13 +223,21 @@ async def issue_student_password_setup_invitation(
         raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account does not have CMS or LMS access.")
     setup = await issue_authenticator_setup_token(db, user_id, created_by)
     access = set(_user_access_keys(user))
-    destinations = []
-    if access & {"CMS", "USER_MANAGEMENT"}:
-        destinations.append(("CMS", settings.CMS_UI_URL))
-    if "LMS" in access:
-        destinations.append(("LMS", settings.LMS_UI_URL))
-    if not destinations:
-        destinations.append(("Inspire", setup_ui_url or settings.LMS_UI_URL))
+    # A portal that explicitly initiated the invitation gets one matching link.
+    # This avoids LMS lecturers accidentally opening the CMS sign-in screen.
+    if setup_ui_url:
+        destinations = [(
+            "LMS" if setup_ui_url.rstrip("/") == settings.LMS_UI_URL.rstrip("/") else "CMS",
+            setup_ui_url,
+        )]
+    else:
+        destinations = []
+        if access & {"CMS", "USER_MANAGEMENT"}:
+            destinations.append(("CMS", settings.CMS_UI_URL))
+        if "LMS" in access:
+            destinations.append(("LMS", settings.LMS_UI_URL))
+        if not destinations:
+            destinations.append(("Inspire", settings.LMS_UI_URL))
     portal_links = [AuthenticatorPortalLink(
         portal=portal,
         setup_url=build_password_setup_url(setup.email, setup.setup_token, url),
