@@ -9,6 +9,10 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.lms import zoom_service
 from app.modules.lms.repository import AttendanceRepository, MeetingRepository
 from app.modules.lms.schemas import (
+    AttendanceAnalyticsResponse,
+    AttendanceClassAnalytic,
+    AttendanceMeetingAnalytic,
+    AttendanceMonthAnalytic,
     AttendanceRecordItem,
     AttendanceRecordUpdate,
     AttendanceReportItem,
@@ -17,6 +21,7 @@ from app.modules.lms.schemas import (
     AttendanceReportResponse,
     AttendanceReportSummary,
     AttendanceSessionItem,
+    AttendanceStudentAnalytic,
     StudentAttendanceItem,
     StudentAttendanceResponse,
     UnmatchedParticipantItem,
@@ -93,9 +98,9 @@ def _report_item(row) -> AttendanceReportItem:
         meeting_title=meeting.title,
         meeting_start_time=meeting.start_time,
         meeting_end_time=meeting.end_time,
-        program_id=program.program_id,
-        program_code=program.code,
-        program_title=program.title,
+        program_id=program.program_id if program else None,
+        program_code=program.code if program else "",
+        program_title=program.title if program else ("Orientation" if course.is_orientation else ""),
         course_id=course.course_id,
         course_code=course.code,
         course_title=course.title,
@@ -328,6 +333,86 @@ async def list_attendance_report(
     )
 
 
+def _rate(present: int, total: int) -> float:
+    return round(present * 100 / total, 2) if total else 0
+
+
+async def attendance_analytics(
+    db: AsyncSession,
+    user_id: int,
+    role: str,
+    program_id: int | None = None,
+    course_id: int | None = None,
+    class_id: int | None = None,
+    student_user_id: int | None = None,
+    lecturer_user_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status: str | None = None,
+    search: str | None = None,
+) -> AttendanceAnalyticsResponse:
+    filters = _report_filters(
+        user_id, role, program_id, course_id, class_id, student_user_id,
+        lecturer_user_id, date_from, date_to, status, search,
+    )
+    repository = AttendanceRepository(db)
+    summary_row = await repository.report_summary(**filters)
+    total, present, absent, average_percentage, student_count, meeting_count = summary_row
+    total, present, absent = int(total or 0), int(present or 0), int(absent or 0)
+    grouped = await repository.report_analytics(**filters)
+    return AttendanceAnalyticsResponse(
+        summary=AttendanceReportSummary(
+            total_records=total,
+            present_count=present,
+            absent_count=absent,
+            present_rate=_rate(present, total),
+            average_attendance_percentage=round(float(average_percentage or 0), 2),
+            student_count=int(student_count or 0),
+            meeting_count=int(meeting_count or 0),
+        ),
+        classes=[
+            AttendanceClassAnalytic(
+                class_id=row[0], class_code=row[1], class_name=row[2],
+                course_code=row[3], course_title=row[4],
+                total_records=int(row[5] or 0), present_count=int(row[6] or 0), absent_count=int(row[7] or 0),
+                present_rate=_rate(int(row[6] or 0), int(row[5] or 0)),
+                student_count=int(row[8] or 0), meeting_count=int(row[9] or 0),
+            )
+            for row in grouped["classes"]
+        ],
+        students=sorted(
+            (
+                AttendanceStudentAnalytic(
+                    student_user_id=row[0], student_name=row[1], student_number=row[2], student_email=row[3],
+                    total_records=int(row[4] or 0), present_count=int(row[5] or 0), absent_count=int(row[6] or 0),
+                    present_rate=_rate(int(row[5] or 0), int(row[4] or 0)),
+                    average_attendance_percentage=round(float(row[7] or 0), 2),
+                )
+                for row in grouped["students"]
+            ),
+            key=lambda item: (item.present_rate, item.student_name.lower()),
+        ),
+        months=[
+            AttendanceMonthAnalytic(
+                month=row[0],
+                total_records=int(row[1] or 0), present_count=int(row[2] or 0), absent_count=int(row[3] or 0),
+                present_rate=_rate(int(row[2] or 0), int(row[1] or 0)),
+                student_count=int(row[4] or 0), meeting_count=int(row[5] or 0),
+            )
+            for row in grouped["months"]
+        ],
+        meetings=[
+            AttendanceMeetingAnalytic(
+                meeting_id=row[0], meeting_title=row[1], meeting_start_time=row[2],
+                class_id=row[3], class_code=row[4], class_name=row[5], course_title=row[6],
+                present_count=int(row[7] or 0), absent_count=int(row[8] or 0),
+                present_rate=_rate(int(row[7] or 0), int(row[7] or 0) + int(row[8] or 0)),
+            )
+            for row in grouped["meetings"]
+        ],
+    )
+
+
 async def get_attendance_report_options(
     db: AsyncSession, user_id: int, role: str
 ) -> AttendanceReportOptionsResponse:
@@ -346,7 +431,13 @@ async def get_attendance_report_options(
             for item in rows["courses"]
         ],
         classes=[
-            AttendanceReportOption(value=item[0], label=f"{item[3]} → {item[2]} · {item[1]}")
+            AttendanceReportOption(
+                value=item[0],
+                label=(
+                    f"{item[1]} | {item[2]} - {item[3]} "
+                    f"({int(item[4] or 0)} student{'' if int(item[4] or 0) == 1 else 's'})"
+                ),
+            )
             for item in rows["classes"]
         ],
         lecturers=[

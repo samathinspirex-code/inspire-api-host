@@ -67,6 +67,9 @@ async def lecturer_gradebook(
     ).where(
         LmsCourseworkAssignment.course_id == course_id,
         LmsCourseworkAssignment.status.in_(("published", "closed")),
+        LmsCourseworkAssignment.assignment_id.not_in(
+            select(LmsExam.assignment_id).where(LmsExam.assessment_kind == "practice_test")
+        ),
     )
     if class_id is not None:
         assignment_stmt = assignment_stmt.where(or_(
@@ -203,8 +206,13 @@ async def lecturer_gradebook(
 
 async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesResponse:
     rows = await CourseworkRepository(db).list_for_student(user_id, include_exams=True)
+    practice_assignment_ids = set((await db.execute(
+        select(LmsExam.assignment_id).where(LmsExam.assessment_kind == "practice_test")
+    )).scalars().all())
     grouped = {}
     for assignment, course, _target_class, submission in rows:
+        if assignment.assignment_id in practice_assignment_ids:
+            continue
         if not assignment.grades_released or submission is None or submission.marks_awarded is None:
             continue
         group = grouped.setdefault(course.course_id, {
@@ -248,6 +256,16 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
     if assignment is None:
         raise NotFoundError("Assignment not found")
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if released and assignment.submission_type == "mcq":
+        submissions = list((await db.execute(
+            select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment_id)
+        )).scalars().all())
+        if not submissions:
+            raise ValidationError("There are no submissions to release yet")
+        if any(item.status == "in_progress" for item in submissions):
+            raise ValidationError("Wait until every started attempt is finished before releasing grades")
+        if any(item.grade_band not in {"pass", "merit", "distinction"} for item in submissions):
+            raise ValidationError("Give every student Pass, Merit, or Distinction before releasing grades")
     assignment.grades_released = released
     linked_exam = (await db.execute(
         select(LmsExam).where(LmsExam.assignment_id == assignment_id)

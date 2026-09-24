@@ -47,6 +47,7 @@ class ProgressSection(BaseModel):
     total_items: int
     completed_items: int
     completion_percent: float
+    is_unlocked: bool = False
     items: list[ProgressLearningItem]
 
 

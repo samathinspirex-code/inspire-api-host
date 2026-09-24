@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from collections import defaultdict
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
@@ -12,6 +13,7 @@ from app.modules.auth.repository.authenticator import AuthenticatorRepository
 from app.modules.cms import media_service
 from app.modules.cms.models import MediaAsset
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
+from app.modules.lms import content_service
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -33,6 +35,7 @@ from app.modules.lms.models import (
     OnlineMeeting,
     StudentProfile,
 )
+from app.modules.lms.repository import ContentRepository
 from app.modules.lms.schemas import (
     MyProfileResponse,
     MyProfileUpdate,
@@ -397,8 +400,28 @@ async def get_student_academic_profile(
         )).all()
 
     progress_by_course = {course_id: {"total": 0, "completed": 0, "sum": 0.0, "last": None} for course_id in course_ids}
+    module_ids = list({module.module_id for _item, module, _progress in progress_rows})
+    rules_by_module = await ContentRepository(db).list_access_for_modules(module_ids)
+    class_ids_by_course: dict[int, set[int]] = defaultdict(set)
+    for class_, course in class_rows:
+        class_ids_by_course[course.course_id].add(class_.class_id)
     activities = []
     for item, module, progress in progress_rows:
+        released = content_service._student_access(
+            rules_by_module.get(module.module_id, []),
+            module.course_id,
+            student_user_id,
+            class_ids_by_course.get(module.course_id, set()),
+        )[0]
+        if progress is not None:
+            activities.append(StudentAcademicActivity(
+                learning_item_id=item.learning_item_id, item_title=item.title,
+                item_type=item.item_type, course_code=course_map[module.course_id].code,
+                section_title=module.title, completion_percent=progress.completion_percent,
+                is_completed=progress.is_completed, last_activity_at=progress.last_activity_at,
+            ))
+        if not released:
+            continue
         summary = progress_by_course[module.course_id]
         summary["total"] += 1
         if progress is not None:
@@ -406,12 +429,6 @@ async def get_student_academic_profile(
             summary["sum"] += progress.completion_percent
             if summary["last"] is None or progress.last_activity_at > summary["last"]:
                 summary["last"] = progress.last_activity_at
-            activities.append(StudentAcademicActivity(
-                learning_item_id=item.learning_item_id, item_title=item.title,
-                item_type=item.item_type, course_code=course_map[module.course_id].code,
-                section_title=module.title, completion_percent=progress.completion_percent,
-                is_completed=progress.is_completed, last_activity_at=progress.last_activity_at,
-            ))
     activities.sort(key=lambda item: item.last_activity_at, reverse=True)
 
     eligibility = []
@@ -444,7 +461,7 @@ async def get_student_academic_profile(
             )).order_by(LmsExam.due_at.desc())
         )).all()
 
-    exam_assignment_ids = {exam.assignment_id for exam, _attempt in exam_rows}
+    exam_assignment_ids = {exam.assignment_id for exam, _attempt in exam_rows if exam.assessment_kind != "graded_mcq"}
     show_private_marks = viewer_role != "STUDENT"
     assignments = []
     for assignment, submission in assignment_rows:
@@ -473,8 +490,10 @@ async def get_student_academic_profile(
         )).all())
     practice_tests, question_papers = [], []
     for exam, attempt in exam_rows:
+        if exam.assessment_kind == "graded_mcq":
+            continue
         maximum = Decimal(question_totals.get(exam.exam_id) or 0)
-        visible = show_private_marks or exam.grades_released
+        visible = show_private_marks or exam.grades_released or exam.assessment_kind == "practice_test"
         marks = attempt.total_marks if attempt and visible else None
         target = practice_tests if exam.assessment_kind == "practice_test" else question_papers
         target.append(StudentAcademicAssessment(

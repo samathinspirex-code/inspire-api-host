@@ -476,6 +476,12 @@ async def update_module_access(
         enrolment = await db.get(CourseEnrollment, (module.course_id, payload.scope_id))
         if enrolment is None or enrolment.status != "enrolled":
             raise ValidationError("The selected student is not enrolled in this course")
+    if payload.is_unlocked:
+        if module.status != "active":
+            module.status = "active"
+        for item in await ContentRepository(db).list_items(module.module_id):
+            if item.status == "draft":
+                item.status = "published"
     rule = await ContentRepository(db).upsert_access(
         module_id, {**payload.model_dump(), "created_by": user_id}
     )

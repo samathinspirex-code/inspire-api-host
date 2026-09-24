@@ -18,7 +18,7 @@ from app.modules.lms import analytics_service, dashboard_service, service
 from app.modules.lms.models import (
     AttendanceRecord, AttendanceSession, ClassStudent, CourseEnrollment, CourseLecturer,
     LecturerProfile, LmsClass, LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission,
-    LmsLearningItem, LmsLearningProgress, LmsModule, OnlineMeeting, StudentProfile,
+    LmsExam, LmsLearningItem, LmsLearningProgress, LmsModule, OnlineMeeting, StudentProfile,
 )
 from app.modules.lms.router import router
 
@@ -44,7 +44,7 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         for model in [User, Program, StudentProfile, LecturerProfile, LmsCourse, LmsClass,
                       LmsModule, LmsLearningItem, OnlineMeeting, AttendanceSession, AttendanceRecord,
                       CourseEnrollment, CourseLecturer, ClassStudent, LmsLearningProgress,
-                      LmsCourseworkAssignment, LmsCourseworkSubmission]:
+                      LmsCourseworkAssignment, LmsCourseworkSubmission, LmsExam]:
             model.__table__.create(self.engine)
         self.session = Session(self.engine)
         self.addCleanup(self.session.close)

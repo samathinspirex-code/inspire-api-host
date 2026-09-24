@@ -28,11 +28,11 @@ class CourseRepository:
         self, page: int, size: int, search: str | None, program_id: int | None, status: str | None
     ) -> tuple[list[tuple[LmsCourse, str, str]], int]:
         filters = self._filters(search, program_id, status)
-        base = select(LmsCourse).join(Program, Program.program_id == LmsCourse.program_id).where(*filters)
+        base = select(LmsCourse).outerjoin(Program, Program.program_id == LmsCourse.program_id).where(*filters)
         total = (await self.db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
         stmt = (
             select(LmsCourse, Program.title, Program.code)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .where(*filters)
             .order_by(LmsCourse.title)
             .offset((page - 1) * size)
@@ -47,7 +47,7 @@ class CourseRepository:
     async def get_with_program(self, course_id: int) -> tuple[LmsCourse, str, str] | None:
         stmt = (
             select(LmsCourse, Program.title, Program.code)
-            .join(Program, Program.program_id == LmsCourse.program_id)
+            .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .where(LmsCourse.course_id == course_id)
         )
         row = (await self.db.execute(stmt)).one_or_none()

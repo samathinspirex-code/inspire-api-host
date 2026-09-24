@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 from app.core.errors import ForbiddenError, NotFoundError
 from app.modules.auth.models import User
 from app.modules.cms.models import Program
-from app.modules.lms import content_service, progress_service
+from app.modules.lms import assistant_service, content_service, progress_service
 from app.modules.lms.models import (
     CourseEnrollment, CourseLecturer, ClassLecturer, ClassStudent, LmsClass, LmsCourse,
-    LmsCourseDiscussion, LmsLearningItem, LmsLearningProgress, LmsLectureQuizAttempt, LmsModule,
+    LmsCourseDiscussion, LmsLearningItem, LmsLearningProgress, LmsLectureQuizAttempt, LmsModule, LmsModuleAccess,
 )
 from app.modules.lms.repository import ContentRepository
 from app.modules.lms.repository.portal import PortalRepository
@@ -43,7 +43,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.engine.dispose)
         for model in [User, Program, LmsCourse, CourseEnrollment, CourseLecturer, LmsModule,
                       LmsLearningItem, LmsLearningProgress, LmsLectureQuizAttempt, LmsCourseDiscussion,
-                      ClassLecturer, ClassStudent, LmsClass]:
+                      ClassLecturer, ClassStudent, LmsClass, LmsModuleAccess]:
             model.__table__.create(self.engine)
         with Session(self.engine) as db:
             db.add(Program(program_id=1, slug="test", title="Test", code="TEST", level="L5", school="Test",
@@ -66,6 +66,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
             for mid in range(1, 13):
                 db.add(LmsModule(module_id=mid, course_id=1, title=f"Section {mid}", position=mid, status="active"))
                 db.add(LmsLearningItem(learning_item_id=mid, module_id=mid, title=f"Item {mid}", position=1, item_type="text", status="published"))
+                db.add(LmsModuleAccess(module_access_id=mid, module_id=mid, scope_type="course", scope_id=1, is_unlocked=True))
             db.add(LmsModule(module_id=13, course_id=1, title="Draft section", position=13, status="draft"))
             db.add(LmsModule(module_id=14, course_id=2, title="Other course", position=1, status="active"))
             for iid, mid, status in [(13, 13, "published"), (14, 14, "published"), (15, 1, "draft")]:
@@ -90,7 +91,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_roster_50_students_in_four_reads_matches_detailed_percentage(self):
         result = await progress_service.get_course_progress_summary(self.db(), 1, 10)
-        self.assertEqual(len(self.queries), 4)
+        self.assertEqual(len(self.queries), 8)
         self.assertEqual(len(result.data), 50)
         by_id = {row.student_user_id: row.completion_percent for row in result.data}
         self.assertEqual(by_id[20], 50)
@@ -107,8 +108,37 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
         self.queries.clear()
         after = await progress_service.get_course_progress(self.db(), 1, 20, 10, "LECTURER")
         self.assertEqual(before, after)
-        self.assertEqual(len(self.queries), 7)
+        self.assertEqual(len(self.queries), 9)
         self.assertGreater(baseline, len(self.queries))
+
+    async def test_locked_class_section_is_excluded_from_progress(self):
+        with Session(self.engine) as db:
+            db.add(LmsModuleAccess(module_access_id=100, module_id=1, scope_type="class", scope_id=1, is_unlocked=False))
+            for row in db.query(LmsLearningProgress).filter_by(student_user_id=20):
+                row.completion_percent = 100 if row.learning_item_id == 1 else 0
+            db.commit()
+        result = await progress_service.get_course_progress_summary(self.db(), 1, 10)
+        by_id = {row.student_user_id: row.completion_percent for row in result.data}
+        self.assertEqual(by_id[20], 0)
+        detail = await progress_service.get_course_progress(self.db(), 1, 20, 10, "LECTURER")
+        self.assertEqual(detail.total_items, 11)
+        self.assertEqual(detail.completion_percent, 0)
+        self.assertFalse(next(section for section in detail.sections if section.module_id == 1).is_unlocked)
+
+    async def test_assistant_drops_a_section_when_the_class_locks_it(self):
+        released = await assistant_service._released_learning_item_ids(self.db(), 1, 20, "STUDENT", 1)
+        self.assertEqual(released, set(range(1, 13)))
+        with Session(self.engine) as db:
+            db.add(LmsModuleAccess(module_access_id=100, module_id=1, scope_type="class", scope_id=1, is_unlocked=False))
+            db.commit()
+        student = await assistant_service._released_learning_item_ids(self.db(), 1, 20, "STUDENT", 1)
+        lecturer = await assistant_service._released_learning_item_ids(self.db(), 1, 10, "LECTURER", 1)
+        other_class = await assistant_service._released_learning_item_ids(self.db(), 1, 21, "STUDENT", None)
+        self.assertNotIn(1, student)
+        self.assertNotIn(1, lecturer)
+        self.assertEqual(student, set(range(2, 13)))
+        self.assertEqual(lecturer, student)
+        self.assertIn(1, other_class)
 
     async def test_empty_course_summary_reports_zero(self):
         with Session(self.engine) as db:

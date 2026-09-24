@@ -356,7 +356,10 @@ async def update_class_workspace_status(db: AsyncSession, class_id: int, status:
 async def update_class_workspace_details(db: AsyncSession, class_id: int, payload: ClassDetailsUpdate, user: CurrentUser):
     """Update an intake without changing its copied course, enrolments, or tracking history."""
     class_row = (await db.execute(text("""
-        SELECT class_id, status FROM lms_classes WHERE class_id=:id
+        SELECT cl.class_id, cl.status, lc.is_orientation
+        FROM lms_classes cl
+        JOIN lms_courses lc ON lc.course_id=cl.course_id
+        WHERE cl.class_id=:id
     """), {"id": class_id})).mappings().first()
     if class_row is None:
         raise NotFoundError(f"Class {class_id} not found")
@@ -364,6 +367,8 @@ async def update_class_workspace_details(db: AsyncSession, class_id: int, payloa
         raise ValidationError("You are not assigned to this class")
     if class_row["status"] == "cancelled":
         raise ValidationError("A removed class cannot be edited")
+    if not class_row["is_orientation"] and payload.study_mode is None:
+        raise ValidationError("Select a study mode")
     code = payload.code.strip().upper()
     duplicate = await db.scalar(text("""
         SELECT 1 FROM lms_classes
@@ -381,6 +386,7 @@ async def update_class_workspace_details(db: AsyncSession, class_id: int, payloa
     """), {
         **payload.model_dump(), "class_id": class_id, "code": code,
         "name": payload.name.strip(),
+        "study_mode": None if class_row["is_orientation"] else payload.study_mode,
         "description": payload.description.strip() if payload.description else None,
     })
     await db.commit()
@@ -823,16 +829,16 @@ async def list_academic_classes(db: AsyncSession):
           cl.delivery_mode, cl.timezone, cl.capacity, cl.status, cl.academic_course_id AS academic_course_id,
           cl.course_id AS course_id, lc.source_master_course_id AS source_course_id,
           cl.study_mode, cl.source_template_version_id, cl.last_synced_version_id,
-          lc.code AS course_code, lc.title AS course_title,
+          lc.code AS course_code, lc.title AS course_title, lc.is_orientation AS is_orientation,
           c.code AS catalogue_course_code, c.title AS catalogue_course_title,
           c.awarding_body, p.name AS programme_name,
           s.name AS school_name,
           (SELECT count(*) FROM lms_class_students cs WHERE cs.class_id=cl.class_id) AS student_count
         FROM lms_classes cl
         JOIN lms_courses lc ON lc.course_id=cl.course_id
-        JOIN academic_courses c ON c.course_id=cl.academic_course_id
-        JOIN academic_programmes p ON p.programme_id=c.programme_id
-        JOIN academic_schools s ON s.school_id=c.school_id
+        LEFT JOIN academic_courses c ON c.course_id=cl.academic_course_id
+        LEFT JOIN academic_programmes p ON p.programme_id=c.programme_id
+        LEFT JOIN academic_schools s ON s.school_id=c.school_id
         WHERE cl.status <> 'cancelled'
         ORDER BY cl.start_date DESC, cl.name
     """)))
@@ -841,7 +847,7 @@ async def list_academic_classes(db: AsyncSession):
 async def list_lms_course_study_options(db: AsyncSession, source_course_id: int):
     """Return catalogue destinations available to a reusable LMS Course page."""
     course = (await db.execute(text("""
-        SELECT lc.course_id, lc.title AS template_course_title,
+        SELECT lc.course_id, lc.title AS template_course_title, lc.is_orientation AS is_orientation,
                ac.course_id AS academic_course_id, ac.title AS academic_course_title,
                ac.awarding_body, ac.programme_id, p.name AS programme_name,
                ac.school_id, s.name AS school_name
@@ -855,6 +861,21 @@ async def list_lms_course_study_options(db: AsyncSession, source_course_id: int)
     """), {"course_id": source_course_id})).mappings().first()
     if course is None:
         raise NotFoundError("The selected reusable Course page was not found")
+    if course["is_orientation"]:
+        return {
+            "course_id": source_course_id,
+            "template_course_title": course["template_course_title"],
+            "is_orientation": True,
+            "academic_course_id": None,
+            "academic_course_title": None,
+            "awarding_body": None,
+            "school_id": None,
+            "school_name": None,
+            "programme_id": None,
+            "programme_name": None,
+            "study_options": [],
+            "academic_courses": [],
+        }
     if course["academic_course_id"] is None:
         raise ValidationError("Link this Course page to a CMS academic course before creating a class")
     rows = _rows(await db.execute(text("""
@@ -881,6 +902,7 @@ async def list_lms_course_study_options(db: AsyncSession, source_course_id: int)
     return {
         "course_id": source_course_id,
         "template_course_title": course["template_course_title"],
+        "is_orientation": False,
         "academic_course_id": course["academic_course_id"],
         "academic_course_title": course["academic_course_title"],
         "awarding_body": course["awarding_body"],
@@ -947,25 +969,35 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
     """), {"course_id": payload.source_course_id})).mappings().first()
     if master is None:
         raise NotFoundError("The selected master Course page was not found")
-    if master["academic_course_id"] is None:
-        raise ValidationError("Link this Course page to the academic catalogue before creating a class")
-    target_course_id = payload.academic_course_id
-    valid_target = await db.scalar(text("""
-        SELECT 1
-        FROM academic_courses target
-        JOIN academic_courses anchor ON anchor.course_id=:anchor_course_id
-        WHERE target.course_id=:target_course_id
-          AND target.programme_id=anchor.programme_id
-          AND target.status <> 'archived'
-    """), {"anchor_course_id": master["academic_course_id"], "target_course_id": target_course_id})
-    if not valid_target:
-        raise ValidationError("Choose a catalogue course from the reusable template's programme")
-    enabled = await db.scalar(text("""
-        SELECT 1 FROM academic_course_study_options
-        WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
-    """), {"course_id": target_course_id, "study_mode": payload.study_mode})
-    if not enabled:
-        raise ValidationError("This study mode is not enabled for the selected course")
+    orientation = bool(master["is_orientation"])
+    if orientation:
+        target_course_id = None
+        study_mode = None
+    else:
+        if master["academic_course_id"] is None:
+            raise ValidationError("Link this Course page to the academic catalogue before creating a class")
+        if payload.academic_course_id is None:
+            raise ValidationError("Choose a catalogue course from the reusable template's programme")
+        if payload.study_mode is None:
+            raise ValidationError("Select a study mode")
+        target_course_id = payload.academic_course_id
+        study_mode = payload.study_mode
+        valid_target = await db.scalar(text("""
+            SELECT 1
+            FROM academic_courses target
+            JOIN academic_courses anchor ON anchor.course_id=:anchor_course_id
+            WHERE target.course_id=:target_course_id
+              AND target.programme_id=anchor.programme_id
+              AND target.status <> 'archived'
+        """), {"anchor_course_id": master["academic_course_id"], "target_course_id": target_course_id})
+        if not valid_target:
+            raise ValidationError("Choose a catalogue course from the reusable template's programme")
+        enabled = await db.scalar(text("""
+            SELECT 1 FROM academic_course_study_options
+            WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
+        """), {"course_id": target_course_id, "study_mode": study_mode})
+        if not enabled:
+            raise ValidationError("This study mode is not enabled for the selected course")
     duplicate = await db.scalar(text("SELECT 1 FROM lms_classes WHERE lower(code)=lower(:code)"), {"code": payload.code.strip()})
     if duplicate:
         raise ConflictError(f"Class code '{payload.code.strip().upper()}' is already in use")
@@ -976,15 +1008,16 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
     copied_course_id = await db.scalar(text("""
         INSERT INTO lms_courses
           (program_id, code, title, description, takeaways, cover_image_url, status,
-           created_by, is_class_copy, source_master_course_id, catalogue_course_id)
+           created_by, is_class_copy, source_master_course_id, catalogue_course_id, is_orientation)
         VALUES (:program_id, :code, :title, :description, :takeaways, :cover, :status,
-                :user_id, TRUE, :source_id, :catalogue_course_id)
+                :user_id, TRUE, :source_id, :catalogue_course_id, :is_orientation)
         RETURNING course_id
     """), {
         "program_id": master["program_id"], "code": copy_code, "title": master["title"],
         "description": master["description"], "takeaways": master.get("takeaways"),
         "cover": master.get("cover_image_url"), "status": master["status"],
         "user_id": user_id, "source_id": payload.source_course_id, "catalogue_course_id": target_course_id,
+        "is_orientation": orientation,
     })
     class_id = await db.scalar(text("""
         INSERT INTO lms_classes
@@ -994,8 +1027,8 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
                 :timezone, :capacity, :status, :user_id, :academic_course_id, :study_mode,
                 '{"sections":[]}'::jsonb)
         RETURNING class_id
-    """), {**payload.model_dump(exclude={"source_course_id", "academic_course_id"}), "course_id": copied_course_id,
-             "academic_course_id": target_course_id, "user_id": user_id,
+    """), {**payload.model_dump(exclude={"source_course_id", "academic_course_id", "study_mode"}), "course_id": copied_course_id,
+             "academic_course_id": target_course_id, "study_mode": study_mode, "user_id": user_id,
              "code": payload.code.strip().upper(), "name": payload.name.strip()})
 
     module_map: dict[int, int] = {}

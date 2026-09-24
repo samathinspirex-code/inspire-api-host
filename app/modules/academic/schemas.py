@@ -145,8 +145,8 @@ class ClassFromTemplateRequest(BaseModel):
 
 class ClassFromCourseRequest(BaseModel):
     source_course_id: int = Field(..., gt=0)
-    academic_course_id: int = Field(..., gt=0)
-    study_mode: StudyMode
+    academic_course_id: int | None = Field(None, gt=0)
+    study_mode: StudyMode | None = None
     code: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=5000)
@@ -175,7 +175,7 @@ class ClassDetailsUpdate(BaseModel):
     start_date: date
     end_date: date
     delivery_mode: Literal["online", "hybrid", "on_site"] = "online"
-    study_mode: StudyMode
+    study_mode: StudyMode | None = None
     timezone: str = Field("Asia/Colombo", min_length=1, max_length=100)
     capacity: int = Field(50, ge=1, le=1000)
     status: Literal["planned", "active", "completed"] = "planned"

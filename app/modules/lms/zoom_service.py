@@ -248,8 +248,9 @@ async def window_availability(db: AsyncSession, start: datetime, end: datetime, 
       FROM lms_zoom_host_connections h WHERE h.enabled=TRUE ORDER BY h.connection_id
     """),{"start_time":start,"end_time":end,"exclude_id":exclude_meeting})).mappings().all()
     clashes=(await db.execute(text("""
-      SELECT m.meeting_id,m.title,m.start_time,m.end_time,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
+      SELECT m.meeting_id,m.title,m.start_time,m.end_time,lc.code AS course_code,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
       FROM lms_online_meetings m JOIN lms_classes c ON c.class_id=m.class_id
+      JOIN lms_courses lc ON lc.course_id=c.course_id
       LEFT JOIN users u ON u.user_id=m.lecturer_user_id
       WHERE m.provider='zoom' AND m.status='scheduled' AND m.start_time<:end_time AND m.end_time>:start_time
         AND (CAST(:exclude_id AS BIGINT) IS NULL OR m.meeting_id<>CAST(:exclude_id AS BIGINT))
@@ -265,7 +266,7 @@ async def window_availability(db: AsyncSession, start: datetime, end: datetime, 
         "overlapping":[{
             "meeting_id":row["meeting_id"],"title":row["title"],
             "start_time":row["start_time"],"end_time":row["end_time"],
-            "class_code":row["class_code"],"class_name":row["class_name"],
+            "course_code":row["course_code"],"class_code":row["class_code"],"class_name":row["class_name"],
             "lecturer_name":row["lecturer_name"],
         } for row in clashes],
     }
@@ -275,8 +276,9 @@ async def live_status(db: AsyncSession) -> dict:
     """Classes running right now, plus the pool's simultaneous limit."""
     now=datetime.now(timezone.utc)
     rows=(await db.execute(text("""
-      SELECT m.meeting_id,m.title,m.start_time,m.end_time,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
+      SELECT m.meeting_id,m.title,m.start_time,m.end_time,lc.code AS course_code,c.code AS class_code,c.name AS class_name,u.full_name AS lecturer_name
       FROM lms_online_meetings m JOIN lms_classes c ON c.class_id=m.class_id
+      JOIN lms_courses lc ON lc.course_id=c.course_id
       LEFT JOIN users u ON u.user_id=m.lecturer_user_id
       WHERE m.provider='zoom' AND m.status='scheduled' AND m.start_time<=:now AND m.end_time>=:now
       ORDER BY m.start_time

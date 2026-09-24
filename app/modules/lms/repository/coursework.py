@@ -16,6 +16,13 @@ from app.modules.lms.models import (
 )
 
 
+def _separate_exam():
+    return exists(select(LmsExam.exam_id).where(
+        LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+        LmsExam.assessment_kind.in_(("exam", "practice_test")),
+    ))
+
+
 class CourseworkRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -38,7 +45,7 @@ class CourseworkRepository:
                     LmsClass.class_id == LmsCourseworkAssignment.target_id,
                 ),
             )
-            .where(~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)))
+            .where(~_separate_exam())
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -54,7 +61,7 @@ class CourseworkRepository:
                     LmsClass.class_id == LmsCourseworkAssignment.target_id,
                 ),
             )
-            .where(~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)))
+            .where(~_separate_exam())
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -99,9 +106,7 @@ class CourseworkRepository:
             .order_by(LmsCourseworkAssignment.due_at.asc().nullslast(), LmsCourseworkAssignment.created_at.desc())
         )
         if not include_exams:
-            stmt = stmt.where(
-                ~exists(select(LmsExam.exam_id).where(LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id))
-            )
+            stmt = stmt.where(~_separate_exam())
         return list((await self.db.execute(stmt)).all())
 
     async def get_assignment(self, assignment_id: int):

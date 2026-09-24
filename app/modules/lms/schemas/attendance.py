@@ -15,7 +15,7 @@ class AttendanceRecordUpdate(BaseModel):
 class AttendanceRecordItem(BaseModel):
     attendance_record_id: int
     student_user_id: int
-    student_number: str
+    student_number: str | None
     full_name: str
     email: str
     status: AttendanceStatus
@@ -23,7 +23,7 @@ class AttendanceRecordItem(BaseModel):
     attendance_percentage: float
     first_join_time: datetime | None
     last_leave_time: datetime | None
-    source: Literal["google_meet", "manual_override"]
+    source: Literal["google_meet", "zoom", "manual_override"]
     override_reason: str | None
 
 
@@ -66,7 +66,7 @@ class StudentAttendanceItem(BaseModel):
     status: AttendanceStatus
     attended_seconds: int
     attendance_percentage: float
-    source: Literal["google_meet", "manual_override"]
+    source: Literal["google_meet", "zoom", "manual_override"]
 
 
 class StudentAttendanceResponse(BaseModel):
@@ -83,7 +83,7 @@ class AttendanceReportItem(BaseModel):
     meeting_title: str
     meeting_start_time: datetime
     meeting_end_time: datetime
-    program_id: int
+    program_id: int | None = None
     program_code: str
     program_title: str
     course_id: int
@@ -93,11 +93,11 @@ class AttendanceReportItem(BaseModel):
     class_code: str
     class_name: str
     lecturer_user_id: int
-    lecturer_staff_number: str
+    lecturer_staff_number: str | None
     lecturer_name: str
     lecturer_email: str
     student_user_id: int
-    student_number: str
+    student_number: str | None
     student_name: str
     student_email: str
     status: AttendanceStatus
@@ -105,7 +105,7 @@ class AttendanceReportItem(BaseModel):
     attendance_percentage: float
     first_join_time: datetime | None
     last_leave_time: datetime | None
-    source: Literal["google_meet", "manual_override"]
+    source: Literal["google_meet", "zoom", "manual_override"]
     override_reason: str | None
     synced_at: datetime | None
 
@@ -140,3 +140,60 @@ class AttendanceReportOptionsResponse(BaseModel):
     classes: list[AttendanceReportOption]
     lecturers: list[AttendanceReportOption]
     students: list[AttendanceReportOption]
+
+
+class AttendanceClassAnalytic(BaseModel):
+    class_id: int
+    class_code: str
+    class_name: str
+    course_code: str
+    course_title: str
+    total_records: int
+    present_count: int
+    absent_count: int
+    present_rate: float
+    student_count: int
+    meeting_count: int
+
+
+class AttendanceStudentAnalytic(BaseModel):
+    student_user_id: int
+    student_name: str
+    student_number: str | None
+    student_email: str
+    total_records: int
+    present_count: int
+    absent_count: int
+    present_rate: float
+    average_attendance_percentage: float
+
+
+class AttendanceMonthAnalytic(BaseModel):
+    month: str
+    total_records: int
+    present_count: int
+    absent_count: int
+    present_rate: float
+    student_count: int
+    meeting_count: int
+
+
+class AttendanceMeetingAnalytic(BaseModel):
+    meeting_id: int
+    meeting_title: str
+    meeting_start_time: datetime
+    class_id: int
+    class_code: str
+    class_name: str
+    course_title: str
+    present_count: int
+    absent_count: int
+    present_rate: float
+
+
+class AttendanceAnalyticsResponse(BaseModel):
+    summary: AttendanceReportSummary
+    classes: list[AttendanceClassAnalytic]
+    students: list[AttendanceStudentAnalytic]
+    months: list[AttendanceMonthAnalytic]
+    meetings: list[AttendanceMeetingAnalytic]

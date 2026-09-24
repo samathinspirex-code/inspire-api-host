@@ -261,11 +261,14 @@ async def _course_programme(db: AsyncSession, course: LmsCourse) -> Program:
 async def ensure_course_workspace(db: AsyncSession, course: LmsCourse) -> str:
     if course.vimeo_folder_uri:
         return course.vimeo_folder_uri
-    programme = await _course_programme(db, course)
     async with VimeoClient() as vimeo:
         root = await vimeo.ensure_folder(settings.VIMEO_ROOT_FOLDER.strip() or "INSPIRE COLLEGE")
-        programme_folder = await vimeo.ensure_folder(f"{programme.code} · {programme.title}", root)
-        course_folder = await vimeo.ensure_folder(f"{course.code} · {course.title}", programme_folder)
+        if course.is_orientation or course.program_id is None:
+            parent_folder = await vimeo.ensure_folder("Orientation", root)
+        else:
+            programme = await _course_programme(db, course)
+            parent_folder = await vimeo.ensure_folder(f"{programme.code} · {programme.title}", root)
+        course_folder = await vimeo.ensure_folder(f"{course.code} · {course.title}", parent_folder)
     course.vimeo_folder_uri = course_folder
     await db.commit()
     return course_folder

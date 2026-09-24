@@ -283,6 +283,8 @@ class ExamResultAnswer(BaseModel):
     marks_awarded: Decimal
     feedback: str | None
     is_correct: bool | None
+    your_answer: str | None = None
+    correct_answer: str | None = None
 
 
 class ExamResultResponse(BaseModel):
@@ -293,4 +295,5 @@ class ExamResultResponse(BaseModel):
     total_marks: Decimal
     percentage: float
     feedback: str | None
+    grade_band: str | None = None
     answers: list[ExamResultAnswer]

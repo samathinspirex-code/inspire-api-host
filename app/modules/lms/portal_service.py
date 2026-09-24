@@ -22,9 +22,10 @@ def _course_item(row, role: str) -> PortalCourseItem:
     return PortalCourseItem(
         course_id=course.course_id,
         program_id=course.program_id,
+        is_orientation=bool(course.is_orientation),
         catalogue_course_id=course.catalogue_course_id,
-        program_title=program_title,
-        program_code=program_code,
+        program_title=program_title or ("Orientation" if course.is_orientation else ""),
+        program_code=program_code or "",
         code=course.code,
         title=course.title,
         description=course.description,
@@ -41,14 +42,15 @@ def _course_item(row, role: str) -> PortalCourseItem:
 
 
 def _class_item(row, role: str) -> PortalClassItem:
-    class_, course_code, course_title, cover_image_url, program_title, people_count = row
+    class_, course_code, course_title, cover_image_url, program_title, people_count, is_orientation = row
     return PortalClassItem(
         class_id=class_.class_id,
         course_id=class_.course_id,
         course_code=course_code,
         course_title=course_title,
         cover_image_url=cover_image_url,
-        program_title=program_title,
+        is_orientation=bool(is_orientation),
+        program_title=program_title or ("Orientation" if is_orientation else ""),
         code=class_.code,
         name=class_.name,
         description=class_.description,
@@ -112,7 +114,7 @@ async def update_my_course_presentation(
     if row is None:
         raise NotFoundError("This course is not assigned to your lecturer profile")
     course = row[0]
-    if await db.get(Program, payload.program_id) is None:
+    if not payload.is_orientation and await db.get(Program, payload.program_id) is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
     if payload.catalogue_course_id is not None and not await db.scalar(text("""
         SELECT 1 FROM academic_courses

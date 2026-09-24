@@ -58,7 +58,10 @@ ROLE_NAVIGATION = {
         ("programmes", "Programmes", "layers"),
         ("courses", "Courses", "book"),
         ("classes", "Classes", "video"),
+        ("assignment-bank", "Assignments", "file"),
+        ("practice-bank", "Practice Tests", "clipboard"),
         ("enrolments", "Enrolments", "user-check"),
+        ("meetings", "Online Meetings", "camera"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Reports & Exports", "chart"),
         ("announcements", "Announcements", "megaphone"),
@@ -70,7 +73,10 @@ ROLE_NAVIGATION = {
         ("programmes", "Programmes", "layers"),
         ("courses", "Courses", "book"),
         ("classes", "Classes", "video"),
+        ("assignment-bank", "Assignments", "file"),
+        ("practice-bank", "Practice Tests", "clipboard"),
         ("enrolments", "Enrolments", "user-check"),
+        ("meetings", "Online Meetings", "camera"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Reports", "chart"),
         ("announcements", "Announcements", "megaphone"),
@@ -79,11 +85,11 @@ ROLE_NAVIGATION = {
         ("profile", "My Profile", "user"),
         ("courses", "Courses", "book"),
         ("my-classes", "My Classes", "video"),
-        ("assignments", "Assignments", "file"),
-        ("exams", "Question Papers", "clipboard"),
+        ("assignment-bank", "Assignments", "file"),
+        ("practice-bank", "Practice Tests", "clipboard"),
         ("grades", "Gradebook", "award"),
         ("attendance", "Attendance", "clipboard"),
-        ("reports", "Attendance Reports", "chart"),
+        ("reports", "Reports", "chart"),
         ("meetings", "Online Meetings", "camera"),
         ("announcements", "Announcements", "megaphone"),
     ],
@@ -92,7 +98,6 @@ ROLE_NAVIGATION = {
         ("my-classes", "My Classes", "video"),
         ("meetings", "Online Classes", "camera"),
         ("assignments", "Assignments", "file"),
-        ("exams", "Question Papers", "clipboard"),
         ("attendance", "Attendance", "clipboard"),
         ("grades", "Grades", "award"),
         ("reports", "My Activity", "chart"),
@@ -146,13 +151,14 @@ async def list_programmes(db: AsyncSession) -> ProgrammeListResponse:
     )
 
 
-def _to_course_item(course, program_title: str, program_code: str) -> CourseItem:
+def _to_course_item(course, program_title: str | None, program_code: str | None) -> CourseItem:
     return CourseItem(
         course_id=course.course_id,
         program_id=course.program_id,
+        is_orientation=bool(course.is_orientation),
         catalogue_course_id=course.catalogue_course_id,
-        program_title=program_title,
-        program_code=program_code,
+        program_title=program_title or ("Orientation" if course.is_orientation else ""),
+        program_code=program_code or "",
         code=course.code,
         title=course.title,
         description=course.description,
@@ -186,8 +192,8 @@ async def list_courses(
 
 
 async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
-    programme = await db.get(Program, payload.program_id)
-    if programme is None:
+    programme = None if payload.is_orientation else await db.get(Program, payload.program_id)
+    if not payload.is_orientation and programme is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
     if payload.catalogue_course_id is not None and not await db.scalar(text("""
         SELECT 1 FROM academic_courses
@@ -223,7 +229,7 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
         and await assignment_repo.get_course_lecturer(course.course_id, user_id) is None
     ):
         await assignment_repo.assign_course_lecturer(course.course_id, user_id, user_id)
-    return _to_course_item(course, programme.title, programme.code)
+    return _to_course_item(course, None if programme is None else programme.title, None if programme is None else programme.code)
 
 
 async def create_lecturer_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
@@ -245,8 +251,8 @@ async def update_course(db: AsyncSession, course_id: int, payload: CourseUpdate)
     if course is None:
         raise NotFoundError(f"Course {course_id} not found")
 
-    programme = await db.get(Program, payload.program_id)
-    if programme is None:
+    programme = None if payload.is_orientation else await db.get(Program, payload.program_id)
+    if not payload.is_orientation and programme is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
     if payload.catalogue_course_id is not None and not await db.scalar(text("""
         SELECT 1 FROM academic_courses
@@ -268,7 +274,7 @@ async def update_course(db: AsyncSession, course_id: int, payload: CourseUpdate)
             "takeaways": payload.takeaways.strip() if payload.takeaways else None,
         },
     )
-    return _to_course_item(course, programme.title, programme.code)
+    return _to_course_item(course, None if programme is None else programme.title, None if programme is None else programme.code)
 
 
 async def delete_course(db: AsyncSession, course_id: int) -> None:
@@ -361,13 +367,13 @@ async def reorder_modules(db: AsyncSession, course_id: int, module_ids: list[int
     return ModuleListResponse(data=[ModuleItem.model_validate(module) for module in reordered])
 
 
-def _to_class_item(class_, course_code: str, course_title: str, program_title: str) -> ClassItem:
+def _to_class_item(class_, course_code: str, course_title: str, program_title: str | None) -> ClassItem:
     return ClassItem(
         class_id=class_.class_id,
         course_id=class_.course_id,
         course_code=course_code,
         course_title=course_title,
-        program_title=program_title,
+        program_title=program_title or "",
         code=class_.code,
         name=class_.name,
         description=class_.description,

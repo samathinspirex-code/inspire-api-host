@@ -20,6 +20,7 @@ from app.modules.lms.schemas.student_import import StudentImportRequest, Student
 from app.modules.lms import assignment_service
 from app.modules.lms import portal_service
 from app.modules.lms import meeting_service
+from app.modules.lms import calendar_event_service
 from app.modules.lms import attendance_service
 from app.modules.lms import content_service
 from app.modules.lms import progress_service
@@ -27,6 +28,7 @@ from app.modules.lms import assistant_service
 from app.modules.lms import coursework_service
 from app.modules.lms import gradebook_service
 from app.modules.lms import exam_service
+from app.modules.lms import template_bank_service
 from app.modules.lms import notification_service
 from app.modules.lms import profile_service
 from app.modules.lms import analytics_service
@@ -39,6 +41,7 @@ from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, Medi
 from app.modules.lms.dependencies import require_lms_roles
 from app.modules.lms.models import LmsModule
 from app.modules.lms.schemas.progress import CourseProgressSummaryResponse
+from app.modules.lms.schemas.calendar_event import CalendarEventItem, CalendarEventListResponse, CalendarEventWrite
 from app.modules.lms.schemas import (
     CourseCreate,
     CourseItem,
@@ -80,6 +83,7 @@ from app.modules.lms.schemas import (
     SchedulableClassListResponse,
     AttendanceRecordItem,
     AttendanceRecordUpdate,
+    AttendanceAnalyticsResponse,
     AttendanceReportOptionsResponse,
     AttendanceReportResponse,
     AttendanceSessionItem,
@@ -137,6 +141,12 @@ from app.modules.lms.schemas import (
     ExamResultResponse,
     ExamScheduleUpdate,
     ExamStatusUpdate,
+    AssessmentTemplateCreate,
+    AssessmentTemplateDetail,
+    AssessmentTemplateListResponse,
+    AssessmentTemplateUpdate,
+    TemplateApplyRequest,
+    TemplateApplyResponse,
     AnnouncementCreate,
     AnnouncementItem,
     AnnouncementListResponse,
@@ -236,12 +246,32 @@ async def get_student_academic_profile(
 @router.get("/analytics/dashboard", response_model=AnalyticsDashboardResponse)
 async def get_analytics_dashboard(
     response: Response,
+    program_id: int | None = Query(None, gt=0),
+    class_id: int | None = Query(None, gt=0),
     current_user: CurrentUser = Depends(analytics_access),
     db: AsyncSession = Depends(get_db),
 ) -> AnalyticsDashboardResponse:
     response.headers["Cache-Control"] = "no-store"
     return await analytics_service.get_dashboard(
-        db, current_user.user_id, service.resolve_role(current_user.access)
+        db, current_user.user_id, service.resolve_role(current_user.access), program_id, class_id
+    )
+
+
+@router.get("/analytics/export")
+async def export_analytics_dashboard(
+    program_id: int | None = Query(None, gt=0),
+    class_id: int | None = Query(None, gt=0),
+    current_user: CurrentUser = Depends(analytics_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    report = await analytics_service.get_dashboard(
+        db, current_user.user_id, service.resolve_role(current_user.access), program_id, class_id
+    )
+    scope = f"class-{class_id}" if class_id else f"programme-{program_id}" if program_id else "all"
+    return Response(
+        content=analytics_service.build_report_csv(report),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="academic-report-{scope}-{date.today().isoformat()}.csv"'},
     )
 
 
@@ -502,6 +532,112 @@ async def create_practice_test(
     db: AsyncSession = Depends(get_db),
 ) -> ExamEditorResponse:
     return await exam_service.create_practice_test(db, course_id, payload, current_user.user_id)
+
+
+@router.get("/assessment-templates", response_model=AssessmentTemplateListResponse)
+async def list_assessment_templates(
+    kind: Literal["assignment", "practice_test"] = Query(...),
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateListResponse:
+    del current_user
+    return await template_bank_service.list_templates(db, kind)
+
+
+@router.post("/assessment-templates", response_model=AssessmentTemplateDetail, status_code=201)
+async def create_assessment_template(
+    payload: AssessmentTemplateCreate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    return await template_bank_service.create_template(db, payload, current_user.user_id)
+
+
+@router.get("/assessment-templates/{template_id}", response_model=AssessmentTemplateDetail)
+async def get_assessment_template(
+    template_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.get_template(db, template_id)
+
+
+@router.put("/assessment-templates/{template_id}", response_model=AssessmentTemplateDetail)
+async def update_assessment_template(
+    template_id: int,
+    payload: AssessmentTemplateUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.update_template(db, template_id, payload)
+
+
+@router.delete("/assessment-templates/{template_id}", status_code=204)
+async def delete_assessment_template(
+    template_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    del current_user
+    await template_bank_service.delete_template(db, template_id)
+    return Response(status_code=204)
+
+
+@router.post("/assessment-templates/{template_id}/questions", response_model=AssessmentTemplateDetail)
+async def add_assessment_template_question(
+    template_id: int,
+    payload: ExamQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.add_question(db, template_id, payload)
+
+
+@router.put("/assessment-templates/{template_id}/questions/{question_id}", response_model=AssessmentTemplateDetail)
+async def update_assessment_template_question(
+    template_id: int,
+    question_id: int,
+    payload: ExamQuestionUpsert,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.update_question(db, template_id, question_id, payload)
+
+
+@router.delete("/assessment-templates/{template_id}/questions/{question_id}", response_model=AssessmentTemplateDetail)
+async def delete_assessment_template_question(
+    template_id: int,
+    question_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.delete_question(db, template_id, question_id)
+
+
+@router.post("/assessment-templates/{template_id}/questions/import", response_model=AssessmentTemplateDetail)
+async def import_assessment_template_questions(
+    template_id: int,
+    payload: ExamQuestionImportRequest,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentTemplateDetail:
+    del current_user
+    return await template_bank_service.import_questions(db, template_id, payload)
+
+
+@router.post("/assessment-templates/{template_id}/apply", response_model=TemplateApplyResponse)
+async def apply_assessment_template(
+    template_id: int,
+    payload: TemplateApplyRequest,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> TemplateApplyResponse:
+    return await template_bank_service.apply_template(db, template_id, payload, current_user.user_id)
 
 
 @router.get("/exams/{exam_id}/editor", response_model=ExamEditorResponse)
@@ -921,7 +1057,7 @@ async def ask_my_course_assistant(
 ) -> CourseAssistantAnswer:
     role = service.resolve_role(current_user.access)
     return await assistant_service.answer_question(
-        db, course_id, payload.question.strip(), current_user.user_id, role
+        db, course_id, payload.question.strip(), current_user.user_id, role, payload.class_id,
     )
 
 
@@ -1298,6 +1434,45 @@ async def get_my_class(
     return await portal_service.get_my_class(db, class_id, current_user.user_id, role)
 
 
+@router.get("/my/calendar-events", response_model=CalendarEventListResponse)
+async def list_my_calendar_events(
+    current_user: CurrentUser = Depends(meeting_view_access), db: AsyncSession = Depends(get_db),
+) -> CalendarEventListResponse:
+    role = service.resolve_role(current_user.access)
+    return await calendar_event_service.list_events(db, current_user.user_id, role)
+
+
+@router.post("/calendar-events", response_model=CalendarEventItem, status_code=201)
+async def create_calendar_event(
+    payload: CalendarEventWrite,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CalendarEventItem:
+    role = service.resolve_role(current_user.access)
+    return await calendar_event_service.create_event(db, payload, current_user.user_id, role)
+
+
+@router.put("/calendar-events/{event_id}", response_model=CalendarEventItem)
+async def update_calendar_event(
+    event_id: int,
+    payload: CalendarEventWrite,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CalendarEventItem:
+    role = service.resolve_role(current_user.access)
+    return await calendar_event_service.update_event(db, event_id, payload, current_user.user_id, role)
+
+
+@router.post("/calendar-events/{event_id}/cancel", response_model=CalendarEventItem)
+async def cancel_calendar_event(
+    event_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CalendarEventItem:
+    role = service.resolve_role(current_user.access)
+    return await calendar_event_service.cancel_event(db, event_id, current_user.user_id, role)
+
+
 @router.get("/my/meetings", response_model=MeetingListResponse)
 async def list_my_meetings(
     current_user: CurrentUser = Depends(meeting_view_access), db: AsyncSession = Depends(get_db)
@@ -1461,6 +1636,28 @@ async def get_attendance_report(
         date_to,
         status,
         search,
+    )
+
+
+@router.get("/attendance/report/analytics", response_model=AttendanceAnalyticsResponse)
+async def get_attendance_analytics(
+    program_id: int | None = Query(None, gt=0),
+    course_id: int | None = Query(None, gt=0),
+    class_id: int | None = Query(None, gt=0),
+    student_user_id: int | None = Query(None, gt=0),
+    lecturer_user_id: int | None = Query(None, gt=0),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    status: Literal["present", "absent"] | None = Query(None),
+    search: str | None = Query(None, max_length=255),
+    current_user: CurrentUser = Depends(attendance_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> AttendanceAnalyticsResponse:
+    role = service.resolve_role(current_user.access)
+    return await attendance_service.attendance_analytics(
+        db, current_user.user_id, role,
+        program_id, course_id, class_id, student_user_id, lecturer_user_id,
+        date_from, date_to, status, search,
     )
 
 
