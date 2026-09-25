@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -151,11 +151,15 @@ async def materialize_announcement(db: AsyncSession, item: LmsAnnouncement, now:
     return created
 
 
-async def notify_meeting_change(db: AsyncSession, meeting: OnlineMeeting, class_: LmsClass, course: LmsCourse, event: str) -> int:
-    users = set(await _audience_user_ids(db, "class", meeting.class_id)); users.add(meeting.lecturer_user_id)
+async def notify_meeting_change(db: AsyncSession, meeting: OnlineMeeting, class_: LmsClass, course: LmsCourse, event: str, class_ids: list[int] | None = None) -> int:
+    users = set()
+    for class_id in class_ids or [meeting.class_id]:
+        users.update(await _audience_user_ids(db, "class", class_id))
+    users.add(meeting.lecturer_user_id)
     labels = {"created": "Online class scheduled", "updated": "Online class rescheduled", "cancelled": "Online class cancelled"}
     title = f"{labels[event]}: {meeting.title}"
-    message = f"{course.code} · {class_.name} — {local_time(meeting.start_time)}."
+    audience = getattr(meeting, "audience_label", None) or f"{course.code} · {class_.name}"
+    message = f"{audience} — {local_time(meeting.start_time)}."
     if event == "cancelled": message += " This class will no longer take place at the scheduled time."
     else: message += " Open the LMS for the latest class details."
     created = await _enqueue(db, list(users), f"meeting:{meeting.meeting_id}:{event}:{meeting.updated_at.isoformat() if meeting.updated_at else meeting.start_time.isoformat()}",
@@ -236,13 +240,17 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
 
     meeting_rows = (await db.execute(select(OnlineMeeting, LmsClass, LmsCourse).join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id).join(LmsCourse, LmsCourse.course_id == LmsClass.course_id).where(OnlineMeeting.status == "scheduled", OnlineMeeting.start_time >= now - timedelta(minutes=10), OnlineMeeting.start_time <= now + timedelta(minutes=max(MEETING_REMINDERS) + 10)))).all()
     for meeting, class_, course in meeting_rows:
-        users = set(await _audience_user_ids(db, "class", meeting.class_id)); users.add(meeting.lecturer_user_id)
+        class_ids = list((await db.execute(text("SELECT class_id FROM lms_meeting_audience_classes WHERE meeting_id=:id"), {"id": meeting.meeting_id})).scalars().all()) or [meeting.class_id]
+        users = set()
+        for class_id in class_ids: users.update(await _audience_user_ids(db, "class", class_id))
+        users.add(meeting.lecturer_user_id)
         for offset in MEETING_REMINDERS:
             if reminder_due(meeting.start_time, offset, now):
                 label = "now" if offset == 0 else ("24 hours" if offset == 1440 else "15 minutes")
                 title = f"Join online class now: {meeting.title}" if offset == 0 else f"Online class in {label}: {meeting.title}"
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
-                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{course.code} · {class_.name} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True)
+                audience = getattr(meeting, "audience_label", None) or f"{course.code} · {class_.name}"
+                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{audience} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True)
     await db.commit(); return created, published
 
 

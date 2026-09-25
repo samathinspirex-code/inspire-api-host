@@ -19,6 +19,8 @@ Create a virtual environment and install dependencies:
 python3 -m venv .venv
 source .venv/bin/activate (.venv\Scripts\Activate.ps1)
 pip install -r requirements.txt
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
 Copy the env template and fill in your Postgres credentials:

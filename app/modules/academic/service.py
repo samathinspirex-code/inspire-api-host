@@ -977,27 +977,31 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
         if master["academic_course_id"] is None:
             raise ValidationError("Link this Course page to the academic catalogue before creating a class")
         if payload.academic_course_id is None:
-            raise ValidationError("Choose a catalogue course from the reusable template's programme")
-        if payload.study_mode is None:
-            raise ValidationError("Select a study mode")
-        target_course_id = payload.academic_course_id
-        study_mode = payload.study_mode
-        valid_target = await db.scalar(text("""
-            SELECT 1
-            FROM academic_courses target
-            JOIN academic_courses anchor ON anchor.course_id=:anchor_course_id
-            WHERE target.course_id=:target_course_id
-              AND target.programme_id=anchor.programme_id
-              AND target.status <> 'archived'
-        """), {"anchor_course_id": master["academic_course_id"], "target_course_id": target_course_id})
-        if not valid_target:
-            raise ValidationError("Choose a catalogue course from the reusable template's programme")
-        enabled = await db.scalar(text("""
-            SELECT 1 FROM academic_course_study_options
-            WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
-        """), {"course_id": target_course_id, "study_mode": study_mode})
-        if not enabled:
-            raise ValidationError("This study mode is not enabled for the selected course")
+            # A reusable template may intentionally create a programme-level
+            # Common class with no exact catalogue course or study-mode link.
+            target_course_id = None
+            study_mode = None
+        else:
+            if payload.study_mode is None:
+                raise ValidationError("Select a study mode")
+            target_course_id = payload.academic_course_id
+            study_mode = payload.study_mode
+            valid_target = await db.scalar(text("""
+                SELECT 1
+                FROM academic_courses target
+                JOIN academic_courses anchor ON anchor.course_id=:anchor_course_id
+                WHERE target.course_id=:target_course_id
+                  AND target.programme_id=anchor.programme_id
+                  AND target.status <> 'archived'
+            """), {"anchor_course_id": master["academic_course_id"], "target_course_id": target_course_id})
+            if not valid_target:
+                raise ValidationError("Choose a catalogue course from the reusable template's programme")
+            enabled = await db.scalar(text("""
+                SELECT 1 FROM academic_course_study_options
+                WHERE course_id=:course_id AND study_mode=:study_mode AND is_enabled
+            """), {"course_id": target_course_id, "study_mode": study_mode})
+            if not enabled:
+                raise ValidationError("This study mode is not enabled for the selected course")
     duplicate = await db.scalar(text("SELECT 1 FROM lms_classes WHERE lower(code)=lower(:code)"), {"code": payload.code.strip()})
     if duplicate:
         raise ConflictError(f"Class code '{payload.code.strip().upper()}' is already in use")
@@ -1134,7 +1138,7 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
     """), {"class_id": class_id, "user_id": user_id})
     await db.commit()
     return {"class_id": class_id, "course_id": copied_course_id,
-            "source_course_id": payload.source_course_id, "study_mode": payload.study_mode}
+            "source_course_id": payload.source_course_id, "study_mode": study_mode}
 
 
 async def save_template_draft(db: AsyncSession, payload: TemplateDraftRequest, user_id: int):

@@ -142,7 +142,10 @@ async def issue_authenticator_setup_token(
         created_by,
         reset_credentials=reset_credentials,
     )
-    await RefreshTokenRepository(db).revoke_all_for_user(user.user_id)
+    # A password-reset request must not sign an already-authenticated user out.
+    # Administrative credential resets still revoke every existing session.
+    if reset_credentials:
+        await RefreshTokenRepository(db).revoke_all_for_user(user.user_id)
     return AuthenticatorSetupTokenResponse(
         user_id=user.user_id,
         email=user.email,
@@ -505,28 +508,30 @@ async def refresh_tokens(db: AsyncSession, refresh_token_plain: str) -> TokenRes
     token_row = await refresh_repo.get_by_hash(token_hash)
     now = datetime.now(timezone.utc)
 
-    if token_row is None or token_row.expires_at <= now:
+    if token_row is None or token_row.revoked_at is not None or token_row.expires_at <= now:
         raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
-
-    if token_row.revoked_at is not None:
-        revoked_at = token_row.revoked_at
-        if revoked_at.tzinfo is None:
-            revoked_at = revoked_at.replace(tzinfo=timezone.utc)
-        reuse_age = (now - revoked_at).total_seconds()
-        if reuse_age < 0 or reuse_age > settings.REFRESH_TOKEN_REUSE_GRACE_SECONDS:
-            await refresh_repo.revoke_all_for_user(token_row.user_id)
-            raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
-        # Multiple browser tabs can refresh the same session at once. Permit a
-        # brief overlap so the slower tab does not revoke the token just issued
-        # to the faster tab. Reuse outside this window still triggers revocation.
-    else:
-        await refresh_repo.revoke(token_row)
 
     user = await UserRepository(db).get(token_row.user_id)
     if user is None or not user.is_active:
         raise APIError(401, "REFRESH_INVALID", "Refresh token is invalid or expired.")
 
-    return await _issue_tokens(db, user)
+    # Keep the existing refresh token until its original 90-day expiry. Rotating
+    # it on every 15-minute access renewal can strand the browser with a revoked
+    # token if a tab closes or the connection drops before the replacement is
+    # saved. Logout and security-sensitive account changes still revoke it.
+    access = _user_access_keys(user)
+    access_token, expires_in = create_access_token(user.user_id, user.email, access)
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token_plain,
+        expires_in=expires_in,
+        user=UserOut(
+            user_id=user.user_id,
+            email=user.email,
+            full_name=user.full_name,
+            access=access,
+        ),
+    )
 
 
 async def logout(db: AsyncSession, refresh_token_plain: str) -> None:

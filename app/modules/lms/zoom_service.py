@@ -173,7 +173,13 @@ async def complete_connection(db: AsyncSession, code: str, state: str) -> str:
         token_response = await client.post(ZOOM_TOKEN, auth=auth, data={"grant_type":"authorization_code", "code":code,
             "redirect_uri":settings.ZOOM_REDIRECT_URI})
         if token_response.is_error:
-            raise ValidationError("Zoom could not complete the account connection")
+            # While the Zoom app is unpublished only users inside the developer's
+            # own Zoom account may authorise it, which is the usual cause here.
+            raise ValidationError(
+                "Zoom could not complete the account connection. Until the Zoom app is "
+                "published, the host must be a user in the same Zoom account as the app, "
+                "so add the new licence as a user in your Zoom organisation first."
+            )
         tokens = token_response.json()
         profile_response = await client.get(f"{ZOOM_API}/users/me", headers={"Authorization":f"Bearer {tokens['access_token']}"})
         if profile_response.is_error:
@@ -366,19 +372,33 @@ async def update_zoom_meeting(db: AsyncSession, meeting, payload) -> dict:
         )
     token=await _access_token(db,dict(host))
     options=payload.options
-    body={"topic":payload.title.strip(),"start_time":payload.start_time.isoformat(),
+    tz = payload.timezone or meeting.timezone or "UTC"
+    # Zoom's PATCH /meetings/{id} expects start_time in the meeting's own timezone
+    # as a naive local datetime (no UTC offset).  Python's isoformat() emits "+00:00"
+    # for aware datetimes which Zoom rejects with a 400 error.  Convert to the
+    # target timezone first, then strip the offset so Zoom reads it relative to
+    # the timezone field we send alongside it.
+    try:
+        import zoneinfo
+        local_start = payload.start_time.astimezone(zoneinfo.ZoneInfo(tz))
+    except Exception:
+        local_start = payload.start_time
+    start_str = local_start.strftime("%Y-%m-%dT%H:%M:%S")
+    body={"topic":payload.title.strip(),"start_time":start_str,
       "duration":max(1,round((payload.end_time-payload.start_time).total_seconds()/60)),
-      "timezone":payload.timezone or meeting.timezone,"agenda":(payload.description or "").strip(),
+      "timezone":tz,"agenda":(payload.description or "").strip(),
       "settings":{"waiting_room":options.waiting_room,"join_before_host":options.join_before_host,
         "mute_upon_entry":options.mute_upon_entry,"host_video":options.host_video,
         "participant_video":options.participant_video}}
     async with httpx.AsyncClient(timeout=25) as client:
         response=await client.patch(f"{ZOOM_API}/meetings/{meeting.provider_meeting_id}",headers={"Authorization":f"Bearer {token}"},json=body)
     if response.is_error:
-        raise ValidationError("Zoom could not update this meeting. Check the host connection and try again.")
+        detail = _zoom_error(response)
+        logger.error("Zoom PATCH meeting %s failed: %s — body: %s", meeting.provider_meeting_id, detail, response.text[:500])
+        raise ValidationError(f"Zoom could not update this meeting ({detail}). Check the host connection and try again.")
     return {"title":payload.title.strip(),"description":(payload.description or "").strip() or None,
       "start_time":payload.start_time,"end_time":payload.end_time,
-      "timezone":payload.timezone or meeting.timezone,"processing_error":None}
+      "timezone":tz,"processing_error":None}
 
 
 async def cancel_zoom_meeting(db: AsyncSession, meeting) -> None:
@@ -406,8 +426,10 @@ async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str
     if not meeting: raise NotFoundError("Zoom meeting not found")
     is_host=role in {"SUPER_ADMIN","ADMIN"} or (role=="LECTURER" and meeting["lecturer_user_id"]==user_id)
     if not is_host:
-        allowed=await db.scalar(text("SELECT 1 FROM lms_class_students WHERE class_id=:c AND student_user_id=:u"),{"c":meeting["class_id"],"u":user_id})
-        if not allowed: raise ForbiddenError("You are not enrolled in this meeting's class")
+        allowed=await db.scalar(text("""SELECT 1 FROM lms_meeting_audience_classes mac
+          JOIN lms_class_students cs ON cs.class_id=mac.class_id
+          WHERE mac.meeting_id=:m AND cs.student_user_id=:u LIMIT 1"""),{"m":meeting_id,"u":user_id})
+        if not allowed: raise ForbiddenError("You are not enrolled in this meeting's audience")
     user=(await db.execute(text("SELECT full_name,email FROM users WHERE user_id=:id AND is_active"),{"id":user_id})).mappings().first()
     result={"meeting_id":meeting_id,"meeting_number":meeting["provider_meeting_id"],"sdk_key":settings.ZOOM_MEETING_SDK_KEY,
       "signature":_sdk_signature(meeting["provider_meeting_id"],1 if is_host else 0),"role":1 if is_host else 0,
@@ -461,16 +483,70 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
     await db.commit()
 
 
+def _past_meeting_refs(context) -> list[str]:
+    """Candidate Zoom identifiers for the finished instance, best first.
+
+    A UUID that starts with a slash or contains a double slash has to be encoded
+    twice, otherwise Zoom reads the path as extra segments and rejects the call.
+    """
+    refs: list[str] = []
+    uuid = str(context["provider_meeting_uuid"] or "")
+    if uuid:
+        once = quote(uuid, safe="")
+        refs.append(quote(once, safe="") if uuid.startswith("/") or "//" in uuid else once)
+    if context["provider_meeting_id"]:
+        refs.append(quote(str(context["provider_meeting_id"]), safe=""))
+    return refs
+
+
+async def _fetch_participant_page(client: httpx.AsyncClient, path: str, token: str, page: str | None):
+    params = {"page_size": 300}
+    if page:
+        params["next_page_token"] = page
+    return await client.get(f"{ZOOM_API}/{path}", params=params, headers={"Authorization": f"Bearer {token}"})
+
+
+async def _past_participants(context, token: str) -> list[dict]:
+    """Every participant row for a finished meeting, across all report pages.
+
+    The participant report is written after the meeting is torn down, so a call
+    made too early legitimately returns nothing yet. Report and past-meeting
+    endpoints are both tried because which one a Zoom plan exposes differs.
+    """
+    failures: list[str] = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for ref in _past_meeting_refs(context):
+            for path in (f"report/meetings/{ref}/participants", f"past_meetings/{ref}/participants"):
+                participants: list[dict] = []
+                page: str | None = None
+                while True:
+                    response = await _fetch_participant_page(client, path, token, page)
+                    if response.is_error:
+                        failures.append(f"{path.split('/')[0]}: {_zoom_error(response)}")
+                        break
+                    body = response.json()
+                    participants.extend(body.get("participants", []))
+                    page = body.get("next_page_token") or None
+                    if not page:
+                        return participants
+    message = (
+        "Zoom has not published the participant report for this class yet. Retry in a "
+        "few minutes. If it keeps failing, the connected Zoom account needs a paid plan "
+        "and the report:read:admin scope."
+    )
+    detail = "; ".join(dict.fromkeys(failures))
+    raise ValidationError(f"{message} Zoom said — {detail}" if detail else message)
+
+
 async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> None:
     context=(await db.execute(text("""SELECT m.*,s.attendance_threshold_percentage FROM lms_online_meetings m
       JOIN lms_zoom_settings s ON s.settings_id=1 WHERE m.meeting_id=:id AND m.provider='zoom'"""),{"id":meeting_id})).mappings().first()
     if not context: raise NotFoundError("Zoom meeting not found")
-    host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":context["zoom_host_connection_id"]})).mappings().first(); token=await _access_token(db,dict(host))
-    meeting_ref=quote(context["provider_meeting_uuid"] or context["provider_meeting_id"],safe="")
-    async with httpx.AsyncClient(timeout=30) as client:
-        response=await client.get(f"{ZOOM_API}/past_meetings/{meeting_ref}/participants",params={"page_size":300},headers={"Authorization":f"Bearer {token}"})
-    if response.is_error: raise ValidationError("Zoom attendance is still processing. Retry in a few minutes.")
-    participants=response.json().get("participants",[]); actual_start=min((_dt(p.get("join_time")) for p in participants if p.get("join_time")),default=context["start_time"]); actual_end=max((_dt(p.get("leave_time")) for p in participants if p.get("leave_time")),default=context["end_time"]); window=max(1,int((actual_end-actual_start).total_seconds()))
+    host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":context["zoom_host_connection_id"]})).mappings().first()
+    if not host:
+        raise ValidationError("The Zoom host account for this class is no longer connected, so attendance cannot be imported. Reconnect it in LMS Settings.")
+    token=await _access_token(db,dict(host))
+    participants=await _past_participants(context,token); actual_start=min((_dt(p.get("join_time")) for p in participants if p.get("join_time")),default=context["start_time"]); actual_end=max((_dt(p.get("leave_time")) for p in participants if p.get("leave_time")),default=context["end_time"]); window=max(1,int((actual_end-actual_start).total_seconds()))
     roster=(await db.execute(text("""SELECT u.user_id,lower(u.email) email,u.full_name FROM lms_class_students cs JOIN users u ON u.user_id=cs.student_user_id
       WHERE cs.class_id=:class_id AND cs.assigned_at<=:ended AND u.is_active"""),{"class_id":context["class_id"],"ended":actual_end})).mappings().all()
     buckets={row["email"]:[] for row in roster}; unmatched=[]

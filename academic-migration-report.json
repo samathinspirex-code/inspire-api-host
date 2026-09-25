@@ -1,0 +1,89 @@
+{
+  "generated_at": "2026-09-25T02:14:07.353996+00:00",
+  "summary": {
+    "programmes": 13,
+    "levels": 3,
+    "schools": 9,
+    "courses": 64,
+    "templates": 12,
+    "template_versions": 13,
+    "converted_classes": 19,
+    "inferred_class_modes": 20,
+    "course_enrolments": 21,
+    "review_required": 12
+  },
+  "review_required": [
+    {
+      "record_type": "class",
+      "record_id": 1,
+      "reason": "Study mode could not be inferred from the existing class code or name.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 9,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 18,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 20,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 23,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 27,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 29,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 30,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 36,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 37,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 38,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    },
+    {
+      "record_type": "course_enrolment",
+      "record_id": 39,
+      "reason": "Existing course enrolment has no class with an inferable Full-time or Part-time mode.",
+      "status": "open"
+    }
+  ]
+}
