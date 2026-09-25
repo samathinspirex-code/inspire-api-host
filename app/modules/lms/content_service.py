@@ -383,7 +383,7 @@ async def get_course_studio(
                 item,
                 accessible or privileged_viewer,
                 progress_by_item.get(item.learning_item_id),
-                role == "LECTURER",
+                role in {"LECTURER", "ADMIN", "SUPER_ADMIN"},
                 accessible=accessible or privileged_viewer,
                 locked_reason=item_reason,
             ))
