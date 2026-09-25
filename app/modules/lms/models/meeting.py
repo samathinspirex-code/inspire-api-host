@@ -33,7 +33,7 @@ class OnlineMeeting(Base):
     audience_type: Mapped[str] = mapped_column(String(20), nullable=False, default="class")
     audience_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lecturer_user_id: Mapped[int] = mapped_column(
-        ForeignKey("lms_lecturer_profiles.user_id", ondelete="CASCADE"), nullable=False
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

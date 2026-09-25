@@ -108,6 +108,7 @@ class MeetingItem(BaseModel):
     class_ids: list[int] = Field(default_factory=list)
     audience_type: Literal["class", "classes", "school", "all"] = "class"
     audience_label: str | None = None
+    awarding_body: str | None = None
     course_code: str
     course_title: str
     title: str
@@ -148,6 +149,7 @@ class SchedulableClassItem(BaseModel):
     student_count: int
     school_id: int | None = None
     school_name: str | None = None
+    awarding_body: str | None = None
 
 
 class SchedulableClassListResponse(BaseModel):

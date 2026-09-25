@@ -17,11 +17,20 @@ from app.modules.lms.schemas import (
 )
 
 
-async def _meeting_item(db: AsyncSession, row) -> MeetingItem:
+async def _meeting_item(db: AsyncSession, row, awarding_body: str | None = None) -> MeetingItem:
     meeting, class_, course, attendee_count = row
     repository = MeetingRepository(db)
     class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
     attendee_count = len(await repository.list_student_emails_for_classes(class_ids))
+    if awarding_body is None:
+        awarding_body = await db.scalar(text("""
+            SELECT COALESCE(ac.awarding_body, pr.awarding_body, '')
+            FROM lms_classes lc
+            JOIN lms_courses c ON c.course_id = lc.course_id
+            LEFT JOIN academic_courses ac ON ac.course_id = COALESCE(lc.academic_course_id, c.catalogue_course_id)
+            LEFT JOIN programs pr ON pr.program_id = c.program_id
+            WHERE lc.class_id = :class_id
+        """), {"class_id": meeting.class_id}) or None
     return MeetingItem(
         meeting_id=meeting.meeting_id,
         class_id=meeting.class_id,
@@ -30,6 +39,7 @@ async def _meeting_item(db: AsyncSession, row) -> MeetingItem:
         class_ids=class_ids,
         audience_type=getattr(meeting, "audience_type", "class"),
         audience_label=getattr(meeting, "audience_label", None),
+        awarding_body=awarding_body or None,
         course_code=course.code,
         course_title=course.title,
         title=meeting.title,
@@ -54,10 +64,13 @@ async def list_schedulable_classes(
 ) -> SchedulableClassListResponse:
     rows = await MeetingRepository(db).list_schedulable_classes(user_id, role)
     school_rows = (await db.execute(text("""
-        SELECT lc.class_id, s.school_id, s.name AS school_name
+        SELECT lc.class_id, s.school_id, s.name AS school_name,
+               COALESCE(ac.awarding_body, pr.awarding_body, '') AS awarding_body
         FROM lms_classes lc
-        LEFT JOIN academic_courses ac ON ac.course_id=lc.academic_course_id
-        LEFT JOIN academic_schools s ON s.school_id=ac.school_id
+        JOIN lms_courses c ON c.course_id = lc.course_id
+        LEFT JOIN academic_courses ac ON ac.course_id = COALESCE(lc.academic_course_id, c.catalogue_course_id)
+        LEFT JOIN programs pr ON pr.program_id = c.program_id
+        LEFT JOIN academic_schools s ON s.school_id = ac.school_id
         WHERE lc.class_id = ANY(:class_ids)
     """), {"class_ids": [row[0].class_id for row in rows]})).mappings().all() if rows else []
     schools = {row["class_id"]: row for row in school_rows}
@@ -71,9 +84,10 @@ async def list_schedulable_classes(
                 course_title=course.title,
                 timezone=class_.timezone,
                 status=class_.status,
-                student_count=student_count,
+                student_count=student_count or 0,
                 school_id=schools.get(class_.class_id, {}).get("school_id"),
                 school_name=schools.get(class_.class_id, {}).get("school_name"),
+                awarding_body=schools.get(class_.class_id, {}).get("awarding_body") or None,
             )
             for class_, course, student_count in rows
         ]
@@ -225,4 +239,16 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, user_id: int, role: 
 
 async def list_my_meetings(db: AsyncSession, user_id: int, role: str) -> MeetingListResponse:
     rows = await MeetingRepository(db).list_for_user(user_id, role)
-    return MeetingListResponse(data=[await _meeting_item(db, row) for row in rows])
+    class_ids = [row[0].class_id for row in rows]
+    awarding_map: dict[int, str] = {}
+    if class_ids:
+        res = await db.execute(text("""
+            SELECT lc.class_id, COALESCE(ac.awarding_body, pr.awarding_body, '') AS awarding_body
+            FROM lms_classes lc
+            JOIN lms_courses c ON c.course_id = lc.course_id
+            LEFT JOIN academic_courses ac ON ac.course_id = COALESCE(lc.academic_course_id, c.catalogue_course_id)
+            LEFT JOIN programs pr ON pr.program_id = c.program_id
+            WHERE lc.class_id = ANY(:class_ids)
+        """), {"class_ids": class_ids})
+        awarding_map = {r["class_id"]: r["awarding_body"] for r in res.mappings()}
+    return MeetingListResponse(data=[await _meeting_item(db, row, awarding_map.get(row[0].class_id)) for row in rows])
