@@ -3,6 +3,8 @@ import io
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
+_real_datetime = datetime
+
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,124 +113,167 @@ async def get_dashboard(
     now = datetime.now(timezone.utc)
     is_student = role == "STUDENT"
 
-    enrolments: dict[int, set[int]] = defaultdict(set)
-    if course_ids:
-        for course_id, student_id in (await db.execute(
-            select(CourseEnrollment.course_id, CourseEnrollment.student_user_id).where(
-                CourseEnrollment.course_id.in_(course_ids), CourseEnrollment.status == "enrolled"
-            )
-        )).all():
-            if roster is None or student_id in roster:
-                enrolments[course_id].add(student_id)
+    if not course_ids:
+        weeks = _week_buckets()
+        return AnalyticsDashboardResponse(
+            role=role,
+            generated_at=now,
+            engagement_score=0,
+            engagement_label="Needs attention",
+            metrics=[],
+            weekly_trend=[AnalyticsTrendPoint(label=w.strftime("%d %b"), activity=0, completions=0) for w in weeks],
+            grade_distribution=_distribution([]),
+            attendance_distribution=[
+                AnalyticsBreakdownItem(label="Present", value=0, percentage=0, tone="green"),
+                AnalyticsBreakdownItem(label="Absent", value=0, percentage=0, tone="red"),
+            ],
+            course_insights=[],
+        )
 
+    # 1. Enrolments count & student IDs
+    enrolments_count: dict[int, int] = defaultdict(int)
+    student_ids: set[int] = set()
+    enrolment_stmt = (
+        select(CourseEnrollment.course_id, CourseEnrollment.student_user_id)
+        .where(CourseEnrollment.course_id.in_(course_ids), CourseEnrollment.status == "enrolled")
+    )
+    if roster is not None:
+        enrolment_stmt = enrolment_stmt.where(CourseEnrollment.student_user_id.in_(roster or [-1]))
+    for cid, sid in (await db.execute(enrolment_stmt)).all():
+        enrolments_count[cid] += 1
+        student_ids.add(sid)
+
+    # 2. Item totals per course
     item_totals = dict((await db.execute(
         select(LmsModule.course_id, func.count(LmsLearningItem.learning_item_id))
         .join(LmsLearningItem, LmsLearningItem.module_id == LmsModule.module_id)
         .where(
-            LmsModule.course_id.in_(course_ids) if course_ids else False,
+            LmsModule.course_id.in_(course_ids),
             LmsModule.status == "active",
             LmsLearningItem.status == "published",
             LmsLearningItem.is_required.is_(True),
         ).group_by(LmsModule.course_id)
-    )).all()) if course_ids else {}
+    )).all())
 
-    progress_by_course: dict[int, list[float]] = defaultdict(list)
-    completion_dates: list[datetime] = []
-    progress_dates: list[datetime] = []
-    if course_ids:
-        progress_stmt = (
-            select(
-                LmsModule.course_id,
-                LmsLearningProgress.completion_percent,
-                LmsLearningProgress.is_completed,
-                LmsLearningProgress.completed_at,
-                LmsLearningProgress.last_activity_at,
-            )
-            .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLearningProgress.learning_item_id)
-            .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
-            .join(CourseEnrollment, (CourseEnrollment.course_id == LmsModule.course_id)
-                  & (CourseEnrollment.student_user_id == LmsLearningProgress.student_user_id)
-                  & (CourseEnrollment.status == "enrolled"))
-            .where(
-                LmsModule.course_id.in_(course_ids),
-                LmsModule.status == "active",
-                LmsLearningItem.status == "published",
-                LmsLearningItem.is_required.is_(True),
-            )
+    # 3. Sum of completion_percent per course
+    sum_progress_by_course: dict[int, float] = defaultdict(float)
+    progress_stmt = (
+        select(
+            LmsModule.course_id,
+            func.sum(LmsLearningProgress.completion_percent).label("total_percent"),
         )
-        if is_student:
-            progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id == user_id)
-        elif roster is not None:
-            progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
-        for course_id, percent, completed, completed_at, activity_at in (await db.execute(progress_stmt)).all():
-            progress_by_course[course_id].append(float(percent))
-            if activity_at:
-                progress_dates.append(_utc(activity_at))
-            if completed and completed_at:
-                completion_dates.append(_utc(completed_at))
+        .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLearningProgress.learning_item_id)
+        .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
+        .join(CourseEnrollment, (CourseEnrollment.course_id == LmsModule.course_id)
+              & (CourseEnrollment.student_user_id == LmsLearningProgress.student_user_id)
+              & (CourseEnrollment.status == "enrolled"))
+        .where(
+            LmsModule.course_id.in_(course_ids),
+            LmsModule.status == "active",
+            LmsLearningItem.status == "published",
+            LmsLearningItem.is_required.is_(True),
+        )
+    )
+    if is_student:
+        progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id == user_id)
+    elif roster is not None:
+        progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
+    progress_stmt = progress_stmt.group_by(LmsModule.course_id)
+    for cid, total_percent in (await db.execute(progress_stmt)).all():
+        if total_percent is not None:
+            sum_progress_by_course[cid] = float(total_percent)
 
-    attendance_by_course: dict[int, list[str]] = defaultdict(list)
-    if course_ids:
-        attendance_stmt = (
-            select(LmsClass.course_id, AttendanceRecord.status)
-            .join(AttendanceSession, AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id)
-            .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
-            .where(LmsClass.course_id.in_(course_ids))
+    # 4. Attendance summary per course & total
+    attendance_by_course: dict[int, tuple[int, int]] = {}  # cid -> (present_count, total_count)
+    attendance_stmt = (
+        select(
+            LmsClass.course_id,
+            func.count().filter(AttendanceRecord.status == "present").label("present"),
+            func.count().label("total"),
         )
-        if is_student:
-            attendance_stmt = attendance_stmt.where(AttendanceRecord.student_user_id == user_id)
-        elif class_id is not None:
-            attendance_stmt = attendance_stmt.where(AttendanceSession.class_id == class_id)
-        for course_id, status in (await db.execute(attendance_stmt)).all():
-            attendance_by_course[course_id].append(status)
+        .join(AttendanceSession, AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id)
+        .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
+        .where(LmsClass.course_id.in_(course_ids))
+    )
+    if is_student:
+        attendance_stmt = attendance_stmt.where(AttendanceRecord.student_user_id == user_id)
+    elif class_id is not None:
+        attendance_stmt = attendance_stmt.where(AttendanceSession.class_id == class_id)
+    attendance_stmt = attendance_stmt.group_by(LmsClass.course_id)
+    total_present_all = 0
+    total_attendance_all = 0
+    for cid, present, total in (await db.execute(attendance_stmt)).all():
+        p_val = present or 0
+        t_val = total or 0
+        attendance_by_course[cid] = (p_val, t_val)
+        total_present_all += p_val
+        total_attendance_all += t_val
 
-    grades_by_course: dict[int, list[float]] = defaultdict(list)
-    submission_dates: list[datetime] = []
-    if course_ids:
-        grade_stmt = (
-            select(
-                LmsCourseworkAssignment.course_id,
-                LmsCourseworkSubmission.marks_awarded,
-                LmsCourseworkAssignment.max_marks,
-                LmsCourseworkSubmission.submitted_at,
-            )
-            .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
-            .where(
-                LmsCourseworkAssignment.course_id.in_(course_ids),
-                LmsCourseworkAssignment.grades_released.is_(True),
-                LmsCourseworkSubmission.marks_awarded.is_not(None),
-                ~exists(select(LmsExam.exam_id).where(
-                    LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
-                    LmsExam.assessment_kind == "practice_test",
-                )),
-            )
+    # 5. Grade average per course
+    grade_avg_by_course: dict[int, float] = {}
+    grade_stmt = (
+        select(
+            LmsCourseworkAssignment.course_id,
+            func.avg(LmsCourseworkSubmission.marks_awarded * 100.0 / LmsCourseworkAssignment.max_marks).label("avg_grade"),
         )
-        if is_student:
-            grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
-        elif roster is not None:
-            grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
-        for course_id, marks, maximum, submitted_at in (await db.execute(grade_stmt)).all():
-            if float(maximum):
-                grades_by_course[course_id].append(round(float(marks) * 100 / float(maximum), 1))
-            if submitted_at:
-                submission_dates.append(_utc(submitted_at))
+        .select_from(LmsCourseworkSubmission)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
+        .where(
+            LmsCourseworkAssignment.course_id.in_(course_ids),
+            LmsCourseworkAssignment.grades_released.is_(True),
+            LmsCourseworkSubmission.marks_awarded.is_not(None),
+            LmsCourseworkAssignment.max_marks > 0,
+            ~exists(select(LmsExam.exam_id).where(
+                LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsExam.assessment_kind == "practice_test",
+            )),
+        )
+    )
+    if is_student:
+        grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif roster is not None:
+        grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
+    grade_stmt = grade_stmt.group_by(LmsCourseworkAssignment.course_id)
+    for cid, avg_grade in (await db.execute(grade_stmt)).all():
+        if avg_grade is not None:
+            grade_avg_by_course[cid] = round(float(avg_grade), 1)
+
+    # 6. All individual grade percentages for distribution & global average
+    all_grades_stmt = (
+        select(
+            (LmsCourseworkSubmission.marks_awarded * 100.0 / LmsCourseworkAssignment.max_marks).label("pct"),
+        )
+        .select_from(LmsCourseworkSubmission)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
+        .where(
+            LmsCourseworkAssignment.course_id.in_(course_ids),
+            LmsCourseworkAssignment.grades_released.is_(True),
+            LmsCourseworkSubmission.marks_awarded.is_not(None),
+            LmsCourseworkAssignment.max_marks > 0,
+            ~exists(select(LmsExam.exam_id).where(
+                LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsExam.assessment_kind == "practice_test",
+            )),
+        )
+    )
+    if is_student:
+        all_grades_stmt = all_grades_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif roster is not None:
+        all_grades_stmt = all_grades_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
+    all_grades = [round(float(pct), 1) for pct in (await db.scalars(all_grades_stmt)).all()]
 
     insights: list[AnalyticsCourseInsight] = []
-    all_attendance: list[str] = []
-    all_grades: list[float] = []
     progress_values: list[float] = []
     for course in courses:
-        student_count = len(enrolments[course.course_id])
-        progresses = progress_by_course[course.course_id]
+        student_count = enrolments_count.get(course.course_id, 0)
+        sum_prog = sum_progress_by_course.get(course.course_id, 0.0)
         expected = int(item_totals.get(course.course_id, 0)) * (1 if is_student else student_count)
-        progress = round(sum(progresses) / expected, 1) if expected else None
-        attendance_values = attendance_by_course[course.course_id]
-        attendance = _percentage(attendance_values.count("present"), len(attendance_values))
-        grades = grades_by_course[course.course_id]
-        grade = _average(grades)
-        if progress is not None: progress_values.append(progress)
-        all_attendance.extend(attendance_values)
-        all_grades.extend(grades)
+        progress = round(sum_prog / expected, 1) if expected else None
+        p_cnt, t_cnt = attendance_by_course.get(course.course_id, (0, 0))
+        attendance = _percentage(p_cnt, t_cnt)
+        grade = grade_avg_by_course.get(course.course_id)
+        if progress is not None:
+            progress_values.append(progress)
         insights.append(AnalyticsCourseInsight(
             course_id=course.course_id,
             course_code=course.code,
@@ -240,20 +285,82 @@ async def get_dashboard(
         ))
 
     overall_progress = _average(progress_values)
-    attendance_rate = _percentage(all_attendance.count("present"), len(all_attendance))
+    attendance_rate = _percentage(total_present_all, total_attendance_all)
     grade_average = _average(all_grades)
+
+    # 7. Recent activity dates & weekly trend points (optimised: fetch only last 8 weeks of timestamps)
+    weeks = _week_buckets()
+    earliest_date = weeks[0]
+    eight_weeks_ago = _real_datetime(earliest_date.year, earliest_date.month, earliest_date.day, tzinfo=timezone.utc)
     recent_cutoff = now - timedelta(days=14)
-    recent_events = sum(recent_cutoff <= value <= now for value in progress_dates + submission_dates)
+
+    progress_activity_dates: list[datetime] = []
+    completion_dates: list[datetime] = []
+    p_trend_stmt = (
+        select(
+            LmsLearningProgress.last_activity_at,
+            LmsLearningProgress.is_completed,
+            LmsLearningProgress.completed_at,
+        )
+        .select_from(LmsLearningProgress)
+        .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLearningProgress.learning_item_id)
+        .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
+        .join(CourseEnrollment, (CourseEnrollment.course_id == LmsModule.course_id)
+              & (CourseEnrollment.student_user_id == LmsLearningProgress.student_user_id)
+              & (CourseEnrollment.status == "enrolled"))
+        .where(
+            LmsModule.course_id.in_(course_ids),
+            LmsModule.status == "active",
+            LmsLearningItem.status == "published",
+            LmsLearningItem.is_required.is_(True),
+            or_(
+                LmsLearningProgress.last_activity_at >= eight_weeks_ago,
+                LmsLearningProgress.completed_at >= eight_weeks_ago,
+            ),
+        )
+    )
+    if is_student:
+        p_trend_stmt = p_trend_stmt.where(LmsLearningProgress.student_user_id == user_id)
+    elif roster is not None:
+        p_trend_stmt = p_trend_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
+    for act_at, is_comp, comp_at in (await db.execute(p_trend_stmt)).all():
+        if act_at:
+            progress_activity_dates.append(_utc(act_at))
+        if is_comp and comp_at:
+            completion_dates.append(_utc(comp_at))
+
+    submission_dates: list[datetime] = []
+    s_trend_stmt = (
+        select(LmsCourseworkSubmission.submitted_at)
+        .select_from(LmsCourseworkSubmission)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
+        .where(
+            LmsCourseworkAssignment.course_id.in_(course_ids),
+            LmsCourseworkSubmission.submitted_at >= eight_weeks_ago,
+            ~exists(select(LmsExam.exam_id).where(
+                LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id,
+                LmsExam.assessment_kind == "practice_test",
+            )),
+        )
+    )
+    if is_student:
+        s_trend_stmt = s_trend_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif roster is not None:
+        s_trend_stmt = s_trend_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
+    for sub_at in (await db.scalars(s_trend_stmt)).all():
+        if sub_at:
+            submission_dates.append(_utc(sub_at))
+
+    recent_events = sum(recent_cutoff <= dt <= now for dt in progress_activity_dates + submission_dates)
     activity_score = min(100.0, recent_events * (12 if is_student else 2.5))
     weighted = [(overall_progress, 0.40), (attendance_rate, 0.30), (grade_average, 0.20), (activity_score, 0.10)]
     available = [(value, weight) for value, weight in weighted if value is not None]
     engagement = round(sum(value * weight for value, weight in available) / sum(weight for _, weight in available), 1) if available else 0
     engagement_label = "Excellent" if engagement >= 85 else "Strong" if engagement >= 70 else "Developing" if engagement >= 50 else "Needs attention"
 
-    weeks = _week_buckets()
     activity_by_week = defaultdict(int)
     completion_by_week = defaultdict(int)
-    for value in progress_dates + submission_dates:
+    for value in progress_activity_dates + submission_dates:
         activity_by_week[_week_for(value)] += 1
     for value in completion_dates:
         completion_by_week[_week_for(value)] += 1
@@ -264,11 +371,11 @@ async def get_dashboard(
     ) for week in weeks]
 
     attendance_distribution = []
-    for label, status, tone in (("Present", "present", "green"), ("Absent", "absent", "red")):
-        value = all_attendance.count(status)
+    for label, status_key, tone in (("Present", "present", "green"), ("Absent", "absent", "red")):
+        val = total_present_all if status_key == "present" else (total_attendance_all - total_present_all)
         attendance_distribution.append(AnalyticsBreakdownItem(
-            label=label, value=value,
-            percentage=round(value * 100 / len(all_attendance), 1) if all_attendance else 0,
+            label=label, value=val,
+            percentage=round(val * 100 / total_attendance_all, 1) if total_attendance_all else 0,
             tone=tone,
         ))
 
@@ -301,12 +408,11 @@ async def get_dashboard(
         )) or 0)
         metrics = [
             AnalyticsMetric(key="progress", label="Overall progress", value=overall_progress or 0, display_value=_display_percent(overall_progress), hint="Across required course materials", tone="purple"),
-            AnalyticsMetric(key="attendance", label="Attendance", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{len(all_attendance)} recorded classes", tone="green"),
+            AnalyticsMetric(key="attendance", label="Attendance", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_attendance_all} recorded classes", tone="green"),
             AnalyticsMetric(key="grades", label="Grade average", value=grade_average or 0, display_value=_display_percent(grade_average), hint=f"{len(all_grades)} released results", tone="blue"),
             AnalyticsMetric(key="upcoming", label="Coming up", value=assignments_due + upcoming_classes, display_value=str(assignments_due + upcoming_classes), hint=f"{assignments_due} deadlines · {upcoming_classes} classes", tone="amber"),
         ]
     else:
-        student_ids = {student for values in enrolments.values() for student in values}
         unmarked_filters = [
             LmsCourseworkAssignment.course_id.in_(course_ids) if course_ids else False,
             LmsCourseworkSubmission.status.in_(["submitted", "expired"]),
@@ -322,7 +428,7 @@ async def get_dashboard(
         metrics = [
             AnalyticsMetric(key="students", label="Enrolled students", value=len(student_ids), display_value=str(len(student_ids)), hint=f"Unique students across {len(courses)} non-archived courses", tone="purple"),
             AnalyticsMetric(key="progress", label="Average progress", value=overall_progress or 0, display_value=_display_percent(overall_progress), hint="Required content completion", tone="blue"),
-            AnalyticsMetric(key="attendance", label="Attendance rate", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{len(all_attendance)} recorded attendances", tone="green"),
+            AnalyticsMetric(key="attendance", label="Attendance rate", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_attendance_all} recorded attendances", tone="green"),
             AnalyticsMetric(key="marking", label="Awaiting marking", value=unmarked, display_value=str(unmarked), hint="Submitted assignments and exams", tone="amber"),
         ]
 

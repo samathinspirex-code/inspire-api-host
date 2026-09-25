@@ -1,24 +1,29 @@
 """Admin home totals: five bounded reads, without loading rosters or full courses."""
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+_real_datetime = datetime
+_real_timezone = timezone
+
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import User
 from app.modules.cms.models import Program
 from app.modules.lms.models import (
-    AttendanceRecord, ClassStudent, CourseEnrollment, LecturerProfile, LmsClass,
-    LmsCourse, LmsLearningItem, LmsModule, OnlineMeeting, StudentProfile,
+    AttendanceRecord, AttendanceSession, ClassStudent, CourseEnrollment, LecturerProfile, LmsClass,
+    LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission, LmsLearningItem, LmsModule, OnlineMeeting, StudentProfile,
 )
 from app.modules.lms.schemas.dashboard import (
-    AdminDashboardCourse, AdminDashboardMeeting, AdminDashboardPopularCourse,
+    AdminDashboardActivity, AdminDashboardCourse, AdminDashboardMeeting, AdminDashboardPopularCourse,
     AdminDashboardResponse, ClassPopulationItem, CoursePopulationItem,
     StudentPopulationResponse,
 )
 
 
-def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+def _utc(value: datetime | str) -> datetime:
+    if isinstance(value, str):
+        value = _real_datetime.fromisoformat(value)
+    return value.replace(tzinfo=_real_timezone.utc) if value.tzinfo is None else value.astimezone(_real_timezone.utc)
 
 
 async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
@@ -48,11 +53,9 @@ async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
         count(OnlineMeeting, *upcoming).label("upcoming_classes"),
         count(CourseEnrollment, CourseEnrollment.status == "enrolled", CourseEnrollment.enrolled_at >= enrolment_period).label("new_enrolments_30d"),
         count(CourseEnrollment, CourseEnrollment.status == "enrolled", CourseEnrollment.enrolled_at >= previous_enrolment_period, CourseEnrollment.enrolled_at < enrolment_period).label("enrolments_previous_30d"),
+        select(func.count()).select_from(AttendanceRecord).scalar_subquery().label("attendance_records"),
+        select(func.count()).select_from(AttendanceRecord).where(AttendanceRecord.status == "present").scalar_subquery().label("attendance_present"),
     ))).one()
-    attendance = (await db.execute(select(
-        func.count().label("total"),
-        func.count().filter(AttendanceRecord.status == "present").label("present"),
-    ).select_from(AttendanceRecord))).one()
 
     meetings = (await db.execute(
         select(OnlineMeeting.meeting_id, OnlineMeeting.title, OnlineMeeting.start_time,
@@ -62,7 +65,12 @@ async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
         .where(*upcoming).order_by(OnlineMeeting.start_time, OnlineMeeting.meeting_id).limit(5)
     )).all()
     courses = (await db.execute(
-        select(LmsCourse.course_id, LmsCourse.code, LmsCourse.title, LmsCourse.status)
+        select(
+            LmsCourse.course_id, LmsCourse.code, LmsCourse.title, LmsCourse.status, LmsCourse.updated_at,
+            func.count(CourseEnrollment.student_user_id).filter(CourseEnrollment.status == "enrolled").label("enrolments"),
+        )
+        .outerjoin(CourseEnrollment, CourseEnrollment.course_id == LmsCourse.course_id)
+        .group_by(LmsCourse.course_id, LmsCourse.code, LmsCourse.title, LmsCourse.status, LmsCourse.created_at, LmsCourse.updated_at)
         .order_by(LmsCourse.created_at.desc(), LmsCourse.course_id.desc()).limit(5)
     )).all()
     popular_courses = (await db.execute(
@@ -76,16 +84,69 @@ async def get_admin_dashboard(db: AsyncSession) -> AdminDashboardResponse:
         .order_by(func.count(CourseEnrollment.student_user_id).desc(), LmsCourse.title)
         .limit(5)
     )).all()
+
+    activity_rows = (await db.execute(text("""
+        SELECT activity_type, message, occurred_at FROM (
+          SELECT 'enrolment' AS activity_type,
+                 COALESCE(u.full_name, 'A student') || ' enrolled in ' || c.title AS message,
+                 e.enrolled_at AS occurred_at
+          FROM lms_course_enrollments e
+          JOIN users u ON u.user_id=e.student_user_id
+          JOIN lms_courses c ON c.course_id=e.course_id
+          WHERE e.status='enrolled' AND e.enrolled_at IS NOT NULL
+          UNION ALL
+          SELECT 'submission' AS activity_type,
+                 COALESCE(u.full_name, 'A student') || ' submitted ' || a.title AS message,
+                 s.submitted_at AS occurred_at
+          FROM lms_coursework_submissions s
+          JOIN users u ON u.user_id=s.student_user_id
+          JOIN lms_coursework_assignments a ON a.assignment_id=s.assignment_id
+          WHERE s.submitted_at IS NOT NULL
+          UNION ALL
+          SELECT 'course' AS activity_type,
+                 'Course “' || c.title || '” is ' || c.status AS message,
+                 c.updated_at AS occurred_at
+          FROM lms_courses c
+          WHERE c.updated_at IS NOT NULL
+          UNION ALL
+          SELECT 'lecturer' AS activity_type,
+                 COALESCE(u.full_name, 'A lecturer') || ' joined as lecturer' AS message,
+                 p.created_at AS occurred_at
+          FROM lms_lecturer_profiles p
+          JOIN users u ON u.user_id=p.user_id
+          WHERE p.created_at IS NOT NULL
+          UNION ALL
+          SELECT 'attendance' AS activity_type,
+                 CAST(COUNT(CASE WHEN r.status='present' THEN 1 END) AS VARCHAR) || ' students attended ' || cl.name AS message,
+                 s.synced_at AS occurred_at
+          FROM lms_attendance_sessions s
+          JOIN lms_classes cl ON cl.class_id=s.class_id
+          LEFT JOIN lms_attendance_records r ON r.attendance_session_id=s.attendance_session_id
+          WHERE s.synced_at IS NOT NULL
+          GROUP BY s.attendance_session_id, s.synced_at, cl.name
+        ) feed
+        WHERE occurred_at IS NOT NULL
+        ORDER BY occurred_at DESC
+        LIMIT 6
+    """))).mappings().all()
+    activity = [AdminDashboardActivity(
+        activity_type=row["activity_type"], message=row["message"], occurred_at=_utc(row["occurred_at"]),
+    ) for row in activity_rows]
+
+    totals_dict = dict(totals._mapping)
+    del totals_dict["attendance_present"]
+    del totals_dict["attendance_records"]
     return AdminDashboardResponse(
-        **totals._mapping,
-        attendance_rate=round(attendance.present * 100 / attendance.total, 1) if attendance.total else None,
-        attendance_records=attendance.total,
+        **totals_dict,
+        attendance_rate=round(totals.attendance_present * 100 / totals.attendance_records, 1) if totals.attendance_records else None,
+        attendance_records=totals.attendance_records,
         popular_course=AdminDashboardPopularCourse.model_validate(popular_courses[0]) if popular_courses else None,
         popular_courses=[AdminDashboardPopularCourse.model_validate(row) for row in popular_courses],
         upcoming_meetings=[AdminDashboardMeeting(
             **{**row._mapping, "start_time": _utc(row.start_time), "end_time": _utc(row.end_time)}
         ) for row in meetings],
         recent_courses=[AdminDashboardCourse.model_validate(row) for row in courses],
+        recent_activity=activity[:6],
         generated_at=now,
     )
 

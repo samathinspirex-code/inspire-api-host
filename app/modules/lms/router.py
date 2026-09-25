@@ -79,6 +79,7 @@ from app.modules.lms.schemas import (
     MeetingCreate,
     MeetingItem,
     MeetingListResponse,
+    MeetingScheduleResult,
     MeetingUpdate,
     SchedulableClassListResponse,
     AttendanceRecordItem,
@@ -1490,12 +1491,12 @@ async def list_schedulable_classes(
     return await meeting_service.list_schedulable_classes(db, current_user.user_id, role)
 
 
-@router.post("/meetings", response_model=MeetingItem, status_code=201)
+@router.post("/meetings", response_model=MeetingScheduleResult, status_code=201)
 async def create_online_meeting(
     payload: MeetingCreate,
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
-) -> MeetingItem:
+) -> MeetingScheduleResult:
     role = service.resolve_role(current_user.access)
     return await meeting_service.create_meeting(db, payload, current_user.user_id, role)
 

@@ -197,8 +197,6 @@ async def update_assignment(
         raise NotFoundError("Assignment not found")
     assignment = context[0]
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
-    if assignment.status == "published":
-        raise ValidationError("Active assignments cannot be edited")
     if assignment.submission_type == "mcq" and payload.submission_type != "mcq":
         raise ValidationError("A multiple-choice assignment cannot change to another type")
     if payload.course_id != assignment.course_id:
@@ -208,7 +206,7 @@ async def update_assignment(
             LmsCourseworkSubmission.assignment_id == assignment_id
         )
     ) or 0)
-    protected_fields = ("course_id", "target_type", "target_id", "assignment_type", "duration_minutes")
+    protected_fields = ("course_id", "target_type", "target_id", "assignment_type", "submission_type", "duration_minutes")
     if submission_count and any(getattr(assignment, field) != getattr(payload, field) for field in protected_fields):
         raise ValidationError("Course, audience, and timing cannot be changed after students have started")
     if payload.target_type == "class":
@@ -234,8 +232,6 @@ async def delete_assignment(db: AsyncSession, assignment_id: int, user_id: int) 
         raise NotFoundError("Assignment not found")
     assignment = context[0]
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
-    if assignment.status == "published":
-        raise ValidationError("Active assignments cannot be deleted")
     submission_count = int(await db.scalar(
         select(func.count()).select_from(LmsCourseworkSubmission).where(
             LmsCourseworkSubmission.assignment_id == assignment_id

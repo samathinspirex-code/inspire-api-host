@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AdminDashboardMeeting(BaseModel):
@@ -21,6 +21,13 @@ class AdminDashboardCourse(BaseModel):
     code: str
     title: str
     status: str
+    enrolments: int = 0
+
+
+class AdminDashboardActivity(BaseModel):
+    activity_type: str
+    message: str
+    occurred_at: datetime
 
 
 class AdminDashboardPopularCourse(BaseModel):
@@ -74,6 +81,7 @@ class AdminDashboardResponse(BaseModel):
     popular_courses: list[AdminDashboardPopularCourse]
     upcoming_meetings: list[AdminDashboardMeeting]
     recent_courses: list[AdminDashboardCourse]
+    recent_activity: list[AdminDashboardActivity] = Field(default_factory=list)
     generated_at: datetime
 
 

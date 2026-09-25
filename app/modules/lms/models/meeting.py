@@ -30,6 +30,8 @@ class OnlineMeeting(Base):
     class_id: Mapped[int] = mapped_column(
         ForeignKey("lms_classes.class_id", ondelete="CASCADE"), nullable=False
     )
+    audience_type: Mapped[str] = mapped_column(String(20), nullable=False, default="class")
+    audience_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lecturer_user_id: Mapped[int] = mapped_column(
         ForeignKey("lms_lecturer_profiles.user_id", ondelete="CASCADE"), nullable=False
     )

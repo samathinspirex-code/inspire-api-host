@@ -2,7 +2,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.modules.cms.models import Program
@@ -30,6 +30,15 @@ class StudentCalendarScopeTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.engine.dispose)
         for model in [Program, LmsCourse, LmsClass, CourseEnrollment, ClassStudent, OnlineMeeting]:
             model.__table__.create(self.engine)
+        # A meeting can now be sent to several classes, and the audience table is
+        # created by SQL migration rather than by a model.
+        with self.engine.begin() as connection:
+            connection.execute(text("""
+                CREATE TABLE lms_meeting_audience_classes (
+                    meeting_id BIGINT NOT NULL, class_id BIGINT NOT NULL,
+                    PRIMARY KEY (meeting_id, class_id)
+                )
+            """))
 
         now = datetime.now(timezone.utc)
         with Session(self.engine) as db:
@@ -68,6 +77,11 @@ class StudentCalendarScopeTests(unittest.IsolatedAsyncioTestCase):
                 self._meeting(8, 6, "scheduled", now + timedelta(days=1)),
                 self._meeting(9, 1, "scheduled", now - timedelta(days=3)),
             ])
+            db.commit()
+            for meeting_id, class_id in [(1, 1), (2, 1), (3, 1), (4, 2), (5, 3), (6, 4), (7, 5), (8, 6), (9, 1)]:
+                db.execute(text(
+                    "INSERT INTO lms_meeting_audience_classes (meeting_id, class_id) VALUES (:m, :c)"
+                ), {"m": meeting_id, "c": class_id})
             db.commit()
 
     @staticmethod

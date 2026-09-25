@@ -52,6 +52,8 @@ from app.modules.lms.schemas.meeting import (
     MeetingItem,
     MeetingListResponse,
     MeetingOptions,
+    MeetingRecurrence,
+    MeetingScheduleResult,
     MeetingUpdate,
     SchedulableClassItem,
     SchedulableClassListResponse,

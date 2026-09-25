@@ -34,6 +34,30 @@ class MeetingOptions(BaseModel):
         return self
 
 
+class MeetingRecurrence(BaseModel):
+    """How often a live class repeats.
+
+    Each occurrence becomes its own Zoom meeting so the host pool, attendance
+    import and recording transfer keep working per session.
+    """
+
+    frequency: Literal["daily", "weekly"]
+    interval: int = Field(1, ge=1, le=12)
+    # Monday is 0 to match datetime.weekday(). Empty means the start day only.
+    weekdays: list[int] = Field(default_factory=list, max_length=7)
+    occurrences: int = Field(..., ge=2, le=60)
+
+    @model_validator(mode="after")
+    def validate_recurrence(self):
+        weekdays = sorted({day for day in self.weekdays})
+        if any(day < 0 or day > 6 for day in weekdays):
+            raise ValueError("Repeat days must be between Monday (0) and Sunday (6)")
+        if self.frequency == "daily" and weekdays:
+            raise ValueError("A daily repeat cannot also select weekdays")
+        self.weekdays = weekdays
+        return self
+
+
 class MeetingSchedule(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=5000)
@@ -54,8 +78,22 @@ class MeetingSchedule(BaseModel):
 
 
 class MeetingCreate(MeetingSchedule):
-    class_id: int = Field(..., gt=0)
+    class_id: int | None = Field(None, gt=0)
+    class_ids: list[int] = Field(default_factory=list, max_length=200)
+    audience_type: Literal["class", "classes", "school", "all"] = "class"
     provider: Literal["zoom"] = "zoom"
+    recurrence: MeetingRecurrence | None = None
+
+    @model_validator(mode="after")
+    def validate_audience(self):
+        ids = list(dict.fromkeys(([self.class_id] if self.class_id else []) + self.class_ids))
+        if not ids:
+            raise ValueError("Select at least one class")
+        self.class_id = ids[0]
+        self.class_ids = ids
+        if self.audience_type == "class" and len(ids) != 1:
+            raise ValueError("A single-class meeting must contain one class")
+        return self
 
 
 class MeetingUpdate(MeetingSchedule):
@@ -67,6 +105,9 @@ class MeetingItem(BaseModel):
     class_id: int
     class_code: str
     class_name: str
+    class_ids: list[int] = Field(default_factory=list)
+    audience_type: Literal["class", "classes", "school", "all"] = "class"
+    audience_label: str | None = None
     course_code: str
     course_title: str
     title: str
@@ -85,6 +126,13 @@ class MeetingItem(BaseModel):
     created_at: datetime
 
 
+class MeetingScheduleResult(BaseModel):
+    """Every live class created by one scheduling action."""
+
+    data: list[MeetingItem]
+    skipped: list[str] = Field(default_factory=list)
+
+
 class MeetingListResponse(BaseModel):
     data: list[MeetingItem]
 
@@ -98,6 +146,8 @@ class SchedulableClassItem(BaseModel):
     timezone: str
     status: str
     student_count: int
+    school_id: int | None = None
+    school_name: str | None = None
 
 
 class SchedulableClassListResponse(BaseModel):
