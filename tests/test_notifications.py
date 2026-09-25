@@ -32,6 +32,33 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(message["TrackOpens"], "disabled")
         self.assertEqual(message["CustomID"], "event-1")
 
+    def test_online_class_email_uses_branded_meeting_template(self):
+        payload = build_notification_payload(
+            "student@example.com",
+            "Samath",
+            "Online class scheduled: Market Research",
+            "FT-B-L3-M5 · Sep_2026 — 25 September 2026 at 11:19 AM.",
+            "https://lms.example.com/?view=meetings",
+            "meeting-1",
+            notification_type="class_schedule",
+        )
+        message = payload["Messages"][0]
+        self.assertEqual(message["Subject"], "Online class scheduled · Market Research")
+        self.assertIn("INSPIRE", message["HTMLPart"])
+        self.assertIn("Class details", message["HTMLPart"])
+        self.assertIn("View online class", message["HTMLPart"])
+        self.assertIn("?view=meetings", message["HTMLPart"])
+
+    def test_cancelled_class_email_uses_cancelled_action(self):
+        payload = build_notification_payload(
+            "student@example.com", "Samath", "Online class cancelled: Market Research",
+            "This class will no longer take place.", None, "meeting-2",
+            notification_type="class_schedule",
+        )
+        message = payload["Messages"][0]
+        self.assertIn("View class update", message["HTMLPart"])
+        self.assertIn("#B42318", message["HTMLPart"])
+
     def test_admin_audiences_do_not_require_course_or_class_ids(self):
         common = {
             "title": "Staff notice", "message": "Review the latest LMS update.",

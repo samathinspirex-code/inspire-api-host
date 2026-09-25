@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
 from app.modules.lms.models import (
+    ClassLecturer,
     ClassStudent,
     CourseEnrollment,
     CourseLecturer,
     LmsClass,
+    LmsCourse,
     LmsCourseworkAssignment,
     LmsExam,
     LmsLearningItem,
@@ -60,14 +62,36 @@ def _discussion_response(discussion, author_name, author_email, is_lecturer):
 
 
 async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, role: str) -> None:
-    if await CourseRepository(db).get(course_id) is None:
+    course = await CourseRepository(db).get(course_id)
+    if course is None:
         raise NotFoundError(f"Course {course_id} not found")
     if role in {"SUPER_ADMIN", "ADMIN"}:
         return
     if role == "LECTURER":
         relation = await db.get(CourseLecturer, (course_id, user_id))
         if relation is None:
-            raise ForbiddenError("This course is not assigned to your lecturer profile")
+            # Older class assignments may predate the automatic Course-level
+            # lecturer link. Independent class copies can also open their source
+            # template (or be opened through it), so accept either side of that
+            # relationship when the lecturer is assigned to the intake.
+            related_course_ids = {course_id}
+            if course.source_master_course_id is not None:
+                related_course_ids.add(course.source_master_course_id)
+            class_relation = await db.scalar(
+                select(ClassLecturer.class_id)
+                .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+                .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+                .where(
+                    or_(
+                        LmsClass.course_id.in_(related_course_ids),
+                        LmsCourse.source_master_course_id.in_(related_course_ids),
+                    ),
+                    ClassLecturer.lecturer_user_id == user_id,
+                )
+                .limit(1)
+            )
+            if class_relation is None:
+                raise ForbiddenError("This course is not assigned to your lecturer profile")
     elif role == "STUDENT":
         relation = await db.get(CourseEnrollment, (course_id, user_id))
         if relation is None or relation.status != "enrolled":

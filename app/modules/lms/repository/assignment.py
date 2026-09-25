@@ -22,7 +22,7 @@ class AssignmentRepository:
     async def list_course_students(self, course_id: int):
         stmt = (
             select(User, StudentProfile, CourseEnrollment)
-            .join(StudentProfile, StudentProfile.user_id == User.user_id)
+            .outerjoin(StudentProfile, StudentProfile.user_id == User.user_id)
             .join(CourseEnrollment, CourseEnrollment.student_user_id == User.user_id)
             .where(CourseEnrollment.course_id == course_id, CourseEnrollment.status == "enrolled")
             .order_by(User.full_name)
@@ -63,7 +63,7 @@ class AssignmentRepository:
     async def list_course_lecturers(self, course_id: int):
         stmt = (
             select(User, LecturerProfile, CourseLecturer)
-            .join(LecturerProfile, LecturerProfile.user_id == User.user_id)
+            .outerjoin(LecturerProfile, LecturerProfile.user_id == User.user_id)
             .join(CourseLecturer, CourseLecturer.lecturer_user_id == User.user_id)
             .where(CourseLecturer.course_id == course_id)
             .order_by(User.full_name)
@@ -90,7 +90,7 @@ class AssignmentRepository:
     async def list_class_students(self, class_id: int):
         stmt = (
             select(User, StudentProfile, ClassStudent)
-            .join(StudentProfile, StudentProfile.user_id == User.user_id)
+            .outerjoin(StudentProfile, StudentProfile.user_id == User.user_id)
             .join(ClassStudent, ClassStudent.student_user_id == User.user_id)
             .where(ClassStudent.class_id == class_id)
             .order_by(User.full_name)
@@ -114,7 +114,7 @@ class AssignmentRepository:
     async def list_class_lecturers(self, class_id: int):
         stmt = (
             select(User, LecturerProfile, ClassLecturer)
-            .join(LecturerProfile, LecturerProfile.user_id == User.user_id)
+            .outerjoin(LecturerProfile, LecturerProfile.user_id == User.user_id)
             .join(ClassLecturer, ClassLecturer.lecturer_user_id == User.user_id)
             .where(ClassLecturer.class_id == class_id)
             .order_by(User.full_name)

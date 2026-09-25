@@ -11,14 +11,14 @@ from app.modules.lms.student_excel_import import parse_excel_students
 
 
 def _student_item(user, profile, relation, status: str) -> AssignmentPersonItem:
-    assigned_at = getattr(relation, "enrolled_at", None) or relation.assigned_at
+    assigned_at = getattr(relation, "enrolled_at", None) or getattr(relation, "assigned_at", None)
     return AssignmentPersonItem(
         user_id=user.user_id,
         full_name=user.full_name or "",
         email=user.email,
-        reference_number=profile.student_number,
-        secondary_label=profile.phone,
-        profile_image_url=profile.profile_image_url,
+        reference_number=(profile.student_number if profile and profile.student_number else "—"),
+        secondary_label=profile.phone if profile else None,
+        profile_image_url=profile.profile_image_url if profile else None,
         status=status,
         assigned_at=assigned_at,
     )
@@ -29,9 +29,9 @@ def _lecturer_item(user, profile, relation) -> AssignmentPersonItem:
         user_id=user.user_id,
         full_name=user.full_name or "",
         email=user.email,
-        reference_number=profile.staff_number,
-        secondary_label=profile.job_title,
-        profile_image_url=profile.profile_image_url,
+        reference_number=(profile.staff_number if profile and profile.staff_number else "—"),
+        secondary_label=profile.job_title if profile else None,
+        profile_image_url=profile.profile_image_url if profile else None,
         status="assigned",
         assigned_at=relation.assigned_at,
     )
@@ -343,7 +343,7 @@ async def assign_class_lecturer(db: AsyncSession, class_id: int, user_id: int, a
     people = PeopleRepository(db)
     user = await people.get_user(user_id)
     profile = await people.get_lecturer_profile(user_id)
-    if user is None or profile is None:
+    if user is None:
         raise NotFoundError(f"Lecturer {user_id} not found")
     if not user.is_active:
         raise ValidationError("Inactive lecturers cannot be assigned")
@@ -368,7 +368,6 @@ async def assign_class_lecturers_bulk(db: AsyncSession, class_id: int, user_ids:
         user.user_id: user
         for user in (await db.execute(
             select(User)
-            .join(LecturerProfile, LecturerProfile.user_id == User.user_id)
             .where(User.user_id.in_(unique_user_ids))
         )).scalars()
     }

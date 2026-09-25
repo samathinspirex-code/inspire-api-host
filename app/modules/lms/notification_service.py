@@ -258,7 +258,15 @@ async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, 
     now = now or utc_now(); sent = failed = 0
     rows = (await db.execute(select(LmsNotification, User).join(User, User.user_id == LmsNotification.user_id).where(LmsNotification.email_enabled.is_(True), LmsNotification.email_status.in_(("pending", "failed")), LmsNotification.email_attempts < 3, LmsNotification.scheduled_for <= now).order_by(LmsNotification.scheduled_for).limit(limit))).all()
     for item, user in rows:
-        result = await send_notification_email(user.email, user.full_name or user.email, item.title, item.message, item.action_url, item.event_key)
+        result = await send_notification_email(
+            user.email,
+            user.full_name or user.email,
+            item.title,
+            item.message,
+            item.action_url,
+            item.event_key,
+            notification_type=item.notification_type,
+        )
         item.email_attempts += 1
         if result.sent:
             item.email_status = "sent"; item.email_sent_at = utc_now(); item.email_provider_id = result.provider_message_id; item.email_error = None; sent += 1

@@ -15,8 +15,8 @@ class AssignmentPersonItem(BaseModel):
     user_id: int
     full_name: str
     email: str
-    reference_number: str
-    secondary_label: str | None
+    reference_number: str | None = "—"
+    secondary_label: str | None = None
     profile_image_url: str | None = None
     status: str
     assigned_at: datetime
