@@ -14,7 +14,7 @@ class CourseLecturer(Base):
         ForeignKey("lms_courses.course_id", ondelete="CASCADE"), primary_key=True
     )
     lecturer_user_id: Mapped[int] = mapped_column(
-        ForeignKey("lms_lecturer_profiles.user_id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
     assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -28,7 +28,7 @@ class ClassLecturer(Base):
         ForeignKey("lms_classes.class_id", ondelete="CASCADE"), primary_key=True
     )
     lecturer_user_id: Mapped[int] = mapped_column(
-        ForeignKey("lms_lecturer_profiles.user_id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
     assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -42,7 +42,7 @@ class CourseEnrollment(Base):
         ForeignKey("lms_courses.course_id", ondelete="CASCADE"), primary_key=True
     )
     student_user_id: Mapped[int] = mapped_column(
-        ForeignKey("lms_student_profiles.user_id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="enrolled")
     enrolled_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
@@ -60,7 +60,7 @@ class ClassStudent(Base):
         ForeignKey("lms_classes.class_id", ondelete="CASCADE"), primary_key=True
     )
     student_user_id: Mapped[int] = mapped_column(
-        ForeignKey("lms_student_profiles.user_id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
     )
     assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
