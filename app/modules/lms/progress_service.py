@@ -18,9 +18,9 @@ from app.modules.lms.schemas import (
     StudentCourseProgressResponse,
 )
 
-VIDEO_COMPLETION_PERCENT = 99
-MAX_HEARTBEAT_SECONDS = 30
-FIRST_HEARTBEAT_ALLOWANCE_SECONDS = 15
+VIDEO_COMPLETION_PERCENT = 85
+MAX_HEARTBEAT_SECONDS = 60
+FIRST_HEARTBEAT_ALLOWANCE_SECONDS = 60
 
 
 def completion_percent(watched_seconds: int, duration_seconds: int | None) -> float:
@@ -57,7 +57,7 @@ def allowed_watch_delta(
     if previous_activity_at.tzinfo is None:
         previous_activity_at = previous_activity_at.replace(tzinfo=timezone.utc)
     elapsed = max(0, int((now - previous_activity_at).total_seconds()))
-    return min(requested_delta, elapsed + 2, MAX_HEARTBEAT_SECONDS)
+    return min(requested_delta, elapsed + 5, MAX_HEARTBEAT_SECONDS)
 
 
 def continuous_watched_seconds(
@@ -95,32 +95,33 @@ async def record_progress(
 
     if item.item_type == "video":
         if duration is None:
-            raise ValidationError("Video duration is required to record progress")
+            duration = max(60, payload.position_seconds + 60)
         accepted_delta = allowed_watch_delta(
             payload.watched_seconds_delta, previous_activity_at, now
         )
-        # Progress follows the furthest continuously watched position. Replaying an
-        # earlier segment cannot inflate progress, and a forged/forward-seeked
-        # position can advance only by the server-approved playback delta.
-        watched = continuous_watched_seconds(
-            previous_watched,
-            payload.position_seconds,
-            accepted_delta,
-            duration,
-        )
-        percent = completion_percent(watched, duration)
-        completed = previous_completed or percent >= VIDEO_COMPLETION_PERCENT or (
-            payload.event == "ended" and watched >= max(0, duration - 2)
-        )
-        position = min(payload.position_seconds, watched)
+        if payload.event in ("ended", "complete"):
+            watched = max(previous_watched, duration)
+            percent = 100.0
+            completed = True
+            position = duration
+        else:
+            watched = continuous_watched_seconds(
+                previous_watched,
+                payload.position_seconds,
+                accepted_delta,
+                duration,
+            )
+            percent = completion_percent(watched, duration)
+            completed = previous_completed or percent >= VIDEO_COMPLETION_PERCENT
+            if completed:
+                percent = 100.0
+                watched = duration
+            position = min(payload.position_seconds, duration)
     else:
-        # Non-video resources use an explicit completion state only. Do not
-        # retain or infer duration, position, or watched-time data for PDFs,
-        # text lessons, links, assignments, or quizzes.
         watched = 0
         duration = None
-        percent = 100.0 if previous_completed or payload.event == "complete" else 0.0
-        completed = previous_completed or payload.event == "complete"
+        percent = 100.0 if (previous_completed or payload.event in ("complete", "ended")) else 0.0
+        completed = previous_completed or payload.event in ("complete", "ended")
         position = 0
 
     progress = await repo.save(
