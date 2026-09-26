@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     MAILJET_SECRET_KEY: str = ""
     MAILJET_FROM_EMAIL: str = ""
     MAILJET_FROM_NAME: str = "Inspire College"
+    MAILJET_SMTP_FALLBACK_ENABLED: bool = True
+    MAILJET_SMTP_HOST: str = "in-v3.mailjet.com"
+    MAILJET_SMTP_PORT: int = 587
     PUBLIC_FORM_FROM_EMAIL: str = "enrol@inspire.college"
     PUBLIC_FORM_FROM_NAME: str = "Inspire College"
     PUBLIC_FORM_RECIPIENT_EMAIL: str = "enrol@inspire.college"
