@@ -273,9 +273,9 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_invitation_persists_and_emails_configured_expiry(self):
         now = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
-        expiry = now + timedelta(days=7)
+        expiry = now + timedelta(days=5)
         default_minutes = Settings.model_fields["AUTHENTICATOR_SETUP_EXPIRE_MINUTES"].default
-        self.assertEqual(default_minutes, 10080)
+        self.assertEqual(default_minutes, 7200)
         user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True, access_levels=[])
         users = SimpleNamespace(get=AsyncMock(return_value=user))
         tokens = SimpleNamespace(create_setup_token=AsyncMock())
@@ -296,7 +296,7 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sender.await_args.args[3], expiry)
         sessions.revoke_all_for_user.assert_awaited_once_with(25)
         for render in [build_invitation_html, build_invitation_text]:
-            self.assertIn("07 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
+            self.assertIn("05 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
 
     async def test_setup_link_is_valid_until_two_day_boundary_and_stays_single_use(self):
         issued = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
