@@ -47,6 +47,7 @@ class CrmLead(Base):
     address_line2: Mapped[Optional[str]] = mapped_column(String(255))
     country: Mapped[Optional[str]] = mapped_column(String(100))
     social_lead_id: Mapped[Optional[str]] = mapped_column(String(100))
+    external_record_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

@@ -1,3 +1,4 @@
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
@@ -6,6 +7,8 @@ from app.modules.auth.models import User
 from app.modules.auth import service as auth_service
 from app.modules.auth.repository import AuthenticatorRepository
 from app.modules.auth.schemas import AuthenticatorInvitationResponse
+from app.modules.crm.models.activity import CrmActivity
+from app.modules.crm.models.lead import CrmLead
 from app.modules.user_management.repository import UserManagementRepository
 from app.modules.user_management.schemas import UserCreate, UserDetail, UserListResponse, UserUpdate
 
@@ -66,6 +69,19 @@ async def update_user(db: AsyncSession, user_id: int, payload: UserUpdate) -> Us
 
     access_levels = await repo.get_access_levels_by_keys(payload.access)
     user = await repo.update(user, payload.name, email, access_levels)
+    # Lead assignments reference the registered account ID. Keep the denormalized
+    # display name synchronized whenever that account is renamed.
+    await db.execute(
+        update(CrmLead)
+        .where(CrmLead.assigned_counsellor_id == user_id)
+        .values(counsellor_name=payload.name)
+    )
+    await db.execute(
+        update(CrmActivity)
+        .where(CrmActivity.counsellor_id == user_id)
+        .values(counsellor_name=payload.name)
+    )
+    await db.commit()
     configured = await AuthenticatorRepository(db).configured_user_ids([user.user_id])
     return _to_detail(user, user.user_id in configured)
 
@@ -87,4 +103,10 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
     if user is None:
         raise NotFoundError(f"User {user_id} not found")
 
+    await db.execute(
+        update(CrmLead)
+        .where(CrmLead.assigned_counsellor_id == user_id)
+        .values(assigned_counsellor_id=None, counsellor_name=None)
+    )
+    await db.commit()
     await repo.delete(user)

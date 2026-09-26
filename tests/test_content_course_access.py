@@ -31,17 +31,18 @@ class LecturerCourseAccessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ForbiddenError):
                 await content_service._ensure_course_access(db, 8, 17, "LECTURER")
 
-    async def test_direct_course_lecturer_does_not_need_class_fallback(self):
+    async def test_stale_direct_course_link_does_not_preserve_access(self):
         db = SimpleNamespace(
             get=AsyncMock(return_value=object()),
-            scalar=AsyncMock(),
+            scalar=AsyncMock(return_value=None),
         )
         course_repo = SimpleNamespace(
             get=AsyncMock(return_value=SimpleNamespace(source_master_course_id=None))
         )
         with patch.object(content_service, "CourseRepository", return_value=course_repo):
-            await content_service._ensure_course_access(db, 8, 17, "LECTURER")
-        db.scalar.assert_not_awaited()
+            with self.assertRaises(ForbiddenError):
+                await content_service._ensure_course_access(db, 8, 17, "LECTURER")
+        db.scalar.assert_awaited_once()
 
     async def test_class_copy_also_checks_its_master_course_assignment(self):
         db = SimpleNamespace(

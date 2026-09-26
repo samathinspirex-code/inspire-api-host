@@ -46,6 +46,7 @@ from app.modules.auth.security import (
 
 
 _DUMMY_PASSWORD_HASH = hash_password("invalid-password-timing-value")
+CMS_ACCESS_KEYS = {"CMS", "USER_MANAGEMENT", "CRM", "COUNSELLOR"}
 
 
 def _user_access_keys(user: User) -> list[str]:
@@ -53,7 +54,7 @@ def _user_access_keys(user: User) -> list[str]:
 
 
 def _password_eligible(user: User) -> bool:
-    return bool(set(_user_access_keys(user)) & {"CMS", "LMS", "USER_MANAGEMENT"})
+    return bool(set(_user_access_keys(user)) & (CMS_ACCESS_KEYS | {"LMS"}))
 
 
 async def _issue_tokens(db: AsyncSession, user: User) -> TokenResponse:
@@ -198,7 +199,7 @@ async def request_password_reset(
     portal_allowed = (
         portal == "lms" and "LMS" in access
     ) or (
-        portal == "cms" and bool(access & {"CMS", "USER_MANAGEMENT"})
+        portal == "cms" and bool(access & CMS_ACCESS_KEYS)
     )
     if not portal_allowed:
         return generic
@@ -252,7 +253,7 @@ async def issue_student_password_setup_invitation(
         destinations = [("LMS", lms_url)]
     else:
         destinations = []
-        if access & {"CMS", "USER_MANAGEMENT"} and not is_local(settings.CMS_UI_URL):
+        if access & CMS_ACCESS_KEYS and not is_local(settings.CMS_UI_URL):
             destinations.append(("CMS", settings.CMS_UI_URL))
         if "LMS" in access or not destinations:
             destinations.append(("LMS", lms_url))
@@ -291,7 +292,7 @@ async def issue_authenticator_setup_invitation(
     user = await UserRepository(db).get(user_id)
     access = set(_user_access_keys(user))
     destinations = []
-    if access & {"CMS", "USER_MANAGEMENT"}:
+    if access & CMS_ACCESS_KEYS:
         destinations.append(("CMS", settings.CMS_UI_URL))
     if "LMS" in access:
         destinations.append(("LMS", settings.LMS_UI_URL))

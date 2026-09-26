@@ -20,6 +20,12 @@ class CrmActivityCreate(BaseModel):
     content: str
 
 
+class CrmCounsellorOut(BaseModel):
+    user_id: int
+    name: str
+    email: str
+
+
 class CrmLeadOut(BaseModel):
     lead_id: int
     full_name: str
@@ -54,6 +60,7 @@ class CrmLeadOut(BaseModel):
     address_line2: Optional[str] = None
     country: Optional[str] = None
     social_lead_id: Optional[str] = None
+    external_record_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     activities: list[CrmActivityOut] = []
@@ -113,6 +120,7 @@ class CrmLeadCreate(BaseModel):
     address_line2: Optional[str] = None
     country: Optional[str] = None
     social_lead_id: Optional[str] = None
+    external_record_id: Optional[str] = None
 
 
 class CrmLeadUpdate(BaseModel):
@@ -146,6 +154,7 @@ class CrmLeadUpdate(BaseModel):
     address_line2: Optional[str] = None
     country: Optional[str] = None
     social_lead_id: Optional[str] = None
+    external_record_id: Optional[str] = None
 
 
 class CrmStageUpdate(BaseModel):
@@ -170,6 +179,7 @@ class CrmPipelineResponse(BaseModel):
 
 
 class CrmDashboardStats(BaseModel):
+    total_leads: int = 0
     new_leads_30d: int
     awaiting_contact: int
     in_progress: int
@@ -178,6 +188,7 @@ class CrmDashboardStats(BaseModel):
     conversion_rate: float
     followups_today: int
     by_source: dict[str, int]
+    by_programme: dict[str, int] = {}
     pipeline_counts: dict[str, int]
 
 

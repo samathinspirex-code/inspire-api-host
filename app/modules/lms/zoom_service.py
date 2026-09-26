@@ -421,14 +421,45 @@ def _sdk_signature(meeting_number: str, role: int) -> str:
     return f"{unsigned}.{sig}"
 
 
+async def _lecturer_can_host(db: AsyncSession, meeting_id: int, primary_class_id: int,
+                             _meeting_lecturer_id: int, user_id: int) -> bool:
+    return bool(await db.scalar(text("""SELECT 1
+          FROM (
+            SELECT class_id FROM lms_meeting_audience_classes WHERE meeting_id=:meeting_id
+            UNION SELECT :primary_class_id
+          ) audience
+          JOIN lms_classes class_ ON class_.class_id=audience.class_id
+          JOIN lms_class_lecturers class_lecturer
+            ON class_lecturer.class_id=audience.class_id AND class_lecturer.lecturer_user_id=:user_id
+          WHERE class_.status<>'cancelled'
+          LIMIT 1"""),{
+            "meeting_id":meeting_id,"primary_class_id":primary_class_id,"user_id":user_id,
+        }))
+
+
 async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> dict:
-    meeting=(await db.execute(text("SELECT * FROM lms_online_meetings WHERE meeting_id=:id AND provider='zoom'"),{"id":meeting_id})).mappings().first()
+    meeting=(await db.execute(text("SELECT * FROM lms_online_meetings WHERE meeting_id=:id AND provider='zoom' AND status<>'cancelled'"),{"id":meeting_id})).mappings().first()
     if not meeting: raise NotFoundError("Zoom meeting not found")
-    is_host=role in {"SUPER_ADMIN","ADMIN"} or (role=="LECTURER" and meeting["lecturer_user_id"]==user_id)
+    lecturer_host=role=="LECTURER" and await _lecturer_can_host(
+        db,meeting_id,meeting["class_id"],meeting["lecturer_user_id"],user_id
+    )
+    is_host=role in {"SUPER_ADMIN","ADMIN"} or lecturer_host
     if not is_host:
-        allowed=await db.scalar(text("""SELECT 1 FROM lms_meeting_audience_classes mac
-          JOIN lms_class_students cs ON cs.class_id=mac.class_id
-          WHERE mac.meeting_id=:m AND cs.student_user_id=:u LIMIT 1"""),{"m":meeting_id,"u":user_id})
+        allowed=await db.scalar(text("""SELECT 1
+          FROM (
+            SELECT class_id FROM lms_meeting_audience_classes WHERE meeting_id=:m
+            UNION SELECT :primary_class_id
+          ) audience
+          JOIN lms_classes class_ ON class_.class_id=audience.class_id
+          JOIN lms_courses course ON course.course_id=class_.course_id
+          JOIN lms_class_students cs
+            ON cs.class_id=audience.class_id AND cs.student_user_id=:u
+          JOIN lms_course_enrollments enrollment
+            ON enrollment.course_id=class_.course_id
+           AND enrollment.student_user_id=:u
+           AND enrollment.status='enrolled'
+          WHERE class_.status<>'cancelled' AND course.status<>'archived'
+          LIMIT 1"""),{"m":meeting_id,"primary_class_id":meeting["class_id"],"u":user_id})
         if not allowed: raise ForbiddenError("You are not enrolled in this meeting's audience")
     user=(await db.execute(text("SELECT full_name,email FROM users WHERE user_id=:id AND is_active"),{"id":user_id})).mappings().first()
     result={"meeting_id":meeting_id,"meeting_number":meeting["provider_meeting_id"],"sdk_key":settings.ZOOM_MEETING_SDK_KEY,

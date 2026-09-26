@@ -111,3 +111,14 @@ class CalendarEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.audience_type, "university")
         titles = {item.title for item in (await list_events(self.db(), 20, "STUDENT")).data}
         self.assertIn("Graduation", titles)
+
+    async def test_removed_people_lose_class_and_programme_calendar_items(self):
+        with Session(self.engine) as db:
+            db.get(CourseEnrollment, (1, 20)).status = "withdrawn"
+            db.delete(db.get(ClassLecturer, (1, 10)))
+            db.commit()
+
+        student_titles = {item.title for item in (await list_events(self.db(), 20, "STUDENT")).data}
+        lecturer_titles = {item.title for item in (await list_events(self.db(), 10, "LECTURER")).data}
+        self.assertEqual(student_titles, {"University day"})
+        self.assertEqual(lecturer_titles, {"University day"})

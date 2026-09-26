@@ -5,16 +5,16 @@ from datetime import date, datetime, timedelta, timezone
 
 _real_datetime = datetime
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
+    ClassLecturer,
     ClassStudent,
     CourseEnrollment,
-    CourseLecturer,
     LmsClass,
     LmsCourse,
     LmsCourseworkAssignment,
@@ -32,6 +32,7 @@ from app.modules.lms.schemas import (
     AnalyticsMetric,
     AnalyticsTrendPoint,
 )
+from app.modules.lms.repository.meeting import MEETING_AUDIENCE
 
 
 def _average(values: list[float]) -> float | None:
@@ -80,15 +81,43 @@ def _distribution(values: list[float]) -> list[AnalyticsBreakdownItem]:
 async def _scope_courses(db: AsyncSession, user_id: int, role: str) -> list[LmsCourse]:
     stmt = select(LmsCourse).where(LmsCourse.status != "archived").order_by(LmsCourse.code)
     if role == "LECTURER":
-        stmt = stmt.join(CourseLecturer, CourseLecturer.course_id == LmsCourse.course_id).where(
-            CourseLecturer.lecturer_user_id == user_id
+        stmt = (
+            stmt.join(LmsClass, LmsClass.course_id == LmsCourse.course_id)
+            .join(ClassLecturer, ClassLecturer.class_id == LmsClass.class_id)
+            .where(
+                ClassLecturer.lecturer_user_id == user_id,
+                LmsClass.status != "cancelled",
+            )
+            .distinct()
         )
     elif role == "STUDENT":
-        stmt = stmt.join(CourseEnrollment, CourseEnrollment.course_id == LmsCourse.course_id).where(
-            CourseEnrollment.student_user_id == user_id,
-            CourseEnrollment.status == "enrolled",
+        stmt = (
+            stmt.join(LmsClass, LmsClass.course_id == LmsCourse.course_id)
+            .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
+            .join(
+                CourseEnrollment,
+                and_(
+                    CourseEnrollment.course_id == LmsCourse.course_id,
+                    CourseEnrollment.student_user_id == user_id,
+                ),
+            )
+            .where(
+                ClassStudent.student_user_id == user_id,
+                CourseEnrollment.status == "enrolled",
+                LmsClass.status != "cancelled",
+            )
+            .distinct()
         )
     return list((await db.scalars(stmt)).all())
+
+
+def _roster_filter(course_column, student_column, roster_by_course: dict[int, set[int]]):
+    conditions = [
+        and_(course_column == course_id, student_column.in_(student_ids))
+        for course_id, student_ids in roster_by_course.items()
+        if student_ids
+    ]
+    return or_(*conditions) if conditions else False
 
 
 async def get_dashboard(
@@ -98,14 +127,45 @@ async def get_dashboard(
     courses = await _scope_courses(db, user_id, role)
     if program_id is not None:
         courses = [course for course in courses if course.program_id == program_id]
+    scoped_class_ids: set[int] | None = None
+    if role == "LECTURER":
+        scoped_class_ids = set((await db.scalars(
+            select(ClassLecturer.class_id)
+            .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+            .where(
+                ClassLecturer.lecturer_user_id == user_id,
+                LmsClass.status != "cancelled",
+            )
+        )).all())
+    elif role == "STUDENT":
+        scoped_class_ids = set((await db.scalars(
+            select(ClassStudent.class_id)
+            .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+            .join(
+                CourseEnrollment,
+                and_(
+                    CourseEnrollment.course_id == LmsClass.course_id,
+                    CourseEnrollment.student_user_id == user_id,
+                ),
+            )
+            .where(
+                ClassStudent.student_user_id == user_id,
+                CourseEnrollment.status == "enrolled",
+                LmsClass.status != "cancelled",
+            )
+        )).all())
     roster: set[int] | None = None
     if class_id is not None:
         class_ = await db.get(LmsClass, class_id)
         if class_ is None:
             raise NotFoundError("Class not found")
-        if class_.course_id not in {course.course_id for course in courses}:
+        if (
+            class_.course_id not in {course.course_id for course in courses}
+            or (scoped_class_ids is not None and class_id not in scoped_class_ids)
+        ):
             raise ForbiddenError("That class is outside this report")
         courses = [course for course in courses if course.course_id == class_.course_id]
+        scoped_class_ids = {class_id}
         roster = set((await db.execute(
             select(ClassStudent.student_user_id).where(ClassStudent.class_id == class_id)
         )).scalars().all())
@@ -133,15 +193,35 @@ async def get_dashboard(
     # 1. Enrolments count & student IDs
     enrolments_count: dict[int, int] = defaultdict(int)
     student_ids: set[int] = set()
-    enrolment_stmt = (
-        select(CourseEnrollment.course_id, CourseEnrollment.student_user_id)
-        .where(CourseEnrollment.course_id.in_(course_ids), CourseEnrollment.status == "enrolled")
-    )
-    if roster is not None:
-        enrolment_stmt = enrolment_stmt.where(CourseEnrollment.student_user_id.in_(roster or [-1]))
-    for cid, sid in (await db.execute(enrolment_stmt)).all():
-        enrolments_count[cid] += 1
-        student_ids.add(sid)
+    roster_by_course: dict[int, set[int]] = defaultdict(set)
+    if scoped_class_ids is not None:
+        roster_rows = (await db.execute(
+            select(LmsClass.course_id, ClassStudent.student_user_id)
+            .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
+            .where(
+                LmsClass.class_id.in_(scoped_class_ids or [-1]),
+                LmsClass.course_id.in_(course_ids or [-1]),
+            )
+        )).all()
+        for cid, sid in roster_rows:
+            if is_student and sid != user_id:
+                continue
+            roster_by_course[cid].add(sid)
+        for cid, ids in roster_by_course.items():
+            enrolments_count[cid] = len(ids)
+            student_ids.update(ids)
+    else:
+        enrolment_stmt = select(
+            CourseEnrollment.course_id, CourseEnrollment.student_user_id
+        ).where(
+            CourseEnrollment.course_id.in_(course_ids),
+            CourseEnrollment.status == "enrolled",
+        )
+        if roster is not None:
+            enrolment_stmt = enrolment_stmt.where(CourseEnrollment.student_user_id.in_(roster or [-1]))
+        for cid, sid in (await db.execute(enrolment_stmt)).all():
+            enrolments_count[cid] += 1
+            student_ids.add(sid)
 
     # 2. Item totals per course
     item_totals = dict((await db.execute(
@@ -176,6 +256,10 @@ async def get_dashboard(
     )
     if is_student:
         progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id == user_id)
+    elif role == "LECTURER":
+        progress_stmt = progress_stmt.where(
+            _roster_filter(LmsModule.course_id, LmsLearningProgress.student_user_id, roster_by_course)
+        )
     elif roster is not None:
         progress_stmt = progress_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
     progress_stmt = progress_stmt.group_by(LmsModule.course_id)
@@ -196,7 +280,14 @@ async def get_dashboard(
         .where(LmsClass.course_id.in_(course_ids))
     )
     if is_student:
-        attendance_stmt = attendance_stmt.where(AttendanceRecord.student_user_id == user_id)
+        attendance_stmt = attendance_stmt.where(
+            AttendanceRecord.student_user_id == user_id,
+            AttendanceSession.class_id.in_(scoped_class_ids or [-1]),
+        )
+    elif role == "LECTURER":
+        attendance_stmt = attendance_stmt.where(
+            AttendanceSession.class_id.in_(scoped_class_ids or [-1])
+        )
     elif class_id is not None:
         attendance_stmt = attendance_stmt.where(AttendanceSession.class_id == class_id)
     attendance_stmt = attendance_stmt.group_by(LmsClass.course_id)
@@ -231,6 +322,12 @@ async def get_dashboard(
     )
     if is_student:
         grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif role == "LECTURER":
+        grade_stmt = grade_stmt.where(_roster_filter(
+            LmsCourseworkAssignment.course_id,
+            LmsCourseworkSubmission.student_user_id,
+            roster_by_course,
+        ))
     elif roster is not None:
         grade_stmt = grade_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
     grade_stmt = grade_stmt.group_by(LmsCourseworkAssignment.course_id)
@@ -258,6 +355,12 @@ async def get_dashboard(
     )
     if is_student:
         all_grades_stmt = all_grades_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif role == "LECTURER":
+        all_grades_stmt = all_grades_stmt.where(_roster_filter(
+            LmsCourseworkAssignment.course_id,
+            LmsCourseworkSubmission.student_user_id,
+            roster_by_course,
+        ))
     elif roster is not None:
         all_grades_stmt = all_grades_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
     all_grades = [round(float(pct), 1) for pct in (await db.scalars(all_grades_stmt)).all()]
@@ -321,6 +424,10 @@ async def get_dashboard(
     )
     if is_student:
         p_trend_stmt = p_trend_stmt.where(LmsLearningProgress.student_user_id == user_id)
+    elif role == "LECTURER":
+        p_trend_stmt = p_trend_stmt.where(
+            _roster_filter(LmsModule.course_id, LmsLearningProgress.student_user_id, roster_by_course)
+        )
     elif roster is not None:
         p_trend_stmt = p_trend_stmt.where(LmsLearningProgress.student_user_id.in_(roster or [-1]))
     for act_at, is_comp, comp_at in (await db.execute(p_trend_stmt)).all():
@@ -345,6 +452,12 @@ async def get_dashboard(
     )
     if is_student:
         s_trend_stmt = s_trend_stmt.where(LmsCourseworkSubmission.student_user_id == user_id)
+    elif role == "LECTURER":
+        s_trend_stmt = s_trend_stmt.where(_roster_filter(
+            LmsCourseworkAssignment.course_id,
+            LmsCourseworkSubmission.student_user_id,
+            roster_by_course,
+        ))
     elif roster is not None:
         s_trend_stmt = s_trend_stmt.where(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
     for sub_at in (await db.scalars(s_trend_stmt)).all():
@@ -380,9 +493,7 @@ async def get_dashboard(
         ))
 
     if is_student:
-        class_ids = list((await db.scalars(select(ClassStudent.class_id).where(
-            ClassStudent.student_user_id == user_id
-        ))).all())
+        class_ids = list(scoped_class_ids or [])
         target_conditions = []
         if course_ids:
             target_conditions.append(
@@ -402,10 +513,19 @@ async def get_dashboard(
                 or_(*target_conditions) if target_conditions else False,
             )
         ) or 0)
-        upcoming_classes = int(await db.scalar(select(func.count()).select_from(OnlineMeeting).where(
-            OnlineMeeting.class_id.in_(class_ids) if class_ids else False,
-            OnlineMeeting.status == "scheduled", OnlineMeeting.start_time > now,
-        )) or 0)
+        audience_meetings = select(MEETING_AUDIENCE.c.meeting_id).where(
+            MEETING_AUDIENCE.c.class_id.in_(class_ids or [-1])
+        )
+        upcoming_classes = int(await db.scalar(
+            select(func.count()).select_from(OnlineMeeting).where(
+                or_(
+                    OnlineMeeting.class_id.in_(class_ids or [-1]),
+                    OnlineMeeting.meeting_id.in_(audience_meetings),
+                ),
+                OnlineMeeting.status == "scheduled",
+                OnlineMeeting.start_time > now,
+            )
+        ) or 0)
         metrics = [
             AnalyticsMetric(key="progress", label="Overall progress", value=overall_progress or 0, display_value=_display_percent(overall_progress), hint="Across required course materials", tone="purple"),
             AnalyticsMetric(key="attendance", label="Attendance", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_attendance_all} recorded classes", tone="green"),
@@ -420,13 +540,19 @@ async def get_dashboard(
         ]
         if roster is not None:
             unmarked_filters.append(LmsCourseworkSubmission.student_user_id.in_(roster or [-1]))
+        elif role == "LECTURER":
+            unmarked_filters.append(_roster_filter(
+                LmsCourseworkAssignment.course_id,
+                LmsCourseworkSubmission.student_user_id,
+                roster_by_course,
+            ))
         unmarked = int(await db.scalar(
             select(func.count()).select_from(LmsCourseworkSubmission)
             .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
             .where(*unmarked_filters)
         ) or 0)
         metrics = [
-            AnalyticsMetric(key="students", label="Enrolled students", value=len(student_ids), display_value=str(len(student_ids)), hint=f"Unique students across {len(courses)} non-archived courses", tone="purple"),
+            AnalyticsMetric(key="students", label="Enrolled students", value=len(student_ids), display_value=str(len(student_ids)), hint=f"Unique students across {len(scoped_class_ids or [])} assigned classes", tone="purple"),
             AnalyticsMetric(key="progress", label="Average progress", value=overall_progress or 0, display_value=_display_percent(overall_progress), hint="Required content completion", tone="blue"),
             AnalyticsMetric(key="attendance", label="Attendance rate", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_attendance_all} recorded attendances", tone="green"),
             AnalyticsMetric(key="marking", label="Awaiting marking", value=unmarked, display_value=str(unmarked), hint="Submitted assignments and exams", tone="amber"),

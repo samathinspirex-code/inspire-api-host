@@ -20,7 +20,6 @@ from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
     CourseEnrollment,
-    CourseLecturer,
     LecturerProfile,
     LmsClass,
     LmsCourse,
@@ -35,6 +34,7 @@ from app.modules.lms.models import (
     OnlineMeeting,
     StudentProfile,
 )
+from app.modules.lms.repository.meeting import MEETING_AUDIENCE
 from app.modules.lms.repository import ContentRepository
 from app.modules.lms.schemas import (
     MyProfileResponse,
@@ -69,17 +69,36 @@ async def _student_statistics(
     db: AsyncSession, user_id: int
 ) -> tuple[ProfileStatistics, list[ProfileUpcomingItem]]:
     now = datetime.now(timezone.utc)
-    course_ids = list((await db.scalars(select(CourseEnrollment.course_id).where(
-        CourseEnrollment.student_user_id == user_id,
-        CourseEnrollment.status == "enrolled",
-    ))).all())
-    class_ids = list((await db.scalars(select(ClassStudent.class_id).where(
-        ClassStudent.student_user_id == user_id
-    ))).all())
+    scope_rows = (await db.execute(
+        select(ClassStudent.class_id, LmsClass.course_id)
+        .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+        .join(
+            CourseEnrollment,
+            and_(
+                CourseEnrollment.course_id == LmsClass.course_id,
+                CourseEnrollment.student_user_id == user_id,
+            ),
+        )
+        .where(
+            ClassStudent.student_user_id == user_id,
+            CourseEnrollment.status == "enrolled",
+            LmsClass.status != "cancelled",
+        )
+    )).all()
+    class_ids = list({class_id for class_id, _course_id in scope_rows})
+    course_ids = list({course_id for _class_id, course_id in scope_rows})
 
-    attendance = list((await db.scalars(select(AttendanceRecord.status).where(
-        AttendanceRecord.student_user_id == user_id
-    ))).all())
+    attendance = list((await db.scalars(
+        select(AttendanceRecord.status)
+        .join(
+            AttendanceSession,
+            AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id,
+        )
+        .where(
+            AttendanceRecord.student_user_id == user_id,
+            AttendanceSession.class_id.in_(class_ids or [-1]),
+        )
+    )).all())
     attendance_percentage = (
         round(sum(value == "present" for value in attendance) * 100 / len(attendance), 1)
         if attendance else None
@@ -90,6 +109,14 @@ async def _student_statistics(
         .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
         .where(
             LmsCourseworkSubmission.student_user_id == user_id,
+            LmsCourseworkAssignment.course_id.in_(course_ids or [-1]),
+            or_(
+                LmsCourseworkAssignment.target_type == "course",
+                and_(
+                    LmsCourseworkAssignment.target_type == "class",
+                    LmsCourseworkAssignment.target_id.in_(class_ids or [-1]),
+                ),
+            ),
             LmsCourseworkSubmission.marks_awarded.is_not(None),
             LmsCourseworkAssignment.grades_released.is_(True),
         )
@@ -148,9 +175,15 @@ async def _student_statistics(
 
     meetings: list[OnlineMeeting] = []
     if class_ids:
+        audience_meetings = select(MEETING_AUDIENCE.c.meeting_id).where(
+            MEETING_AUDIENCE.c.class_id.in_(class_ids)
+        )
         meetings = list((await db.scalars(
             select(OnlineMeeting).where(
-                OnlineMeeting.class_id.in_(class_ids),
+                or_(
+                    OnlineMeeting.class_id.in_(class_ids),
+                    OnlineMeeting.meeting_id.in_(audience_meetings),
+                ),
                 OnlineMeeting.status == "scheduled",
                 OnlineMeeting.start_time > now,
             ).order_by(OnlineMeeting.start_time)
@@ -201,35 +234,69 @@ async def _lecturer_statistics(
     db: AsyncSession, user_id: int
 ) -> tuple[ProfileStatistics, list[ProfileUpcomingItem]]:
     now = datetime.now(timezone.utc)
-    course_ids = list((await db.scalars(select(CourseLecturer.course_id).where(
-        CourseLecturer.lecturer_user_id == user_id
-    ))).all())
-    class_ids = list((await db.scalars(select(ClassLecturer.class_id).where(
-        ClassLecturer.lecturer_user_id == user_id
-    ))).all())
+    class_ids = list((await db.scalars(
+        select(ClassLecturer.class_id)
+        .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+        .where(
+            ClassLecturer.lecturer_user_id == user_id,
+            LmsClass.status != "cancelled",
+        )
+    )).all())
+    course_ids = list((await db.scalars(
+        select(LmsClass.course_id).where(LmsClass.class_id.in_(class_ids))
+    )).all()) if class_ids else []
+    course_ids = list(set(course_ids))
+    roster_rows = (await db.execute(
+        select(LmsClass.course_id, ClassStudent.student_user_id)
+        .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
+        .where(LmsClass.class_id.in_(class_ids or [-1]))
+    )).all()
+    roster_by_course: dict[int, set[int]] = defaultdict(set)
+    for course_id, student_id in roster_rows:
+        roster_by_course[course_id].add(student_id)
+    student_ids = {student_id for _course_id, student_id in roster_rows}
     students = 0
-    if course_ids:
-        students = int(await db.scalar(select(func.count(func.distinct(CourseEnrollment.student_user_id))).where(
-            CourseEnrollment.course_id.in_(course_ids), CourseEnrollment.status == "enrolled"
-        )) or 0)
+    if class_ids:
+        students = len(student_ids)
     unmarked = 0
-    if course_ids:
+    assignment_scope = [
+        and_(
+            LmsCourseworkAssignment.course_id == course_id,
+            LmsCourseworkSubmission.student_user_id.in_(roster),
+        )
+        for course_id, roster in roster_by_course.items()
+        if roster
+    ]
+    if assignment_scope:
         unmarked = int(await db.scalar(
             select(func.count()).select_from(LmsCourseworkSubmission)
             .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
             .where(
-                LmsCourseworkAssignment.course_id.in_(course_ids),
+                or_(*assignment_scope),
+                or_(
+                    LmsCourseworkAssignment.target_type == "course",
+                    and_(
+                        LmsCourseworkAssignment.target_type == "class",
+                        LmsCourseworkAssignment.target_id.in_(class_ids),
+                    ),
+                ),
                 LmsCourseworkSubmission.status.in_(["submitted", "expired"]),
                 LmsCourseworkSubmission.marks_awarded.is_(None),
             )
         ) or 0)
+    audience_meetings = select(MEETING_AUDIENCE.c.meeting_id).where(
+        MEETING_AUDIENCE.c.class_id.in_(class_ids)
+    )
     meetings = list((await db.scalars(
         select(OnlineMeeting).where(
-            OnlineMeeting.lecturer_user_id == user_id,
+            or_(
+                OnlineMeeting.class_id.in_(class_ids),
+                OnlineMeeting.meeting_id.in_(audience_meetings),
+            ),
             OnlineMeeting.status == "scheduled",
             OnlineMeeting.start_time > now,
         ).order_by(OnlineMeeting.start_time)
-    )).all())
+    )).all()) if class_ids else []
     class_labels = {}
     meeting_class_ids = {item.class_id for item in meetings}
     if meeting_class_ids:
@@ -237,12 +304,20 @@ async def _lecturer_statistics(
             select(LmsClass.class_id, LmsClass.code).where(LmsClass.class_id.in_(meeting_class_ids))
         )).all())
     course_progress = None
-    if course_ids:
+    progress_scope = [
+        and_(
+            LmsModule.course_id == course_id,
+            LmsLearningProgress.student_user_id.in_(roster),
+        )
+        for course_id, roster in roster_by_course.items()
+        if roster
+    ]
+    if progress_scope:
         course_progress_value = await db.scalar(
             select(func.avg(LmsLearningProgress.completion_percent))
             .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLearningProgress.learning_item_id)
             .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
-            .where(LmsModule.course_id.in_(course_ids))
+            .where(or_(*progress_scope))
         )
         course_progress = round(float(course_progress_value), 1) if course_progress_value is not None else None
     upcoming = [ProfileUpcomingItem(
@@ -336,24 +411,25 @@ async def _ensure_student_profile_access(
         return
     if viewer_role != "LECTURER":
         raise ForbiddenError("You cannot view this student profile")
-    course_access = await db.scalar(
-        select(func.count()).select_from(CourseEnrollment)
-        .join(CourseLecturer, CourseLecturer.course_id == CourseEnrollment.course_id)
-        .where(
-            CourseEnrollment.student_user_id == student_user_id,
-            CourseEnrollment.status == "enrolled",
-            CourseLecturer.lecturer_user_id == viewer_user_id,
-        )
-    )
     class_access = await db.scalar(
         select(func.count()).select_from(ClassStudent)
         .join(ClassLecturer, ClassLecturer.class_id == ClassStudent.class_id)
+        .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+        .join(
+            CourseEnrollment,
+            and_(
+                CourseEnrollment.course_id == LmsClass.course_id,
+                CourseEnrollment.student_user_id == student_user_id,
+            ),
+        )
         .where(
             ClassStudent.student_user_id == student_user_id,
             ClassLecturer.lecturer_user_id == viewer_user_id,
+            CourseEnrollment.status == "enrolled",
+            LmsClass.status != "cancelled",
         )
     )
-    if not course_access and not class_access:
+    if not class_access:
         raise ForbiddenError("You can view profiles only for students you teach")
 
 
@@ -366,25 +442,48 @@ async def get_student_academic_profile(
     if user is None or profile is None:
         raise NotFoundError("Student profile not found")
 
-    course_rows = (await db.execute(
-        select(CourseEnrollment, LmsCourse)
-        .join(LmsCourse, LmsCourse.course_id == CourseEnrollment.course_id)
-        .where(CourseEnrollment.student_user_id == student_user_id,
-               CourseEnrollment.status == "enrolled")
-        .order_by(LmsCourse.code)
-    )).all()
-    course_ids = [course.course_id for _enrolment, course in course_rows]
-    course_map = {course.course_id: course for _enrolment, course in course_rows}
-
-    class_rows = (await db.execute(
+    class_stmt = (
         select(LmsClass, LmsCourse)
         .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
         .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-        .where(ClassStudent.student_user_id == student_user_id)
+        .join(
+            CourseEnrollment,
+            and_(
+                CourseEnrollment.course_id == LmsClass.course_id,
+                CourseEnrollment.student_user_id == student_user_id,
+            ),
+        )
+        .where(
+            ClassStudent.student_user_id == student_user_id,
+            CourseEnrollment.status == "enrolled",
+            LmsClass.status != "cancelled",
+        )
         .order_by(LmsClass.start_date.desc(), LmsClass.code)
-    )).all()
+    )
+    if viewer_role == "LECTURER":
+        class_stmt = class_stmt.join(
+            ClassLecturer,
+            and_(
+                ClassLecturer.class_id == LmsClass.class_id,
+                ClassLecturer.lecturer_user_id == viewer_user_id,
+            ),
+        )
+    class_rows = (await db.execute(class_stmt)).all()
     class_ids = [class_.class_id for class_, _course in class_rows]
     class_map = {class_.class_id: class_ for class_, _course in class_rows}
+    course_map = {course.course_id: course for _class, course in class_rows}
+    course_ids = list(course_map)
+    enrollment_map = {
+        enrollment.course_id: enrollment
+        for enrollment in (await db.scalars(
+            select(CourseEnrollment).where(
+                CourseEnrollment.student_user_id == student_user_id,
+                CourseEnrollment.course_id.in_(course_ids or [-1]),
+                CourseEnrollment.status == "enrolled",
+            )
+        )).all()
+    }
+    course_rows = [(enrollment_map[course_id], course_map[course_id]) for course_id in course_ids]
 
     progress_rows = []
     if course_ids:
@@ -518,7 +617,10 @@ async def get_student_academic_profile(
         .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
         .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
         .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-        .where(AttendanceRecord.student_user_id == student_user_id)
+        .where(
+            AttendanceRecord.student_user_id == student_user_id,
+            AttendanceSession.class_id.in_(class_ids or [-1]),
+        )
         .order_by(OnlineMeeting.start_time.desc())
     )).all()
     attendance = [StudentAcademicAttendance(

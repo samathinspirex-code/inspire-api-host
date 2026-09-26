@@ -119,11 +119,19 @@ class CrmLeadRepository:
         return list((await self.db.execute(stmt)).scalars().all())
 
     async def source_counts(self) -> list[Any]:
-        stmt = select(CrmLead.source, func.count().label("cnt")).group_by(CrmLead.source)
+        stmt = (
+            select(CrmLead.source, func.count().label("cnt"))
+            .where(CrmLead.is_archived == False)  # noqa: E712
+            .group_by(CrmLead.source)
+        )
         return list((await self.db.execute(stmt)).all())
 
     async def stage_counts(self) -> list[Any]:
-        stmt = select(CrmLead.stage, func.count().label("cnt")).group_by(CrmLead.stage)
+        stmt = (
+            select(CrmLead.stage, func.count().label("cnt"))
+            .where(CrmLead.is_archived == False)  # noqa: E712
+            .group_by(CrmLead.stage)
+        )
         return list((await self.db.execute(stmt)).all())
 
     async def list_export(
