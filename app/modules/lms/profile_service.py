@@ -272,7 +272,10 @@ async def get_my_profile(db: AsyncSession, user_id: int, role: str) -> MyProfile
     if role == "STUDENT":
         profile = await db.get(StudentProfile, user_id)
         if profile is None:
-            raise NotFoundError("Student profile not found")
+            profile = StudentProfile(user_id=user_id)
+            db.add(profile)
+            await db.commit()
+            await db.refresh(profile)
         statistics, upcoming = await _student_statistics(db, user_id)
         editable_values = [
             user.full_name, profile.profile_image_url, profile.preferred_name, profile.phone,
@@ -295,7 +298,10 @@ async def get_my_profile(db: AsyncSession, user_id: int, role: str) -> MyProfile
     if role == "LECTURER":
         profile = await db.get(LecturerProfile, user_id)
         if profile is None:
-            raise NotFoundError("Lecturer profile not found")
+            profile = LecturerProfile(user_id=user_id)
+            db.add(profile)
+            await db.commit()
+            await db.refresh(profile)
         statistics, upcoming = await _lecturer_statistics(db, user_id)
         editable_values = [
             user.full_name, profile.profile_image_url, profile.preferred_name, profile.phone,
@@ -565,7 +571,8 @@ async def update_my_profile(
     if role == "STUDENT":
         profile = await db.get(StudentProfile, user_id)
         if profile is None:
-            raise NotFoundError("Student profile not found")
+            profile = StudentProfile(user_id=user_id)
+            db.add(profile)
         for field in (
             "preferred_name", "phone", "bio", "address", "city", "country",
             "emergency_contact_name", "emergency_contact_phone",
@@ -574,7 +581,8 @@ async def update_my_profile(
     elif role == "LECTURER":
         profile = await db.get(LecturerProfile, user_id)
         if profile is None:
-            raise NotFoundError("Lecturer profile not found")
+            profile = LecturerProfile(user_id=user_id)
+            db.add(profile)
         for field in ("preferred_name", "phone", "bio", "address", "city", "country", "expertise"):
             setattr(profile, field, _clean(getattr(payload, field)))
     else:
@@ -604,8 +612,14 @@ async def complete_profile_upload(
     completed = await media_service.complete_upload(db, asset_id)
     if role == "STUDENT":
         profile = await db.get(StudentProfile, user_id)
+        if profile is None:
+            profile = StudentProfile(user_id=user_id)
+            db.add(profile)
     elif role == "LECTURER":
         profile = await db.get(LecturerProfile, user_id)
+        if profile is None:
+            profile = LecturerProfile(user_id=user_id)
+            db.add(profile)
     else:
         profile = None
     if profile is None:
