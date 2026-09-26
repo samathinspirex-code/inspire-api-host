@@ -100,6 +100,7 @@ class AdmissionApplicationResponse(BaseModel):
 class ContactInquiryCreate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
+    phone: str | None = Field(None, min_length=5, max_length=50)
     message: str = Field(..., min_length=1, max_length=5000)
 
 
