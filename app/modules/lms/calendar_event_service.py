@@ -7,7 +7,6 @@ from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
     CourseEnrollment,
-    CourseLecturer,
     LmsCalendarEvent,
     LmsClass,
     LmsCourse,
@@ -47,7 +46,20 @@ async def _scope_ids(db: AsyncSession, user_id: int, role: str) -> tuple[set[int
         return None
     if role == "STUDENT":
         class_ids = set((await db.execute(
-            select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
+            select(ClassStudent.class_id)
+            .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)
+            .join(
+                CourseEnrollment,
+                and_(
+                    CourseEnrollment.course_id == LmsClass.course_id,
+                    CourseEnrollment.student_user_id == user_id,
+                ),
+            )
+            .where(
+                ClassStudent.student_user_id == user_id,
+                CourseEnrollment.status == "enrolled",
+                LmsClass.status != "cancelled",
+            )
         )).scalars().all())
         program_ids = set((await db.execute(
             select(LmsCourse.program_id)
@@ -66,13 +78,16 @@ async def _scope_ids(db: AsyncSession, user_id: int, role: str) -> tuple[set[int
             )).scalars().all())
         return class_ids, program_ids
     class_ids = set((await db.execute(
-        select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+        select(ClassLecturer.class_id)
+        .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+        .where(
+            ClassLecturer.lecturer_user_id == user_id,
+            LmsClass.status != "cancelled",
+        )
     )).scalars().all())
-    course_ids = set((await db.execute(
-        select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
-    )).scalars().all())
+    course_ids = set()
     if class_ids:
-        course_ids.update((await db.execute(
+        course_ids = set((await db.execute(
             select(LmsClass.course_id).where(LmsClass.class_id.in_(class_ids))
         )).scalars().all())
     program_ids = set()
@@ -145,12 +160,7 @@ async def _assert_audience(db: AsyncSession, payload: CalendarEventWrite, user_i
         if role not in MANAGERS:
             scope = await _scope_ids(db, user_id, role)
             if scope is None or payload.class_id not in scope[0]:
-                course_link = await db.scalar(select(CourseLecturer.lecturer_user_id).where(
-                    CourseLecturer.course_id == class_.course_id,
-                    CourseLecturer.lecturer_user_id == user_id,
-                ))
-                if course_link is None:
-                    raise ForbiddenError("You can add class events only for a class you teach")
+                raise ForbiddenError("You can add class events only for a class you teach")
 
 
 async def _load(db: AsyncSession, event_id: int) -> LmsCalendarEvent:

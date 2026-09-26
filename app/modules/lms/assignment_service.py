@@ -1,4 +1,4 @@
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -405,4 +405,23 @@ async def remove_class_lecturer(db: AsyncSession, class_id: int, user_id: int) -
     relation = await repo.get_class_lecturer(class_id, user_id)
     if relation is None:
         raise NotFoundError("Class lecturer assignment not found")
+    class_ = await ClassRepository(db).get(class_id)
     await repo.remove(relation)
+    if class_ is not None:
+        still_teaching_course = await db.scalar(
+            select(ClassLecturer.class_id)
+            .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+            .where(
+                ClassLecturer.lecturer_user_id == user_id,
+                LmsClass.course_id == class_.course_id,
+            )
+            .limit(1)
+        )
+        if still_teaching_course is None:
+            await db.execute(
+                delete(CourseLecturer).where(
+                    CourseLecturer.course_id == class_.course_id,
+                    CourseLecturer.lecturer_user_id == user_id,
+                )
+            )
+            await db.commit()

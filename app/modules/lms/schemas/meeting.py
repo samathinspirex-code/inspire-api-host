@@ -118,7 +118,10 @@ class MeetingItem(BaseModel):
     timezone: str
     status: MeetingStatus
     provider: MeetingProvider = "zoom"
-    join_uri: str
+    # The raw provider URL is intentionally omitted for students. They join
+    # through the authenticated Zoom join endpoint, which issues the correct
+    # participant token without exposing the organiser's host URL.
+    join_uri: str | None = None
     provider_meeting_id: str | None = None
     processing_status: str = "not_applicable"
     processing_error: str | None = None

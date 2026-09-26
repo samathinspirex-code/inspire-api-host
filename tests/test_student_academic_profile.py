@@ -23,10 +23,9 @@ class StudentAcademicProfileAccessTests(unittest.IsolatedAsyncioTestCase):
         await _ensure_student_profile_access(ScalarDatabase(), 20, 1, "SUPER_ADMIN")
 
     async def test_lecturer_must_teach_the_student(self):
-        await _ensure_student_profile_access(ScalarDatabase([1, 0]), 20, 10, "LECTURER")
-        await _ensure_student_profile_access(ScalarDatabase([0, 1]), 20, 10, "LECTURER")
+        await _ensure_student_profile_access(ScalarDatabase([1]), 20, 10, "LECTURER")
         with self.assertRaises(ForbiddenError):
-            await _ensure_student_profile_access(ScalarDatabase([0, 0]), 20, 10, "LECTURER")
+            await _ensure_student_profile_access(ScalarDatabase([0]), 20, 10, "LECTURER")
 
 
 if __name__ == "__main__":

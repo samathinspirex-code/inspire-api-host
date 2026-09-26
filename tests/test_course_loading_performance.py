@@ -52,14 +52,20 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
                 db.add(LmsCourse(course_id=cid, program_id=1, code=f"C{cid}", title=f"Course {cid}", status="active"))
             db.add(CourseLecturer(course_id=1, lecturer_user_id=10))
             db.add(CourseLecturer(course_id=2, lecturer_user_id=11))
+            db.add(CourseLecturer(course_id=2, lecturer_user_id=12))
             db.add_all([User(user_id=10, email="teacher@example.test", full_name="Teacher"),
-                        User(user_id=11, email="other@example.test", full_name="Other teacher")])
+                        User(user_id=11, email="other@example.test", full_name="Other teacher"),
+                        User(user_id=12, email="removed@example.test", full_name="Removed teacher")])
             for sid in range(20, 70):
                 db.add(User(user_id=sid, email=f"student{sid}@example.test"))
                 db.add(CourseEnrollment(course_id=1, student_user_id=sid, status="enrolled"))
             now = datetime.now(timezone.utc)
             db.add(LmsClass(class_id=1, course_id=1, code="C1-INTAKE", name="Course 1 intake",
                             start_date=now.date(), end_date=(now + timedelta(days=90)).date()))
+            db.add(LmsClass(class_id=2, course_id=2, code="C2-INTAKE", name="Course 2 intake",
+                            start_date=now.date(), end_date=(now + timedelta(days=90)).date()))
+            db.add(ClassLecturer(class_id=1, lecturer_user_id=10))
+            db.add(ClassLecturer(class_id=2, lecturer_user_id=11))
             db.add(ClassStudent(class_id=1, student_user_id=20))
             db.add(CourseEnrollment(course_id=1, student_user_id=99, status="withdrawn"))
             db.add(CourseEnrollment(course_id=2, student_user_id=99, status="enrolled"))
@@ -173,3 +179,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lms_courses.course_id = ?", self.queries[-1])
         self.assertIsNone(await PortalRepository(self.db()).get_course(2, 20, "STUDENT"))
         self.assertIsNone(await PortalRepository(self.db()).get_course(1, 99, "STUDENT"))
+
+    async def test_lecturer_course_access_requires_a_current_class_assignment(self):
+        self.assertIsNotNone(await PortalRepository(self.db()).get_course(1, 10, "LECTURER"))
+        self.assertIsNone(await PortalRepository(self.db()).get_course(2, 12, "LECTURER"))

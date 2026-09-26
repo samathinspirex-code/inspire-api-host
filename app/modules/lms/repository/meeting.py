@@ -9,7 +9,6 @@ from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
     CourseEnrollment,
-    CourseLecturer,
     LmsClass,
     LmsCourse,
     OnlineMeeting,
@@ -82,6 +81,37 @@ class MeetingRepository:
         """), {"meeting_id": meeting_id})).scalars().all())
         return rows or [fallback_class_id]
 
+    async def audience_details(self, meeting_ids: list[int]) -> dict[int, tuple[list[int], int]]:
+        """Load audience classes and active student totals for many meetings at once."""
+        if not meeting_ids:
+            return {}
+        rows = (await self.db.execute(text("""
+            WITH audience AS (
+                SELECT ma.meeting_id, ma.class_id
+                FROM lms_meeting_audience_classes ma
+                WHERE ma.meeting_id = ANY(:meeting_ids)
+                UNION
+                SELECT m.meeting_id, m.class_id
+                FROM lms_online_meetings m
+                WHERE m.meeting_id = ANY(:meeting_ids)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM lms_meeting_audience_classes ma
+                      WHERE ma.meeting_id = m.meeting_id
+                  )
+            )
+            SELECT a.meeting_id,
+                   ARRAY_AGG(DISTINCT a.class_id ORDER BY a.class_id) AS class_ids,
+                   COUNT(DISTINCT u.user_id) AS attendee_count
+            FROM audience a
+            LEFT JOIN lms_class_students cs ON cs.class_id = a.class_id
+            LEFT JOIN users u ON u.user_id = cs.student_user_id AND u.is_active IS TRUE
+            GROUP BY a.meeting_id
+        """), {"meeting_ids": meeting_ids})).mappings().all()
+        return {
+            row["meeting_id"]: (list(row["class_ids"]), int(row["attendee_count"]))
+            for row in rows
+        }
+
     async def get_user_email(self, user_id: int) -> str | None:
         return await self.db.scalar(select(User.email).where(User.user_id == user_id, User.is_active.is_(True)))
 
@@ -116,9 +146,6 @@ class MeetingRepository:
             lecturer_class_ids = (
                 select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
             )
-            lecturer_course_ids = (
-                select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
-            )
             lecturer_audience_meetings = (
                 select(MEETING_AUDIENCE.c.meeting_id).where(
                     MEETING_AUDIENCE.c.class_id.in_(lecturer_class_ids)
@@ -126,10 +153,8 @@ class MeetingRepository:
             )
             stmt = stmt.where(
                 or_(
-                    OnlineMeeting.lecturer_user_id == user_id,
                     OnlineMeeting.class_id.in_(lecturer_class_ids),
                     OnlineMeeting.meeting_id.in_(lecturer_audience_meetings),
-                    LmsClass.course_id.in_(lecturer_course_ids),
                 )
             )
         return (await self.db.execute(stmt)).one_or_none()
@@ -152,15 +177,13 @@ class MeetingRepository:
             select(OnlineMeeting, LmsClass, LmsCourse, attendee_count)
             .join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+            .where(OnlineMeeting.status != "cancelled")
         )
         if role in {"SUPER_ADMIN", "ADMIN"}:
             pass
         elif role == "LECTURER":
             lecturer_class_ids = (
                 select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
-            )
-            lecturer_course_ids = (
-                select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
             )
             lecturer_audience_meetings = (
                 select(MEETING_AUDIENCE.c.meeting_id).where(
@@ -169,10 +192,8 @@ class MeetingRepository:
             )
             stmt = stmt.where(
                 or_(
-                    OnlineMeeting.lecturer_user_id == user_id,
                     OnlineMeeting.class_id.in_(lecturer_class_ids),
                     OnlineMeeting.meeting_id.in_(lecturer_audience_meetings),
-                    LmsClass.course_id.in_(lecturer_course_ids),
                 )
             )
         else:

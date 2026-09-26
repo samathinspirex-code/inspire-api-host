@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
+import httpx
+
 from app.core.config import Settings, settings
 from app.modules.auth import service
 from app.modules.lms import service as lms_service
@@ -273,9 +275,9 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_invitation_persists_and_emails_configured_expiry(self):
         now = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
-        expiry = now + timedelta(days=7)
+        expiry = now + timedelta(days=5)
         default_minutes = Settings.model_fields["AUTHENTICATOR_SETUP_EXPIRE_MINUTES"].default
-        self.assertEqual(default_minutes, 10080)
+        self.assertEqual(default_minutes, 7200)
         user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True, access_levels=[])
         users = SimpleNamespace(get=AsyncMock(return_value=user))
         tokens = SimpleNamespace(create_setup_token=AsyncMock())
@@ -296,7 +298,7 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sender.await_args.args[3], expiry)
         sessions.revoke_all_for_user.assert_awaited_once_with(25)
         for render in [build_invitation_html, build_invitation_text]:
-            self.assertIn("07 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
+            self.assertIn("05 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
 
     async def test_setup_link_is_valid_until_two_day_boundary_and_stays_single_use(self):
         issued = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
@@ -381,6 +383,49 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for link in links:
             self.assertIn(link.setup_url, sent_message["HTMLPart"])
             self.assertIn(link.setup_url, sent_message["TextPart"])
+
+    async def test_mailjet_transport_failure_is_retried(self):
+        response = MagicMock()
+        response.is_error = False
+        response.json.return_value = {
+            "Messages": [
+                {"Status": "success", "To": [{"MessageID": 987654321}]}
+            ]
+        }
+        client = MagicMock()
+        client.post = AsyncMock(
+            side_effect=[httpx.ConnectError("temporary connection failure"), response]
+        )
+        client_context = MagicMock()
+        client_context.__aenter__ = AsyncMock(return_value=client)
+        client_context.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(settings, "MAILJET_API_KEY", "public-key"),
+            patch.object(settings, "MAILJET_SECRET_KEY", "secret-key"),
+            patch.object(settings, "MAILJET_FROM_EMAIL", "lms@college.example"),
+            patch(
+                "app.modules.auth.invitation_email.httpx.AsyncClient",
+                return_value=client_context,
+            ),
+            patch(
+                "app.modules.auth.invitation_email.asyncio.sleep",
+                new=AsyncMock(),
+            ) as retry_sleep,
+        ):
+            result = await send_authenticator_invitation(
+                "student@example.com",
+                "Example Student",
+                "https://lms.example.com/setup",
+                datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc),
+                "password-setup-25",
+                setup_method="password",
+            )
+
+        self.assertTrue(result.sent)
+        self.assertEqual(result.provider_message_id, "987654321")
+        self.assertEqual(client.post.await_count, 2)
+        retry_sleep.assert_awaited_once()
 
     async def test_mailjet_preblocked_result_is_not_reported_as_sent(self):
         send_response = MagicMock(is_error=False)

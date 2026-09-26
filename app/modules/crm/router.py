@@ -13,6 +13,7 @@ from app.modules.crm import service
 from app.modules.crm.schemas import (
     CrmActivityCreate,
     CrmActivityOut,
+    CrmCounsellorOut,
     CrmDashboardResponse,
     CrmLeadCreate,
     CrmLeadListResponse,
@@ -24,7 +25,7 @@ from app.modules.crm.schemas import (
 
 
 def require_crm_staff(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    allowed = {"CRM", "COUNSELLOR", "SUPER_ADMIN", "ADMIN", "CMS", "USER_MANAGEMENT"}
+    allowed = {"CRM", "COUNSELLOR", "SUPER_ADMIN", "ADMIN", "USER_MANAGEMENT"}
     if not any(role in current_user.access for role in allowed):
         raise ForbiddenError("Requires 'CRM' or administrative access")
     return current_user
@@ -35,6 +36,11 @@ router = APIRouter(
     tags=["crm"],
     dependencies=[Depends(require_crm_staff)],
 )
+
+
+@router.get("/counsellors", response_model=list[CrmCounsellorOut])
+async def list_counsellors(db: AsyncSession = Depends(get_db)) -> list[CrmCounsellorOut]:
+    return await service.list_counsellors(db)
 
 
 @router.get("/leads", response_model=CrmLeadListResponse)
@@ -57,11 +63,12 @@ async def create_lead(
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ) -> CrmLeadOut:
+    counsellor_name = await service._actor_name(db, current_user.user_id, current_user.email)
     return await service.create_lead(
         db,
         payload,
         counsellor_id=current_user.user_id,
-        counsellor_name=current_user.email,
+        counsellor_name=counsellor_name,
     )
 
 
@@ -117,12 +124,13 @@ async def update_stage(
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ) -> CrmLeadOut:
+    counsellor_name = await service._actor_name(db, current_user.user_id, current_user.email)
     return await service.update_stage(
         db,
         lead_id,
         payload.stage,
         counsellor_id=current_user.user_id,
-        counsellor_name=current_user.email,
+        counsellor_name=counsellor_name,
     )
 
 
@@ -138,10 +146,11 @@ async def add_activity(
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ) -> CrmActivityOut:
+    counsellor_name = await service._actor_name(db, current_user.user_id, current_user.email)
     return await service.add_activity(
         db,
         lead_id,
         payload,
         counsellor_id=current_user.user_id,
-        counsellor_name=current_user.email,
+        counsellor_name=counsellor_name,
     )

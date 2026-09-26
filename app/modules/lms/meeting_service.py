@@ -18,12 +18,21 @@ from app.modules.lms.schemas import (
 
 
 async def _meeting_item(
-    db: AsyncSession, row, awarding_body: str | None = None, role: str = "STUDENT"
+    db: AsyncSession,
+    row,
+    awarding_body: str | None = None,
+    role: str = "STUDENT",
+    class_ids: list[int] | None = None,
+    attendee_count_override: int | None = None,
 ) -> MeetingItem:
     meeting, class_, course, attendee_count = row
     repository = MeetingRepository(db)
-    class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
-    attendee_count = len(await repository.list_student_emails_for_classes(class_ids))
+    if class_ids is None:
+        class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
+    if attendee_count_override is None:
+        attendee_count = len(await repository.list_student_emails_for_classes(class_ids))
+    else:
+        attendee_count = attendee_count_override
     if awarding_body is None:
         awarding_body = await db.scalar(text("""
             SELECT COALESCE(ac.awarding_body, pr.awarding_body, '')
@@ -244,7 +253,10 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, user_id: int, role: 
 
 async def list_my_meetings(db: AsyncSession, user_id: int, role: str) -> MeetingListResponse:
     rows = await MeetingRepository(db).list_for_user(user_id, role)
-    class_ids = [row[0].class_id for row in rows]
+    repository = MeetingRepository(db)
+    meeting_ids = [row[0].meeting_id for row in rows]
+    audience_map = await repository.audience_details(meeting_ids)
+    class_ids = list({row[0].class_id for row in rows})
     awarding_map: dict[int, str] = {}
     if class_ids:
         res = await db.execute(text("""
@@ -256,4 +268,13 @@ async def list_my_meetings(db: AsyncSession, user_id: int, role: str) -> Meeting
             WHERE lc.class_id = ANY(:class_ids)
         """), {"class_ids": class_ids})
         awarding_map = {r["class_id"]: r["awarding_body"] for r in res.mappings()}
-    return MeetingListResponse(data=[await _meeting_item(db, row, awarding_map.get(row[0].class_id), role) for row in rows])
+    return MeetingListResponse(data=[
+        await _meeting_item(
+            db,
+            row,
+            awarding_map.get(row[0].class_id),
+            role,
+            *(audience_map.get(row[0].meeting_id, ([row[0].class_id], row[3] or 0))),
+        )
+        for row in rows
+    ])

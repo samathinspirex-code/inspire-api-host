@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, delete, event, update
+from sqlalchemy import create_engine, delete, event, text, update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,7 +16,7 @@ from app.modules.auth.schemas import CurrentUser
 from app.modules.cms.models import Program
 from app.modules.lms import analytics_service, dashboard_service, service
 from app.modules.lms.models import (
-    AttendanceRecord, AttendanceSession, ClassStudent, CourseEnrollment, CourseLecturer,
+    AttendanceRecord, AttendanceSession, ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer,
     LecturerProfile, LmsClass, LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission,
     LmsExam, LmsLearningItem, LmsLearningProgress, LmsModule, OnlineMeeting, StudentProfile,
 )
@@ -43,9 +43,14 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.engine.dispose)
         for model in [User, Program, StudentProfile, LecturerProfile, LmsCourse, LmsClass,
                       LmsModule, LmsLearningItem, OnlineMeeting, AttendanceSession, AttendanceRecord,
-                      CourseEnrollment, CourseLecturer, ClassStudent, LmsLearningProgress,
+                      CourseEnrollment, CourseLecturer, ClassLecturer, ClassStudent, LmsLearningProgress,
                       LmsCourseworkAssignment, LmsCourseworkSubmission, LmsExam]:
             model.__table__.create(self.engine)
+        with self.engine.begin() as connection:
+            connection.execute(text("""CREATE TABLE lms_meeting_audience_classes (
+                meeting_id BIGINT NOT NULL, class_id BIGINT NOT NULL,
+                PRIMARY KEY (meeting_id, class_id)
+            )"""))
         self.session = Session(self.engine)
         self.addCleanup(self.session.close)
         self.db = LocalSession(self.session)
@@ -79,6 +84,11 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         for cid, status in [(1, "active"), (2, "planned"), (3, "completed")]:
             db.add(LmsClass(class_id=cid, course_id=1, code=f"CL{cid}", name=f"Class {cid}",
                             status=status, start_date=date(2026, 8, 1), end_date=date(2026, 12, 1)))
+        db.add(ClassLecturer(class_id=1, lecturer_user_id=10))
+        db.add_all([
+            ClassStudent(class_id=1, student_user_id=1),
+            ClassStudent(class_id=1, student_user_id=2),
+        ])
         for mid, cid, status in [(1, 1, "active"), (2, 1, "draft"), (3, 2, "active"), (4, 3, "active")]:
             db.add(LmsModule(module_id=mid, course_id=cid, title=f"Section {mid}", position=mid, status=status))
         for iid, mid, kind, status in [(1, 1, "video", "published"), (2, 1, "pdf", "published"),
@@ -165,7 +175,11 @@ class AdminDashboardTests(unittest.IsolatedAsyncioTestCase):
         self.seed()
         lecturer = await analytics_service.get_dashboard(self.db, 10, "LECTURER")
         self.assertEqual([c.course_id for c in lecturer.course_insights], [1])
+        self.assertEqual(next(m for m in lecturer.metrics if m.key == "students").value, 2)
+        removed_lecturer = await analytics_service.get_dashboard(self.db, 11, "LECTURER")
+        self.assertEqual(removed_lecturer.course_insights, [])
         student = await analytics_service.get_dashboard(self.db, 1, "STUDENT")
+        self.assertEqual([c.course_id for c in student.course_insights], [1])
         first = next(c for c in student.course_insights if c.course_id == 1)
         self.assertEqual(first.progress, 100)
         self.assertEqual(first.attendance, 100)

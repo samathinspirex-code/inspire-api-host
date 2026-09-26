@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     AUTHENTICATOR_ENCRYPTION_KEY: str = ""
     AUTHENTICATOR_ISSUER: str = "Inspire College"
-    AUTHENTICATOR_SETUP_EXPIRE_MINUTES: int = 10080  # Seven days; setup links remain single-use.
+    AUTHENTICATOR_SETUP_EXPIRE_MINUTES: int = 7200  # Five days; setup links remain single-use.
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
     AUTHENTICATOR_MAX_ATTEMPTS: int = 5
     AUTHENTICATOR_LOCK_MINUTES: int = 5

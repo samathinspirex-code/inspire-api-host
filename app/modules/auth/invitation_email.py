@@ -1,3 +1,4 @@
+import asyncio
 import html
 import logging
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from app.modules.auth.schemas.auth import AuthenticatorPortalLink
 logger = logging.getLogger(__name__)
 
 MAILJET_SEND_URL = "https://api.mailjet.com/v3.1/send"
+MAILJET_SEND_ATTEMPTS = 3
+MAILJET_RETRY_DELAYS_SECONDS = (0.5, 1.5)
 
 
 @dataclass(frozen=True)
@@ -134,14 +137,49 @@ async def send_authenticator_invitation(
         to_email, full_name, setup_url, expires_at, idempotency_key, portal_links, setup_method
     )
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.post(
-                MAILJET_SEND_URL,
-                json=payload,
-                auth=httpx.BasicAuth(
-                    settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY
-                ),
-            )
+        response: httpx.Response | None = None
+        last_transport_error: httpx.HTTPError | None = None
+        timeout = httpx.Timeout(30.0, connect=15.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for attempt in range(MAILJET_SEND_ATTEMPTS):
+                try:
+                    response = await client.post(
+                        MAILJET_SEND_URL,
+                        json=payload,
+                        auth=httpx.BasicAuth(
+                            settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY
+                        ),
+                    )
+                except httpx.HTTPError as exc:
+                    last_transport_error = exc
+                    logger.warning(
+                        "Mailjet invitation attempt %s/%s failed for user email domain %s: %s",
+                        attempt + 1,
+                        MAILJET_SEND_ATTEMPTS,
+                        to_email.rsplit("@", 1)[-1],
+                        type(exc).__name__,
+                    )
+                else:
+                    # Retry provider throttling and temporary server failures. A
+                    # permanent 4xx response should be surfaced immediately.
+                    if not response.is_error or (
+                        response.status_code != 429 and response.status_code < 500
+                    ):
+                        break
+                    logger.warning(
+                        "Mailjet invitation attempt %s/%s returned status %s for user email domain %s",
+                        attempt + 1,
+                        MAILJET_SEND_ATTEMPTS,
+                        response.status_code,
+                        to_email.rsplit("@", 1)[-1],
+                    )
+                if attempt < MAILJET_SEND_ATTEMPTS - 1:
+                    await asyncio.sleep(MAILJET_RETRY_DELAYS_SECONDS[attempt])
+
+        if response is None:
+            if last_transport_error is not None:
+                raise last_transport_error
+            return EmailDeliveryResult(False, error="The email provider is temporarily unavailable.")
         if response.is_error:
             logger.warning(
                 "Mailjet rejected an Authenticator invitation for user email domain %s with status %s",
@@ -202,5 +240,10 @@ async def send_authenticator_invitation(
                 pass
         return EmailDeliveryResult(True, provider_message_id=message_id)
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Authenticator invitation email failed: %s", type(exc).__name__)
+        logger.warning(
+            "Authenticator invitation email failed for user email domain %s: %s: %s",
+            to_email.rsplit("@", 1)[-1],
+            type(exc).__name__,
+            str(exc),
+        )
         return EmailDeliveryResult(False, error="The email provider is temporarily unavailable.")

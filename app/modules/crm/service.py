@@ -6,13 +6,15 @@ from typing import Optional
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationError
+from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
 from app.modules.crm.repository import CrmActivityRepository, CrmLeadRepository
 from app.modules.crm.schemas import (
     CrmActivityCreate,
     CrmActivityOut,
+    CrmCounsellorOut,
     CrmDashboardResponse,
     CrmDashboardStats,
     CrmLeadCreate,
@@ -44,6 +46,42 @@ IN_PROGRESS_STAGES = [
     "documents_pending",
     "app_submitted",
 ]
+
+
+async def list_counsellors(db: AsyncSession) -> list[CrmCounsellorOut]:
+    stmt = (
+        select(User)
+        .join(UserAccessLevel, UserAccessLevel.user_id == User.user_id)
+        .join(AccessLevel, AccessLevel.access_level_id == UserAccessLevel.access_level_id)
+        .where(
+            User.is_active == True,  # noqa: E712
+            AccessLevel.is_active == True,  # noqa: E712
+            AccessLevel.access_key == "COUNSELLOR",
+        )
+        .order_by(User.full_name, User.email)
+    )
+    users = list((await db.execute(stmt)).scalars().unique().all())
+    return [
+        CrmCounsellorOut(
+            user_id=user.user_id,
+            name=user.full_name or user.email,
+            email=user.email,
+        )
+        for user in users
+    ]
+
+
+async def _registered_counsellor(db: AsyncSession, user_id: int) -> CrmCounsellorOut:
+    counsellors = await list_counsellors(db)
+    counsellor = next((item for item in counsellors if item.user_id == user_id), None)
+    if counsellor is None:
+        raise ValidationError("Select an active user with Admissions Counsellor access.")
+    return counsellor
+
+
+async def _actor_name(db: AsyncSession, user_id: int, email: str) -> str:
+    name = await db.scalar(select(User.full_name).where(User.user_id == user_id))
+    return name or email
 
 
 async def list_leads(
@@ -111,7 +149,14 @@ async def update_lead(
     if lead is None:
         raise NotFoundError(f"Lead {lead_id} not found")
 
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    data = payload.model_dump(include=payload.model_fields_set)
+    if "assigned_counsellor_id" in data:
+        counsellor_id = data["assigned_counsellor_id"]
+        if counsellor_id is None:
+            data["counsellor_name"] = None
+        else:
+            counsellor = await _registered_counsellor(db, counsellor_id)
+            data["counsellor_name"] = counsellor.name
     await repo.update(lead, data)
     return await get_lead(db, lead_id)
 
@@ -184,7 +229,9 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     today_end = today_start + timedelta(days=1)
 
     # new_leads_30d
-    stmt_new = select(func.count()).where(CrmLead.created_at >= thirty_days_ago)
+    stmt_new = select(func.count()).where(
+        and_(CrmLead.created_at >= thirty_days_ago, CrmLead.is_archived == False)  # noqa: E712
+    )
     new_leads_30d: int = (await db.execute(stmt_new)).scalar_one()
 
     # awaiting_contact
@@ -200,19 +247,27 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     in_progress: int = (await db.execute(stmt_prog)).scalar_one()
 
     # offers_sent
-    stmt_offer = select(func.count()).where(CrmLead.stage == "offer_sent")
+    stmt_offer = select(func.count()).where(
+        and_(CrmLead.stage == "offer_sent", CrmLead.is_archived == False)  # noqa: E712
+    )
     offers_sent: int = (await db.execute(stmt_offer)).scalar_one()
 
     # enrolled_30d
     stmt_enr = select(func.count()).where(
-        and_(CrmLead.stage == "enrolled", CrmLead.updated_at >= thirty_days_ago)
+        and_(
+            CrmLead.stage == "enrolled",
+            CrmLead.updated_at >= thirty_days_ago,
+            CrmLead.is_archived == False,  # noqa: E712
+        )
     )
     enrolled_30d: int = (await db.execute(stmt_enr)).scalar_one()
 
     # total for conversion rate
-    stmt_total = select(func.count()).select_from(CrmLead)
+    stmt_total = select(func.count()).where(CrmLead.is_archived == False)  # noqa: E712
     total_leads: int = (await db.execute(stmt_total)).scalar_one()
-    stmt_enrolled_total = select(func.count()).where(CrmLead.stage == "enrolled")
+    stmt_enrolled_total = select(func.count()).where(
+        and_(CrmLead.stage == "enrolled", CrmLead.is_archived == False)  # noqa: E712
+    )
     enrolled_total: int = (await db.execute(stmt_enrolled_total)).scalar_one()
     conversion_rate = round((enrolled_total / total_leads) * 100, 2) if total_leads > 0 else 0.0
 
@@ -231,13 +286,33 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     source_rows = await repo.source_counts()
     by_source = {row[0]: row[1] for row in source_rows}
 
+    # Programme demand for the CMS executive dashboard. Prefer the selected
+    # course and fall back to the broader programme when a course is missing.
+    programme_name = func.coalesce(
+        func.nullif(CrmLead.interested_course, ""),
+        func.nullif(CrmLead.interested_programme, ""),
+        "Unspecified",
+    )
+    programme_rows = (
+        await db.execute(
+            select(programme_name.label("programme"), func.count().label("cnt"))
+            .where(CrmLead.is_archived == False)  # noqa: E712
+            .group_by(programme_name)
+            .order_by(func.count().desc())
+        )
+    ).all()
+    by_programme = {row[0]: row[1] for row in programme_rows}
+
     # pipeline_counts
     stage_rows = await repo.stage_counts()
     pipeline_counts = {row[0]: row[1] for row in stage_rows}
 
     # recent_leads (last 5)
     stmt_recent = (
-        select(CrmLead).order_by(CrmLead.created_at.desc()).limit(5)
+        select(CrmLead)
+        .where(CrmLead.is_archived == False)  # noqa: E712
+        .order_by(CrmLead.created_at.desc())
+        .limit(5)
     )
     recent_leads_orm = list((await db.execute(stmt_recent)).scalars().all())
     recent_leads = [CrmLeadSummary.model_validate(l) for l in recent_leads_orm]
@@ -258,6 +333,7 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     followups_today = [CrmLeadSummary.model_validate(l) for l in followups_today_orm]
 
     stats = CrmDashboardStats(
+        total_leads=total_leads,
         new_leads_30d=new_leads_30d,
         awaiting_contact=awaiting_contact,
         in_progress=in_progress,
@@ -266,6 +342,7 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
         conversion_rate=conversion_rate,
         followups_today=followups_today_count,
         by_source=by_source,
+        by_programme=by_programme,
         pipeline_counts=pipeline_counts,
     )
     return CrmDashboardResponse(
@@ -384,7 +461,7 @@ async def export_leads_csv(
             prob = 100 if lead.stage == "enrolled" else (90 if lead.stage == "offer_sent" else 50)
             writer.writerow(
                 [
-                    f"zcrm_{lead.lead_id}",
+                    getattr(lead, "external_record_id", None) or f"zcrm_{lead.lead_id}",
                     f"zcrm_{lead.assigned_counsellor_id or ''}",
                     lead.counsellor_name or "Inspire College",
                     lead.amount or "",
