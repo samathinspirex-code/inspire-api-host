@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
+import httpx
+
 from app.core.config import Settings, settings
 from app.modules.auth import service
 from app.modules.lms import service as lms_service
@@ -381,6 +383,49 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for link in links:
             self.assertIn(link.setup_url, sent_message["HTMLPart"])
             self.assertIn(link.setup_url, sent_message["TextPart"])
+
+    async def test_mailjet_transport_failure_is_retried(self):
+        response = MagicMock()
+        response.is_error = False
+        response.json.return_value = {
+            "Messages": [
+                {"Status": "success", "To": [{"MessageID": 987654321}]}
+            ]
+        }
+        client = MagicMock()
+        client.post = AsyncMock(
+            side_effect=[httpx.ConnectError("temporary connection failure"), response]
+        )
+        client_context = MagicMock()
+        client_context.__aenter__ = AsyncMock(return_value=client)
+        client_context.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(settings, "MAILJET_API_KEY", "public-key"),
+            patch.object(settings, "MAILJET_SECRET_KEY", "secret-key"),
+            patch.object(settings, "MAILJET_FROM_EMAIL", "lms@college.example"),
+            patch(
+                "app.modules.auth.invitation_email.httpx.AsyncClient",
+                return_value=client_context,
+            ),
+            patch(
+                "app.modules.auth.invitation_email.asyncio.sleep",
+                new=AsyncMock(),
+            ) as retry_sleep,
+        ):
+            result = await send_authenticator_invitation(
+                "student@example.com",
+                "Example Student",
+                "https://lms.example.com/setup",
+                datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc),
+                "password-setup-25",
+                setup_method="password",
+            )
+
+        self.assertTrue(result.sent)
+        self.assertEqual(result.provider_message_id, "987654321")
+        self.assertEqual(client.post.await_count, 2)
+        retry_sleep.assert_awaited_once()
 
     async def test_mailjet_preblocked_result_is_not_reported_as_sent(self):
         send_response = MagicMock(is_error=False)
