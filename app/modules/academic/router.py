@@ -65,8 +65,8 @@ async def admission_application(payload: AdmissionApplicationCreate, db: AsyncSe
 
 
 @public_router.post("/contact-inquiries", response_model=ContactInquiryResponse, status_code=201)
-async def contact_inquiry(payload: ContactInquiryCreate):
-    return await service.send_contact_inquiry(payload)
+async def contact_inquiry(payload: ContactInquiryCreate, db: AsyncSession = Depends(get_db)):
+    return await service.send_contact_inquiry(db, payload)
 
 
 @cms_router.get("/{resource}", response_model=AcademicResponse)

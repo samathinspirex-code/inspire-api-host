@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     ZOOM_MEETING_SDK_KEY: str = ""
     ZOOM_MEETING_SDK_SECRET: str = ""
     ZOOM_OAUTH_STATE_EXPIRE_MINUTES: int = 10
-    LMS_UI_URL: str = "http://localhost:5174"
+    LMS_UI_URL: str = "https://lms-ui-amber.vercel.app"
     CMS_UI_URL: str = "http://localhost:5173"
 
     OPENAI_API_KEY: str = ""

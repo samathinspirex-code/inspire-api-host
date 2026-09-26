@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import APIError, ConflictError, NotFoundError, ValidationError
 from app.modules.auth.schemas import CurrentUser
 from app.modules.auth import service as auth_service
 from app.modules.auth.repository import AuthenticatorRepository, RefreshTokenRepository
@@ -707,4 +707,59 @@ async def send_person_authenticator_invitation(
     # screen, even when a lecturer also has a CMS role.
     return await auth_service.issue_student_password_setup_invitation(
         db, user_id, created_by, settings.LMS_UI_URL
+    )
+
+
+async def resend_pending_password_invitations(
+    db: AsyncSession, kind: str, created_by: int
+):
+    from app.modules.lms.schemas import (
+        BulkInvitationResendResponse,
+        InvitationResendFailure,
+    )
+
+    people = (
+        (await list_students(db, None)).data
+        if kind == "students"
+        else (await list_lecturers(db, None)).data
+    )
+    targets = [
+        person
+        for person in people
+        if person.is_active
+        and person.authenticator_status in {"invitation_sent", "invitation_expired"}
+    ]
+    sent_count = 0
+    failures = []
+    for person in targets:
+        try:
+            result = await send_person_authenticator_invitation(
+                db, person.user_id, created_by
+            )
+            if result.email_sent:
+                sent_count += 1
+            else:
+                failures.append(
+                    InvitationResendFailure(
+                        user_id=person.user_id,
+                        full_name=person.full_name,
+                        email=person.email,
+                        message=result.delivery_message,
+                    )
+                )
+        except APIError as exc:
+            failures.append(
+                InvitationResendFailure(
+                    user_id=person.user_id,
+                    full_name=person.full_name,
+                    email=person.email,
+                    message=exc.message,
+                )
+            )
+
+    return BulkInvitationResendResponse(
+        eligible_count=len(targets),
+        sent_count=sent_count,
+        failed_count=len(failures),
+        failures=failures,
     )

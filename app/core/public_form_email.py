@@ -52,9 +52,12 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
     recipient = settings.PUBLIC_FORM_RECIPIENT_EMAIL.strip()
     if not recipient:
         return FormEmailResult(False, "The form recipient is not configured")
+    recipients = [{"Email": r.strip(), "Name": "Inspire Admissions"} for r in recipient.split(",") if r.strip()]
+    if not recipients:
+        return FormEmailResult(False, "No valid form recipients configured")
     message = {
         "From": {"Email": settings.PUBLIC_FORM_FROM_EMAIL, "Name": settings.PUBLIC_FORM_FROM_NAME},
-        "To": [{"Email": recipient, "Name": "Inspire Admissions"}],
+        "To": recipients,
         "Subject": subject,
         "TextPart": text_body,
         "HTMLPart": html_body,
