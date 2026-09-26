@@ -476,6 +476,21 @@ async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str
     return result
 
 
+async def mark_end_requested(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> dict:
+    meeting=(await db.execute(text("SELECT * FROM lms_online_meetings WHERE meeting_id=:id AND provider='zoom' AND status='scheduled'"),{"id":meeting_id})).mappings().first()
+    if not meeting: raise NotFoundError("Scheduled Zoom meeting not found")
+    lecturer_host=role=="LECTURER" and await _lecturer_can_host(
+        db,meeting_id,meeting["class_id"],meeting["lecturer_user_id"],user_id
+    )
+    if role not in {"SUPER_ADMIN","ADMIN"} and not lecturer_host:
+        raise ForbiddenError("Only this meeting's host can end it for everyone")
+    await db.execute(text("""UPDATE lms_online_meetings
+      SET processing_status='end_requested',processing_error=NULL,updated_at=now()
+      WHERE meeting_id=:id AND status='scheduled'"""),{"id":meeting_id})
+    await db.commit()
+    return {"meeting_id":meeting_id,"end_requested":True}
+
+
 def verify_webhook(timestamp: str, body: bytes, signature: str) -> bool:
     message=f"v0:{timestamp}:{body.decode()}"; expected="v0="+hmac.new(settings.ZOOM_WEBHOOK_SECRET.encode(),message.encode(),hashlib.sha256).hexdigest()
     return bool(settings.ZOOM_WEBHOOK_SECRET and hmac.compare_digest(expected,signature))
@@ -495,12 +510,20 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
     if not local: return
     kinds=[]
     if name=="meeting.ended":
-        # The meeting lifecycle must not wait for Zoom's participant report.
-        # That report can take several minutes and its retry job is independent.
-        await db.execute(text("""UPDATE lms_online_meetings
-          SET status='completed',processing_status='attendance_pending',processing_error=NULL
-          WHERE meeting_id=:id AND status='scheduled'"""),{"id":local})
-        kinds.append("attendance")
+        # Zoom also emits meeting.ended when a lone host chooses Leave Meeting.
+        # The webhook has no field that distinguishes that from End for All, so
+        # accept it only after the LMS host explicitly signalled that action.
+        confirmed_end=await db.scalar(text("""SELECT 1 FROM lms_online_meetings
+          WHERE meeting_id=:id AND status='scheduled'
+            AND processing_status='end_requested'
+            AND updated_at >= now()-interval '2 minutes'"""),{"id":local})
+        if confirmed_end:
+            # The meeting lifecycle must not wait for Zoom's participant report.
+            # That report can take several minutes and its retry job is independent.
+            await db.execute(text("""UPDATE lms_online_meetings
+              SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
+              WHERE meeting_id=:id AND status='scheduled'"""),{"id":local})
+            kinds.append("attendance")
     if name=="recording.completed":
         # A host can leave while participants continue the meeting. Zoom may
         # finish a recording segment at that point, so recording completion is

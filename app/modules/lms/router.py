@@ -1533,6 +1533,16 @@ async def get_zoom_join_config(
     return await zoom_service.join_config(db, meeting_id, current_user.user_id, role)
 
 
+@router.post("/meetings/{meeting_id}/zoom/end-intent")
+async def mark_zoom_meeting_end_intent(
+    meeting_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    role = service.resolve_role(current_user.access)
+    return await zoom_service.mark_end_requested(db, meeting_id, current_user.user_id, role)
+
+
 @router.post("/integrations/zoom/jobs/dispatch")
 async def dispatch_zoom_jobs(
     _current_user: CurrentUser = Depends(admin_access),
