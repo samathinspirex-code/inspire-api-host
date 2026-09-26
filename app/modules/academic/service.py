@@ -193,6 +193,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
 
 
 async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
+    phone = payload.phone.strip() if payload.phone else "Not provided"
 
     # Mirror into modern CRM leads pipeline
     try:
@@ -205,7 +206,7 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
         """), {
             "full_name": payload.full_name.strip(),
             "email": str(payload.email).strip().lower(),
-            "phone": "Not provided",
+            "phone": phone,
             "message": payload.message.strip(),
             "notes": f"Website Contact Message:\n{payload.message.strip()}",
         })).mappings().one()
@@ -224,6 +225,7 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
         ("Submitted", submitted_at),
         ("Name", payload.full_name.strip()),
         ("Email", str(payload.email)),
+        ("Phone", phone),
     ]
     text_body = "New website contact enquiry\n\n" + "\n".join(f"{label}: {value}" for label, value in rows) + f"\n\nMessage:\n{payload.message.strip()}"
     result = await send_public_form_email(
