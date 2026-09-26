@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -68,10 +68,11 @@ class AuthenticatorRepository:
         created_by: int | None,
         reset_credentials: bool = True,
     ) -> AuthenticatorSetupToken:
+        now = datetime.now(timezone.utc)
         await self.db.execute(
             delete(AuthenticatorSetupToken).where(
                 AuthenticatorSetupToken.user_id == user_id,
-                AuthenticatorSetupToken.used_at.is_(None),
+                AuthenticatorSetupToken.expires_at <= now,
             )
         )
         if reset_credentials:
@@ -100,6 +101,7 @@ class AuthenticatorRepository:
         return item
 
     async def get_valid_setup_token(self, token_hash: str, email: str):
+        normalized = email.strip().lower()
         stmt = (
             select(AuthenticatorSetupToken, User)
             .join(User, User.user_id == AuthenticatorSetupToken.user_id)
@@ -108,7 +110,7 @@ class AuthenticatorRepository:
             )
             .where(
                 AuthenticatorSetupToken.token_hash == token_hash,
-                func.lower(User.email) == email,
+                func.trim(func.lower(User.email)) == normalized,
                 User.is_active.is_(True),
             )
             .with_for_update()
@@ -162,6 +164,14 @@ class AuthenticatorRepository:
         credential.locked_until = None
         credential.verified_at = now
         token.used_at = now
+        await self.db.execute(
+            update(AuthenticatorSetupToken)
+            .where(
+                AuthenticatorSetupToken.user_id == credential.user_id,
+                AuthenticatorSetupToken.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
         await self.db.execute(
             delete(AuthenticatorRecoveryCode).where(
                 AuthenticatorRecoveryCode.user_id == credential.user_id

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import AuthenticatorSetupToken, PasswordCredential
@@ -41,6 +41,14 @@ class PasswordRepository:
             credential.locked_until = None
             credential.verified_at = now
         token.used_at = now
+        await self.db.execute(
+            update(AuthenticatorSetupToken)
+            .where(
+                AuthenticatorSetupToken.user_id == user_id,
+                AuthenticatorSetupToken.used_at.is_(None),
+            )
+            .values(used_at=now)
+        )
         await self.db.commit()
 
     async def record_failed_attempt(

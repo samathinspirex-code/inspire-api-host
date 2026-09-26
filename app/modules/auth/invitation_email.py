@@ -32,7 +32,10 @@ def build_invitation_html(full_name: str, setup_url: str, expires_at: datetime, 
     password_reset = setup_method == "password_reset"
     setup_label = "Reset password" if password_reset else "Set up password" if password_setup else "Set up Authenticator"
     setup_buttons = "".join(
-        f'<p><a href="{html.escape(link.setup_url, quote=True)}">{setup_label} — {html.escape(link.portal)}</a></p>'
+        f'<div style="margin:20px 0">'
+        f'<p><a href="{html.escape(link.setup_url, quote=True)}" style="display:inline-block;padding:12px 24px;background-color:#3f007c;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:6px">{setup_label} — {html.escape(link.portal)}</a></p>'
+        f'<p style="font-size:12px;color:#5f6368;margin-top:6px">Direct link: <a href="{html.escape(link.setup_url, quote=True)}" style="color:#3f007c;word-break:break-all">{html.escape(link.setup_url)}</a></p>'
+        f'</div>'
         for link in links
     )
     logins = " · ".join(
