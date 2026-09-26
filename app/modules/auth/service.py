@@ -154,23 +154,32 @@ async def issue_authenticator_setup_token(
     )
 
 
+def _resolve_safe_setup_base_url(setup_ui_url: str | None = None) -> str:
+    base = setup_ui_url or settings.LMS_UI_URL
+    lms_url = settings.LMS_UI_URL
+    if ("localhost" in base.lower() or "127.0.0.1" in base) and not ("localhost" in lms_url.lower() or "127.0.0.1" in lms_url):
+        return lms_url
+    return base
+
+
 def build_authenticator_setup_url(
     email: str, setup_token: str, setup_ui_url: str | None = None
 ) -> str:
     query = urlencode(
         {
             "setup": "authenticator",
-            "email": email,
+            "email": email.strip().lower(),
             "token": setup_token,
         }
     )
-    base_url = setup_ui_url or settings.LMS_UI_URL
+    base_url = _resolve_safe_setup_base_url(setup_ui_url)
     return f"{base_url.rstrip('/')}?{query}"
 
 
 def build_password_setup_url(email: str, setup_token: str, setup_ui_url: str | None = None) -> str:
-    query = urlencode({"setup": "password", "email": email, "token": setup_token})
-    return f"{(setup_ui_url or settings.LMS_UI_URL).rstrip('/')}?{query}"
+    query = urlencode({"setup": "password", "email": email.strip().lower(), "token": setup_token})
+    base_url = _resolve_safe_setup_base_url(setup_ui_url)
+    return f"{base_url.rstrip('/')}?{query}"
 
 
 async def request_password_reset(
@@ -228,19 +237,27 @@ async def issue_student_password_setup_invitation(
     access = set(_user_access_keys(user))
     # A portal that explicitly initiated the invitation gets one matching link.
     # This avoids LMS lecturers accidentally opening the CMS sign-in screen.
-    if setup_ui_url:
+    def is_local(u: str | None) -> bool:
+        return not u or "localhost" in u.lower() or "127.0.0.1" in u
+
+    lms_url = settings.LMS_UI_URL
+    cms_url = settings.CMS_UI_URL if not is_local(settings.CMS_UI_URL) else lms_url
+
+    if setup_ui_url and not is_local(setup_ui_url):
         destinations = [(
-            "LMS" if setup_ui_url.rstrip("/") == settings.LMS_UI_URL.rstrip("/") else "CMS",
+            "LMS" if setup_ui_url.rstrip("/") == lms_url.rstrip("/") else "CMS",
             setup_ui_url,
         )]
+    elif setup_ui_url and is_local(setup_ui_url) and not is_local(lms_url):
+        destinations = [("LMS", lms_url)]
     else:
         destinations = []
-        if access & {"CMS", "USER_MANAGEMENT"}:
+        if access & {"CMS", "USER_MANAGEMENT"} and not is_local(settings.CMS_UI_URL):
             destinations.append(("CMS", settings.CMS_UI_URL))
-        if "LMS" in access:
-            destinations.append(("LMS", settings.LMS_UI_URL))
+        if "LMS" in access or not destinations:
+            destinations.append(("LMS", lms_url))
         if not destinations:
-            destinations.append(("Inspire", settings.LMS_UI_URL))
+            destinations.append(("Inspire", lms_url))
     portal_links = [AuthenticatorPortalLink(
         portal=portal,
         setup_url=build_password_setup_url(setup.email, setup.setup_token, url),

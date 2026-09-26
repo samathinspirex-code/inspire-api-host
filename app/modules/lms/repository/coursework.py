@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.auth.models import User
 from app.modules.cms.models import MediaAsset
 from app.modules.lms.models import (
+    ClassLecturer,
     ClassStudent,
     CourseEnrollment,
     CourseLecturer,
@@ -28,16 +29,12 @@ class CourseworkRepository:
         self.db = db
 
     async def list_for_lecturer(self, user_id: int):
+        lecturer_courses = select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
+        lecturer_classes = select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+        lecturer_class_courses = select(LmsClass.course_id).where(LmsClass.class_id.in_(lecturer_classes))
         stmt = (
             select(LmsCourseworkAssignment, LmsCourse, LmsClass)
             .join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id)
-            .join(
-                CourseLecturer,
-                and_(
-                    CourseLecturer.course_id == LmsCourseworkAssignment.course_id,
-                    CourseLecturer.lecturer_user_id == user_id,
-                ),
-            )
             .outerjoin(
                 LmsClass,
                 and_(
@@ -45,7 +42,17 @@ class CourseworkRepository:
                     LmsClass.class_id == LmsCourseworkAssignment.target_id,
                 ),
             )
-            .where(~_separate_exam())
+            .where(
+                ~_separate_exam(),
+                or_(
+                    LmsCourseworkAssignment.course_id.in_(lecturer_courses),
+                    LmsCourseworkAssignment.course_id.in_(lecturer_class_courses),
+                    and_(
+                        LmsCourseworkAssignment.target_type == "class",
+                        LmsCourseworkAssignment.target_id.in_(lecturer_classes),
+                    ),
+                ),
+            )
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -68,17 +75,14 @@ class CourseworkRepository:
 
     async def list_for_student(self, user_id: int, include_exams: bool = False):
         class_access = select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
+        enrolled_courses = select(CourseEnrollment.course_id).where(
+            CourseEnrollment.student_user_id == user_id,
+            CourseEnrollment.status == "enrolled",
+        )
+        class_courses = select(LmsClass.course_id).where(LmsClass.class_id.in_(class_access))
         stmt = (
             select(LmsCourseworkAssignment, LmsCourse, LmsClass, LmsCourseworkSubmission)
             .join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id)
-            .join(
-                CourseEnrollment,
-                and_(
-                    CourseEnrollment.course_id == LmsCourseworkAssignment.course_id,
-                    CourseEnrollment.student_user_id == user_id,
-                    CourseEnrollment.status == "enrolled",
-                ),
-            )
             .outerjoin(
                 LmsClass,
                 and_(
@@ -95,6 +99,10 @@ class CourseworkRepository:
             )
             .where(
                 LmsCourseworkAssignment.status.in_(("published", "closed")),
+                or_(
+                    LmsCourseworkAssignment.course_id.in_(enrolled_courses),
+                    LmsCourseworkAssignment.course_id.in_(class_courses),
+                ),
                 or_(
                     LmsCourseworkAssignment.target_type == "course",
                     and_(

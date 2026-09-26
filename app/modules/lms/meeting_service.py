@@ -17,7 +17,9 @@ from app.modules.lms.schemas import (
 )
 
 
-async def _meeting_item(db: AsyncSession, row, awarding_body: str | None = None) -> MeetingItem:
+async def _meeting_item(
+    db: AsyncSession, row, awarding_body: str | None = None, role: str = "STUDENT"
+) -> MeetingItem:
     meeting, class_, course, attendee_count = row
     repository = MeetingRepository(db)
     class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
@@ -31,6 +33,9 @@ async def _meeting_item(db: AsyncSession, row, awarding_body: str | None = None)
             LEFT JOIN programs pr ON pr.program_id = c.program_id
             WHERE lc.class_id = :class_id
         """), {"class_id": meeting.class_id}) or None
+    # Students must not receive the raw Zoom host join URI — they join through the
+    # secure /meetings/{id}/zoom/join endpoint which issues a role-appropriate token.
+    student_safe = role == "STUDENT"
     return MeetingItem(
         meeting_id=meeting.meeting_id,
         class_id=meeting.class_id,
@@ -49,10 +54,10 @@ async def _meeting_item(db: AsyncSession, row, awarding_body: str | None = None)
         timezone=meeting.timezone,
         status=meeting.status,
         provider=meeting.provider,
-        join_uri=meeting.join_uri,
-        provider_meeting_id=meeting.provider_meeting_id,
+        join_uri=None if student_safe else meeting.join_uri,
+        provider_meeting_id=None if student_safe else meeting.provider_meeting_id,
         processing_status=meeting.processing_status,
-        processing_error=meeting.processing_error,
+        processing_error=None if student_safe else meeting.processing_error,
         students_notified=meeting.students_notified,
         attendee_count=attendee_count,
         created_at=meeting.created_at,
@@ -182,7 +187,7 @@ async def create_meeting(
             }, payload.class_ids
         )
         await notification_service.notify_meeting_change(db, meeting, class_, course, "created", payload.class_ids)
-        created.append(await _meeting_item(db, (meeting, class_, course, len(attendee_emails))))
+        created.append(await _meeting_item(db, (meeting, class_, course, len(attendee_emails)), role=role))
     if not created:
         raise ValidationError(
             "None of the repeated sessions could be scheduled. " + " ".join(skipped)
@@ -210,7 +215,7 @@ async def update_meeting(
     )
     class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
     await notification_service.notify_meeting_change(db, meeting, class_, course, "updated", class_ids)
-    return await _meeting_item(db, (meeting, class_, course, attendee_count))
+    return await _meeting_item(db, (meeting, class_, course, attendee_count), role=role)
 
 
 async def cancel_meeting(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> MeetingItem:
@@ -220,7 +225,7 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, user_id: int, role: 
         raise NotFoundError("Meeting was not found")
     meeting, class_, course, attendee_count = row
     if meeting.status == "cancelled":
-        return await _meeting_item(db, row)
+        return await _meeting_item(db, row, role=role)
     if meeting.status == "completed":
         raise ValidationError("Completed live classes cannot be cancelled")
 
@@ -234,7 +239,7 @@ async def cancel_meeting(db: AsyncSession, meeting_id: int, user_id: int, role: 
     )
     class_ids = await repository.audience_class_ids(meeting.meeting_id, meeting.class_id)
     await notification_service.notify_meeting_change(db, meeting, class_, course, "cancelled", class_ids)
-    return await _meeting_item(db, (meeting, class_, course, attendee_count))
+    return await _meeting_item(db, (meeting, class_, course, attendee_count), role=role)
 
 
 async def list_my_meetings(db: AsyncSession, user_id: int, role: str) -> MeetingListResponse:
@@ -251,4 +256,4 @@ async def list_my_meetings(db: AsyncSession, user_id: int, role: str) -> Meeting
             WHERE lc.class_id = ANY(:class_ids)
         """), {"class_ids": class_ids})
         awarding_map = {r["class_id"]: r["awarding_body"] for r in res.mappings()}
-    return MeetingListResponse(data=[await _meeting_item(db, row, awarding_map.get(row[0].class_id)) for row in rows])
+    return MeetingListResponse(data=[await _meeting_item(db, row, awarding_map.get(row[0].class_id), role) for row in rows])

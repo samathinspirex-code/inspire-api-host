@@ -124,8 +124,29 @@ async def create_announcement(db: AsyncSession, payload, user_id: int, role: str
 
 async def list_announcements(db: AsyncSession, user_id: int, role: str) -> AnnouncementListResponse:
     stmt = select(LmsAnnouncement)
-    if role == "LECTURER": stmt = stmt.where(LmsAnnouncement.created_by == user_id)
-    elif role not in {"SUPER_ADMIN", "ADMIN"}: raise ForbiddenError("Use Notifications to view published announcements")
+    if role == "LECTURER":
+        # Lecturers see announcements they created OR announcements targeting any
+        # course or class they are assigned to teach (for shared-course visibility).
+        taught_course_ids = list((await db.execute(
+            select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
+        )).scalars().all())
+        taught_class_ids = list((await db.execute(
+            select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+        )).scalars().all())
+        lecturer_filters = [LmsAnnouncement.created_by == user_id]
+        if taught_course_ids:
+            lecturer_filters.append(
+                and_(LmsAnnouncement.audience_type == "course",
+                     LmsAnnouncement.audience_id.in_(taught_course_ids))
+            )
+        if taught_class_ids:
+            lecturer_filters.append(
+                and_(LmsAnnouncement.audience_type == "class",
+                     LmsAnnouncement.audience_id.in_(taught_class_ids))
+            )
+        stmt = stmt.where(or_(*lecturer_filters))
+    elif role not in {"SUPER_ADMIN", "ADMIN"}:
+        raise ForbiddenError("Use Notifications to view published announcements")
     rows = list((await db.execute(stmt.order_by(LmsAnnouncement.publish_at.desc()))).scalars().all())
     return AnnouncementListResponse(data=[await _announcement_item(db, item) for item in rows])
 

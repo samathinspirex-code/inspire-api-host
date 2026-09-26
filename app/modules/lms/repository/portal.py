@@ -25,7 +25,7 @@ class PortalRepository:
             )
         return CourseEnrollment, CourseEnrollment.course_id == LmsCourse.course_id, (
             CourseEnrollment.student_user_id == user_id
-        ) & (CourseEnrollment.status == "enrolled") & (LmsCourse.status == "active")
+        ) & (CourseEnrollment.status == "enrolled") & (LmsCourse.status != "archived")
 
     def _class_relation(self, user_id: int, role: str):
         if role == "LECTURER":
@@ -110,8 +110,28 @@ class PortalRepository:
         if course_id is None and role != "STUDENT":
             stmt = stmt.where(LmsCourse.is_class_copy.is_(False), LmsCourse.status != "archived")
         if not is_manager:
-            stmt = stmt.join(relation, join_on).where(access_filter)
-            if role == "STUDENT":
+            if role == "LECTURER":
+                has_course_assignment = (
+                    select(CourseLecturer.course_id)
+                    .where(
+                        CourseLecturer.course_id == LmsCourse.course_id,
+                        CourseLecturer.lecturer_user_id == user_id,
+                    )
+                    .exists()
+                )
+                has_class_assignment = (
+                    select(ClassLecturer.class_id)
+                    .join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+                    .join(class_course, class_course.course_id == LmsClass.course_id)
+                    .where(
+                        (LmsClass.course_id == LmsCourse.course_id) | (class_course.source_master_course_id == LmsCourse.course_id),
+                        ClassLecturer.lecturer_user_id == user_id,
+                    )
+                    .exists()
+                )
+                stmt = stmt.where(has_course_assignment | has_class_assignment)
+            elif role == "STUDENT":
+                stmt = stmt.join(relation, join_on).where(access_filter)
                 class_access = (
                     select(ClassStudent.class_id)
                     .join(LmsClass, LmsClass.class_id == ClassStudent.class_id)

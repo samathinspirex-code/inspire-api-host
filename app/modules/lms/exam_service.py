@@ -162,17 +162,35 @@ async def list_exams(
         .where(LmsExam.assessment_kind == "exam")
     )
     if role == "LECTURER":
-        stmt = stmt.join(CourseLecturer, and_(CourseLecturer.course_id == LmsExam.course_id, CourseLecturer.lecturer_user_id == user_id)).outerjoin(
+        lecturer_courses = select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
+        lecturer_classes = select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+        lecturer_class_courses = select(LmsClass.course_id).where(LmsClass.class_id.in_(lecturer_classes))
+        stmt = stmt.outerjoin(
             LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == -1)
+        ).where(
+            or_(
+                LmsExam.course_id.in_(lecturer_courses),
+                LmsExam.course_id.in_(lecturer_class_courses),
+                and_(LmsExam.target_type == "class", LmsExam.target_id.in_(lecturer_classes)),
+            )
         )
     elif role in {"ADMIN", "SUPER_ADMIN"}:
         stmt = stmt.outerjoin(LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == -1))
     elif role == "STUDENT":
         class_ids = select(ClassStudent.class_id).where(ClassStudent.student_user_id == user_id)
-        stmt = stmt.join(CourseEnrollment, and_(CourseEnrollment.course_id == LmsExam.course_id, CourseEnrollment.student_user_id == user_id, CourseEnrollment.status == "enrolled")).outerjoin(
+        enrolled_courses = select(CourseEnrollment.course_id).where(
+            CourseEnrollment.student_user_id == user_id,
+            CourseEnrollment.status == "enrolled",
+        )
+        class_courses = select(LmsClass.course_id).where(LmsClass.class_id.in_(class_ids))
+        stmt = stmt.outerjoin(
             LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id, LmsExamAttempt.student_user_id == user_id)
         ).where(
             LmsExam.status.in_(("published", "closed")),
+            or_(
+                LmsExam.course_id.in_(enrolled_courses),
+                LmsExam.course_id.in_(class_courses),
+            ),
             or_(LmsExam.target_type == "course", and_(LmsExam.target_type == "class", LmsExam.target_id.in_(class_ids))),
         )
     else:

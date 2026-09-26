@@ -25,3 +25,19 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM cms_testimonial_migrations WHERE name='initial-four')
 ON CONFLICT(seed_key) DO NOTHING;
 INSERT INTO cms_testimonial_migrations(name) VALUES('initial-four') ON CONFLICT DO NOTHING;
+
+-- Apply the unified branded thumbnail set and add Keneth Joel once. Later CMS
+-- edits remain untouched when this migration is rerun.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cms_testimonial_migrations WHERE name='branded-thumbnails-and-keneth') THEN
+    UPDATE cms_testimonials SET thumbnail_url='/testimonials/gimhani-edirisinghe-branded.png', updated_at=now() WHERE seed_key='gimhani-edirisinghe';
+    UPDATE cms_testimonials SET thumbnail_url='/testimonials/akram-razik-branded.png', updated_at=now() WHERE seed_key='akram-razik';
+    UPDATE cms_testimonials SET thumbnail_url='/testimonials/nidarshana-premkumar-branded.jpg', updated_at=now() WHERE seed_key='nidarshana-premkumar';
+    UPDATE cms_testimonials SET thumbnail_url='/testimonials/yara-benjamin-branded.png', position=5, updated_at=now() WHERE seed_key='yara-benjamin';
+    INSERT INTO cms_testimonials(seed_key,name,programme,caption,video_url,thumbnail_url,position,status)
+    VALUES ('keneth-joel','Keneth Joel','Level 4','Keneth shares his Level 4 learning experience at Inspire.','/testimonials/keneth-joel.mp4','/testimonials/keneth-joel-branded.png',4,'Published')
+    ON CONFLICT(seed_key) DO NOTHING;
+    INSERT INTO cms_testimonial_migrations(name) VALUES('branded-thumbnails-and-keneth');
+  END IF;
+END $$;

@@ -43,7 +43,7 @@ class MyProfileResponse(BaseModel):
     role: str
     email: str
     full_name: str
-    reference_number: str
+    reference_number: str | None = None
     reference_label: str
     job_title: str | None = None
     preferred_name: str | None = None
@@ -130,7 +130,7 @@ class StudentAcademicProfileResponse(BaseModel):
     full_name: str
     preferred_name: str | None = None
     email: str
-    student_number: str
+    student_number: str | None = None
     profile_image_url: str | None = None
     phone: str | None = None
     city: str | None = None
