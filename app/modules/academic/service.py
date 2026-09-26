@@ -115,30 +115,18 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             "document_name": document.filename if document else None,
             "document_content_type": document.content_type if document else None,
         })
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        if document_key:
-            try:
-                await asyncio.to_thread(media_service._client().delete_object, Bucket=settings.MEDIA_BUCKET, Key=document_key)
-            except Exception:
-                pass
-        raise
-    pathway = (await db.execute(text("""
-        SELECT p.name AS programme_name, c.title AS course_name, c.awarding_body,
-               o.price, o.duration
-        FROM academic_programmes p
-        LEFT JOIN academic_courses c ON c.course_id=:course_id
-        LEFT JOIN academic_course_study_options o
-          ON o.course_id=c.course_id AND o.study_mode=:study_mode AND o.is_enabled=true
-        WHERE p.programme_id=:programme_id
-    """), {"programme_id": payload.programme_id, "course_id": payload.preferred_course_id, "study_mode": payload.preferred_study_mode})).mappings().first()
-    submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
-    study_mode = payload.preferred_study_mode.replace("_", " ").title() if payload.preferred_study_mode else "Not selected"
-    price = f"Rs {int(pathway['price']):,}" if pathway and pathway["price"] is not None else "To be confirmed"
+        pathway = (await db.execute(text("""
+            SELECT p.name AS programme_name, c.title AS course_name, c.awarding_body,
+                   o.price, o.duration
+            FROM academic_programmes p
+            LEFT JOIN academic_courses c ON c.course_id=:course_id
+            LEFT JOIN academic_course_study_options o
+              ON o.course_id=c.course_id AND o.study_mode=:study_mode AND o.is_enabled=true
+            WHERE p.programme_id=:programme_id
+        """), {"programme_id": payload.programme_id, "course_id": payload.preferred_course_id, "study_mode": payload.preferred_study_mode})).mappings().first()
 
-    # Mirror into modern CRM leads pipeline
-    try:
+        # The admissions record and the visible CRM pipeline lead are one unit.
+        # Do not report success unless both have been persisted.
         new_crm_lead = (await db.execute(text("""
             INSERT INTO crm_leads
               (full_name, email, phone, highest_qualification, interested_programme, interested_course, source, stage, priority, notes, is_archived)
@@ -162,8 +150,18 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             "content": f"New application submitted via website for {(pathway['course_name'] if pathway else None) or 'Academic Pathway'}",
         })
         await db.commit()
-    except Exception as exc:
-        logger.warning("Failed to mirror admission lead into crm_leads: %s", exc)
+    except Exception:
+        await db.rollback()
+        if document_key:
+            try:
+                await asyncio.to_thread(media_service._client().delete_object, Bucket=settings.MEDIA_BUCKET, Key=document_key)
+            except Exception:
+                pass
+        raise
+
+    submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
+    study_mode = payload.preferred_study_mode.replace("_", " ").title() if payload.preferred_study_mode else "Not selected"
+    price = f"Rs {int(pathway['price']):,}" if pathway and pathway["price"] is not None else "To be confirmed"
     rows = [
         ("Lead ID", str(lead_id)),
         ("Submitted", submitted_at),
@@ -219,7 +217,13 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
         })
         await db.commit()
     except Exception as exc:
+        await db.rollback()
         logger.warning("Failed to insert contact lead into crm_leads: %s", exc)
+        raise APIError(
+            503,
+            "CRM_LEAD_SAVE_FAILED",
+            "Your message could not be saved right now. Please try again shortly.",
+        ) from exc
     submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
     rows = [
         ("Submitted", submitted_at),
@@ -237,7 +241,8 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
     )
     if not result.sent:
         logger.warning("Contact form notification failed: %s", result.error)
-        raise APIError(503, "EMAIL_DELIVERY_FAILED", "Your message could not be sent right now. Please try again shortly.")
+        # The CRM lead is the durable source of truth. Do not tell a visitor to
+        # resubmit and create a duplicate merely because the alert email failed.
     return {"sent": True, "message": "Your message was sent successfully."}
 
 
