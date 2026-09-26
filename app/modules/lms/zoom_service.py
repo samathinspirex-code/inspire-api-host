@@ -502,9 +502,10 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
           WHERE meeting_id=:id AND status='scheduled'"""),{"id":local})
         kinds.append("attendance")
     if name=="recording.completed":
-        # A recording-completed event is also a safe fallback when Zoom did not
-        # deliver meeting.ended. Do not overwrite the attendance job status.
-        await db.execute(text("UPDATE lms_online_meetings SET status='completed' WHERE meeting_id=:id AND status='scheduled'"),{"id":local})
+        # A host can leave while participants continue the meeting. Zoom may
+        # finish a recording segment at that point, so recording completion is
+        # never evidence that the meeting ended for everyone. Only the
+        # meeting.ended webhook owns the meeting lifecycle status.
         kinds.append("recording")
     for kind in kinds:
         key=f"{name}:{obj.get('uuid') or meeting_id}:{kind}"
@@ -603,7 +604,7 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
           VALUES(:session,:student,:status,:seconds,:percentage,:first,:last,:name,'zoom') ON CONFLICT(attendance_session_id,student_user_id) DO UPDATE SET status=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.status ELSE EXCLUDED.status END,
           attended_seconds=EXCLUDED.attended_seconds,attendance_percentage=EXCLUDED.attendance_percentage,first_join_time=EXCLUDED.first_join_time,last_leave_time=EXCLUDED.last_leave_time,google_participant_name=EXCLUDED.google_participant_name,source=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.source ELSE 'zoom' END"""),
           {"session":session,"student":student["user_id"],"status":status,"seconds":seconds,"percentage":percentage,"first":first_join,"last":last_leave,"name":", ".join(str(p.get("name") or "") for p in entries) or None})
-    await db.execute(text("UPDATE lms_online_meetings SET status='completed',processing_status='attendance_ready',processing_error=NULL WHERE meeting_id=:id"),{"id":meeting_id}); await db.commit()
+    await db.execute(text("UPDATE lms_online_meetings SET processing_status='attendance_ready',processing_error=NULL WHERE meeting_id=:id"),{"id":meeting_id}); await db.commit()
 
 
 def _dt(value: str|None) -> datetime|None:
@@ -704,7 +705,7 @@ async def sweep_missing_attendance(db: AsyncSession, now: datetime, limit: int=1
     # A short grace period lets Zoom's participant report become available.
     rows=(await db.execute(text("""SELECT m.meeting_id FROM lms_online_meetings m
       LEFT JOIN lms_attendance_sessions s ON s.meeting_id=m.meeting_id
-      WHERE m.provider='zoom' AND m.status<>'cancelled' AND m.end_time < :cutoff
+      WHERE m.provider='zoom' AND m.status='completed' AND m.end_time < :cutoff
         AND (s.attendance_session_id IS NULL OR s.sync_status<>'synced')
         AND NOT EXISTS (SELECT 1 FROM lms_zoom_jobs j WHERE j.meeting_id=m.meeting_id
           AND j.job_type='attendance' AND j.status IN ('pending','processing'))

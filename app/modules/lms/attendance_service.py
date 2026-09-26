@@ -166,6 +166,8 @@ async def sync_meeting_attendance(
     meeting, _class, _course, _attendee_count = meeting_row
     if meeting.status == "cancelled":
         raise ValidationError("Cancelled live classes do not have attendance")
+    if meeting.status != "completed":
+        raise ValidationError("End the Zoom meeting for everyone before importing attendance")
     if meeting.end_time > datetime.now(timezone.utc):
         raise ValidationError("Attendance can be imported after the scheduled end time")
     if meeting.provider != "zoom":
