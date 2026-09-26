@@ -58,6 +58,11 @@ and emailed from **CMS > User Management > Authenticator**. Configure the
 Mailjet API/secret keys and a validated `MAILJET_FROM_EMAIL` sender first. Add
 SPF and DKIM records for the sender domain before production use. If delivery
 fails, the UI provides the same single-use setup link for manual sharing.
+The API uses Mailjet HTTPS first and automatically falls back to Mailjet SMTP
+over STARTTLS (`in-v3.mailjet.com:587`) when the hosting network resets or
+cannot reach the HTTPS endpoint. The fallback uses the same Mailjet API key and
+secret; override `MAILJET_SMTP_HOST`, `MAILJET_SMTP_PORT`, or
+`MAILJET_SMTP_FALLBACK_ENABLED` only when required by the deployment.
 
 Authenticator setup invitations expire after **2 days (48 hours)** by default.
 Set `AUTHENTICATOR_SETUP_EXPIRE_MINUTES=2880` in the deployed API environment

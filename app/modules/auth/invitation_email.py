@@ -7,6 +7,7 @@ from datetime import datetime
 import httpx
 
 from app.core.config import settings
+from app.core.mailjet_smtp import send_mailjet_smtp_message
 from app.modules.auth.schemas.auth import AuthenticatorPortalLink
 
 logger = logging.getLogger(__name__)
@@ -177,10 +178,17 @@ async def send_authenticator_invitation(
                     await asyncio.sleep(MAILJET_RETRY_DELAYS_SECONDS[attempt])
 
         if response is None:
+            smtp_result = await send_mailjet_smtp_message(payload["Messages"][0])
+            if smtp_result.sent:
+                return EmailDeliveryResult(True)
             if last_transport_error is not None:
                 raise last_transport_error
-            return EmailDeliveryResult(False, error="The email provider is temporarily unavailable.")
+            return EmailDeliveryResult(False, error=smtp_result.error or "The email provider is temporarily unavailable.")
         if response.is_error:
+            if response.status_code == 429 or response.status_code >= 500:
+                smtp_result = await send_mailjet_smtp_message(payload["Messages"][0])
+                if smtp_result.sent:
+                    return EmailDeliveryResult(True)
             logger.warning(
                 "Mailjet rejected an Authenticator invitation for user email domain %s with status %s",
                 to_email.rsplit("@", 1)[-1],
@@ -246,4 +254,8 @@ async def send_authenticator_invitation(
             type(exc).__name__,
             str(exc),
         )
-        return EmailDeliveryResult(False, error="The email provider is temporarily unavailable.")
+        smtp_result = await send_mailjet_smtp_message(payload["Messages"][0])
+        return EmailDeliveryResult(
+            smtp_result.sent,
+            error=None if smtp_result.sent else "The email provider is temporarily unavailable.",
+        )

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import settings
+from app.core.mailjet_smtp import send_mailjet_smtp_message
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
                 auth=httpx.BasicAuth(settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY),
             )
         if response.is_error:
+            if response.status_code == 429 or response.status_code >= 500:
+                smtp_result = await send_mailjet_smtp_message(message)
+                if smtp_result.sent:
+                    return FormEmailResult(True)
             logger.warning("Mailjet rejected a public form notification with status %s", response.status_code)
             return FormEmailResult(False, "The email provider rejected the message")
         payload = response.json()
@@ -83,4 +88,8 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
         return FormEmailResult(True)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Public form email failed: %s", type(exc).__name__)
-        return FormEmailResult(False, "The email provider is temporarily unavailable")
+        smtp_result = await send_mailjet_smtp_message(message)
+        return FormEmailResult(
+            smtp_result.sent,
+            None if smtp_result.sent else "The email provider is temporarily unavailable",
+        )
