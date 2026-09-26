@@ -136,6 +136,34 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
     study_mode = payload.preferred_study_mode.replace("_", " ").title() if payload.preferred_study_mode else "Not selected"
     price = f"Rs {int(pathway['price']):,}" if pathway and pathway["price"] is not None else "To be confirmed"
+
+    # Mirror into modern CRM leads pipeline
+    try:
+        new_crm_lead = (await db.execute(text("""
+            INSERT INTO crm_leads
+              (full_name, email, phone, highest_qualification, interested_programme, interested_course, source, stage, priority, notes, is_archived)
+            VALUES
+              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course, 'website_admission', 'new_inquiry', 'high', :notes, FALSE)
+            RETURNING lead_id
+        """), {
+            "full_name": payload.full_name.strip(),
+            "email": str(payload.email).strip().lower(),
+            "phone": payload.phone.strip(),
+            "highest_qualification": payload.highest_qualification.strip(),
+            "interested_programme": pathway["programme_name"] if pathway else None,
+            "interested_course": pathway["course_name"] if pathway else None,
+            "notes": f"Submitted via Website Admission Form. Submission ID: {submission_id}",
+        })).mappings().one()
+        await db.execute(text("""
+            INSERT INTO crm_activities (lead_id, activity_type, content)
+            VALUES (:lead_id, 'note', :content)
+        """), {
+            "lead_id": new_crm_lead["lead_id"],
+            "content": f"New application submitted via website for {(pathway['course_name'] if pathway else None) or 'Academic Pathway'}",
+        })
+        await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to mirror admission lead into crm_leads: %s", exc)
     rows = [
         ("Lead ID", str(lead_id)),
         ("Submitted", submitted_at),
@@ -164,7 +192,33 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     return {"lead_id": lead_id, "status": "new_inquiry", "message": "Your application was received. An advisor will contact you within one business day."}
 
 
-async def send_contact_inquiry(payload: ContactInquiryCreate):
+async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
+
+    # Mirror into modern CRM leads pipeline
+    try:
+        lead_row = (await db.execute(text("""
+            INSERT INTO crm_leads
+              (full_name, email, phone, message, source, stage, priority, notes, is_archived)
+            VALUES
+              (:full_name, :email, :phone, :message, 'website_contact', 'new_inquiry', 'medium', :notes, FALSE)
+            RETURNING lead_id
+        """), {
+            "full_name": payload.full_name.strip(),
+            "email": str(payload.email).strip().lower(),
+            "phone": "Not provided",
+            "message": payload.message.strip(),
+            "notes": f"Website Contact Message:\n{payload.message.strip()}",
+        })).mappings().one()
+        await db.execute(text("""
+            INSERT INTO crm_activities (lead_id, activity_type, content)
+            VALUES (:lead_id, 'note', :content)
+        """), {
+            "lead_id": lead_row["lead_id"],
+            "content": f"New contact enquiry submitted on website: {payload.message.strip()}",
+        })
+        await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to insert contact lead into crm_leads: %s", exc)
     submitted_at = datetime.now(timezone.utc).strftime("%d %B %Y at %H:%M UTC")
     rows = [
         ("Submitted", submitted_at),

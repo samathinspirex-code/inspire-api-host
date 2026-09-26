@@ -75,3 +75,17 @@ class LecturerItem(BaseModel):
 
 class LecturerListResponse(BaseModel):
     data: list[LecturerItem]
+
+
+class InvitationResendFailure(BaseModel):
+    user_id: int
+    full_name: str
+    email: EmailStr
+    message: str
+
+
+class BulkInvitationResendResponse(BaseModel):
+    eligible_count: int
+    sent_count: int
+    failed_count: int
+    failures: list[InvitationResendFailure] = Field(default_factory=list)

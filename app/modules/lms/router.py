@@ -60,6 +60,7 @@ from app.modules.lms.schemas import (
     LecturerCreate,
     LecturerItem,
     LecturerListResponse,
+    BulkInvitationResendResponse,
     LecturerUpdate,
     LmsBootstrapResponse,
     ModuleCreate,
@@ -2040,6 +2041,20 @@ async def send_lms_password_invitation(
 ) -> AuthenticatorInvitationResponse:
     return await service.send_person_authenticator_invitation(
         db, user_id, current_user.user_id
+    )
+
+
+@router.post(
+    "/{kind}/password-invitations/resend",
+    response_model=BulkInvitationResendResponse,
+)
+async def resend_lms_password_invitations(
+    kind: Literal["students", "lecturers"],
+    current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> BulkInvitationResendResponse:
+    return await service.resend_pending_password_invitations(
+        db, kind, current_user.user_id
     )
 
 

@@ -98,9 +98,9 @@ class AdmissionApplicationResponse(BaseModel):
 
 
 class ContactInquiryCreate(BaseModel):
-    full_name: str = Field(..., min_length=2, max_length=255)
+    full_name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    message: str = Field(..., min_length=5, max_length=5000)
+    message: str = Field(..., min_length=1, max_length=5000)
 
 
 class ContactInquiryResponse(BaseModel):

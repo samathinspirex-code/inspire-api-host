@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.core.config import Settings, settings
 from app.modules.auth import service
+from app.modules.lms import service as lms_service
 from app.core.errors import APIError
 from app.modules.auth.repository.authenticator import AuthenticatorRepository
 from app.modules.auth.invitation_email import (
@@ -270,11 +271,11 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(parse_qs(parsed.query)["token"], [setup.setup_token])
                     self.assertEqual(parse_qs(parsed.query)["email"], [setup.email])
 
-    async def test_new_invitation_persists_and_emails_two_day_expiry(self):
+    async def test_new_invitation_persists_and_emails_configured_expiry(self):
         now = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
-        expiry = now + timedelta(days=2)
+        expiry = now + timedelta(days=7)
         default_minutes = Settings.model_fields["AUTHENTICATOR_SETUP_EXPIRE_MINUTES"].default
-        self.assertEqual(default_minutes, 2880)
+        self.assertEqual(default_minutes, 10080)
         user = SimpleNamespace(user_id=25, email="student@example.test", full_name="Student", is_active=True, access_levels=[])
         users = SimpleNamespace(get=AsyncMock(return_value=user))
         tokens = SimpleNamespace(create_setup_token=AsyncMock())
@@ -295,7 +296,7 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sender.await_args.args[3], expiry)
         sessions.revoke_all_for_user.assert_awaited_once_with(25)
         for render in [build_invitation_html, build_invitation_text]:
-            self.assertIn("02 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
+            self.assertIn("07 September 2026 at 12:00 UTC", render(user.full_name, result.setup_url, expiry))
 
     async def test_setup_link_is_valid_until_two_day_boundary_and_stays_single_use(self):
         issued = datetime(2026, 8, 31, 12, tzinfo=timezone.utc)
@@ -380,6 +381,70 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for link in links:
             self.assertIn(link.setup_url, sent_message["HTMLPart"])
             self.assertIn(link.setup_url, sent_message["TextPart"])
+
+    async def test_mailjet_preblocked_result_is_not_reported_as_sent(self):
+        send_response = MagicMock(is_error=False)
+        send_response.json.return_value = {
+            "Messages": [{"Status": "success", "To": [{"MessageID": 123456789}]}]
+        }
+        history_response = MagicMock(is_error=False)
+        history_response.json.return_value = {
+            "Data": [{"EventType": "blocked", "State": "preblocked"}]
+        }
+        send_client = MagicMock(post=AsyncMock(return_value=send_response))
+        history_client = MagicMock(get=AsyncMock(return_value=history_response))
+        send_context = MagicMock(
+            __aenter__=AsyncMock(return_value=send_client),
+            __aexit__=AsyncMock(return_value=None),
+        )
+        history_context = MagicMock(
+            __aenter__=AsyncMock(return_value=history_client),
+            __aexit__=AsyncMock(return_value=None),
+        )
+
+        with (
+            patch.object(settings, "MAILJET_API_KEY", "public-key"),
+            patch.object(settings, "MAILJET_SECRET_KEY", "secret-key"),
+            patch.object(settings, "MAILJET_FROM_EMAIL", "lms@college.example"),
+            patch(
+                "app.modules.auth.invitation_email.httpx.AsyncClient",
+                side_effect=[send_context, history_context],
+            ),
+        ):
+            result = await send_authenticator_invitation(
+                "student@example.com",
+                "Example Student",
+                "https://lms.example.com/setup",
+                datetime(2026, 8, 12, 10, 30, tzinfo=timezone.utc),
+                "password-setup-25",
+                setup_method="password",
+            )
+
+        self.assertFalse(result.sent)
+        self.assertIn("blocked this recipient", result.error)
+
+    async def test_bulk_resend_only_targets_sent_and_expired_accounts(self):
+        people = [
+            SimpleNamespace(user_id=1, full_name="Sent", email="sent@example.com", is_active=True, authenticator_status="invitation_sent"),
+            SimpleNamespace(user_id=2, full_name="Expired", email="expired@example.com", is_active=True, authenticator_status="invitation_expired"),
+            SimpleNamespace(user_id=3, full_name="New", email="new@example.com", is_active=True, authenticator_status="not_invited"),
+            SimpleNamespace(user_id=4, full_name="Configured", email="configured@example.com", is_active=True, authenticator_status="configured"),
+            SimpleNamespace(user_id=5, full_name="Inactive", email="inactive@example.com", is_active=False, authenticator_status="invitation_sent"),
+        ]
+        sender = AsyncMock(side_effect=[
+            SimpleNamespace(email_sent=True, delivery_message="sent"),
+            SimpleNamespace(email_sent=False, delivery_message="blocked"),
+        ])
+        with (
+            patch.object(lms_service, "list_students", AsyncMock(return_value=SimpleNamespace(data=people))),
+            patch.object(lms_service, "send_person_authenticator_invitation", sender),
+        ):
+            result = await lms_service.resend_pending_password_invitations(None, "students", 99)
+
+        self.assertEqual([call.args[1] for call in sender.await_args_list], [1, 2])
+        self.assertEqual(result.eligible_count, 2)
+        self.assertEqual(result.sent_count, 1)
+        self.assertEqual(result.failed_count, 1)
 
 
 if __name__ == "__main__":

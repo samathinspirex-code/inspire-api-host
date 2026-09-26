@@ -158,6 +158,45 @@ async def send_authenticator_invitation(
         recipient = (message.get("To") or [{}])[0]
         raw_message_id = recipient.get("MessageID") or recipient.get("MessageUUID")
         message_id = str(raw_message_id) if raw_message_id is not None else None
+        if message_id:
+            try:
+                async with httpx.AsyncClient(timeout=5) as history_client:
+                    history_response = await history_client.get(
+                        f"https://api.mailjet.com/v3/REST/messagehistory/{message_id}",
+                        auth=httpx.BasicAuth(
+                            settings.MAILJET_API_KEY, settings.MAILJET_SECRET_KEY
+                        ),
+                    )
+                if not history_response.is_error:
+                    events = history_response.json().get("Data") or []
+                    failed_event = next(
+                        (
+                            item
+                            for item in events
+                            if str(item.get("EventType", "")).lower()
+                            in {"blocked", "bounce", "spam"}
+                        ),
+                        None,
+                    )
+                    if failed_event:
+                        state = str(failed_event.get("State") or "blocked").replace("_", " ")
+                        logger.warning(
+                            "Mailjet did not deliver an invitation for user email domain %s: %s",
+                            to_email.rsplit("@", 1)[-1],
+                            state,
+                        )
+                        return EmailDeliveryResult(
+                            False,
+                            provider_message_id=message_id,
+                            error=(
+                                "Mailjet blocked this recipient before delivery. "
+                                "Check the address and Mailjet's blocked contacts list."
+                            ),
+                        )
+            except (httpx.HTTPError, TypeError, ValueError):
+                # Mailjet's event record can lag behind the accepted send response.
+                # In that case the accepted response remains the best available result.
+                pass
         return EmailDeliveryResult(True, provider_message_id=message_id)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Authenticator invitation email failed: %s", type(exc).__name__)
