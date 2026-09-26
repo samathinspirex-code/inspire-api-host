@@ -491,6 +491,36 @@ async def mark_end_requested(db: AsyncSession, meeting_id: int, user_id: int, ro
     return {"meeting_id":meeting_id,"end_requested":True}
 
 
+async def confirm_end_requested(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> dict:
+    meeting=(await db.execute(text("""SELECT * FROM lms_online_meetings
+      WHERE meeting_id=:id AND provider='zoom' AND status IN ('scheduled','completed')"""),{"id":meeting_id})).mappings().first()
+    if not meeting: raise NotFoundError("Zoom meeting not found")
+    lecturer_host=role=="LECTURER" and await _lecturer_can_host(
+        db,meeting_id,meeting["class_id"],meeting["lecturer_user_id"],user_id
+    )
+    if role not in {"SUPER_ADMIN","ADMIN"} and not lecturer_host:
+        raise ForbiddenError("Only this meeting's host can end it for everyone")
+    if meeting["status"] == "completed":
+        return {"meeting_id":meeting_id,"status":"completed"}
+    confirmed=await db.scalar(text("""SELECT 1 FROM lms_online_meetings
+      WHERE meeting_id=:id AND status='scheduled'
+        AND processing_status='end_requested'
+        AND updated_at >= now()-interval '2 minutes'"""),{"id":meeting_id})
+    if not confirmed:
+        raise ValidationError("End Meeting for All was not confirmed")
+    await db.execute(text("""UPDATE lms_online_meetings
+      SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
+      WHERE meeting_id=:id AND status='scheduled'"""),{"id":meeting_id})
+    await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
+      VALUES(:key,:meeting,'attendance',CAST(:payload AS jsonb),now()+interval '2 minutes')
+      ON CONFLICT(event_key) DO NOTHING"""),{
+        "key":f"lms:end-confirmed:{meeting_id}","meeting":meeting_id,
+        "payload":json.dumps({"event":"lms.end_confirmed","meeting_id":meeting_id}),
+    })
+    await db.commit()
+    return {"meeting_id":meeting_id,"status":"completed"}
+
+
 def verify_webhook(timestamp: str, body: bytes, signature: str) -> bool:
     message=f"v0:{timestamp}:{body.decode()}"; expected="v0="+hmac.new(settings.ZOOM_WEBHOOK_SECRET.encode(),message.encode(),hashlib.sha256).hexdigest()
     return bool(settings.ZOOM_WEBHOOK_SECRET and hmac.compare_digest(expected,signature))
