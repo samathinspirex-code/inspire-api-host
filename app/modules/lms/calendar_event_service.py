@@ -101,6 +101,8 @@ async def list_events(db: AsyncSession, user_id: int, role: str) -> CalendarEven
         .outerjoin(Program, Program.program_id == LmsCalendarEvent.program_id)
         .outerjoin(LmsClass, LmsClass.class_id == LmsCalendarEvent.class_id)
         .outerjoin(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+        # Exclude cancelled events — they should not appear on any calendar view.
+        .where(LmsCalendarEvent.status != "cancelled")
         .order_by(LmsCalendarEvent.start_time, LmsCalendarEvent.event_id)
     )
     managed_classes = None if scope is None else scope[0]

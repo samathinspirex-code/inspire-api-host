@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, column, func, select, table, text
+from sqlalchemy import and_, column, func, or_, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -9,6 +9,7 @@ from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
     CourseEnrollment,
+    CourseLecturer,
     LmsClass,
     LmsCourse,
     OnlineMeeting,
@@ -98,7 +99,7 @@ class MeetingRepository:
         return item
 
     async def get_for_organiser(self, meeting_id: int, user_id: int, role: str):
-        """Administrators can manage any live class; lecturers only their own."""
+        """Administrators can manage any live class; lecturers their own or assigned classes."""
         attendee_count = (
             select(func.count(ClassStudent.student_user_id))
             .where(ClassStudent.class_id == OnlineMeeting.class_id)
@@ -112,7 +113,25 @@ class MeetingRepository:
             .where(OnlineMeeting.meeting_id == meeting_id)
         )
         if role not in {"SUPER_ADMIN", "ADMIN"}:
-            stmt = stmt.where(OnlineMeeting.lecturer_user_id == user_id)
+            lecturer_class_ids = (
+                select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+            )
+            lecturer_course_ids = (
+                select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
+            )
+            lecturer_audience_meetings = (
+                select(MEETING_AUDIENCE.c.meeting_id).where(
+                    MEETING_AUDIENCE.c.class_id.in_(lecturer_class_ids)
+                )
+            )
+            stmt = stmt.where(
+                or_(
+                    OnlineMeeting.lecturer_user_id == user_id,
+                    OnlineMeeting.class_id.in_(lecturer_class_ids),
+                    OnlineMeeting.meeting_id.in_(lecturer_audience_meetings),
+                    LmsClass.course_id.in_(lecturer_course_ids),
+                )
+            )
         return (await self.db.execute(stmt)).one_or_none()
 
     async def update(self, item: OnlineMeeting, data: dict) -> OnlineMeeting:
@@ -137,24 +156,56 @@ class MeetingRepository:
         if role in {"SUPER_ADMIN", "ADMIN"}:
             pass
         elif role == "LECTURER":
-            stmt = stmt.where(OnlineMeeting.lecturer_user_id == user_id)
-        else:
-            now = datetime.now(timezone.utc)
-            # A meeting reaches a student through any audience class they are in,
-            # but only while that class is running and their enrolment is current.
-            audience_class = aliased(LmsClass)
-            audience_meetings = select(MEETING_AUDIENCE.c.meeting_id).where(
-                MEETING_AUDIENCE.c.class_id == ClassStudent.class_id,
-                ClassStudent.student_user_id == user_id,
-                audience_class.class_id == ClassStudent.class_id,
-                audience_class.status != "cancelled",
-                CourseEnrollment.course_id == audience_class.course_id,
-                CourseEnrollment.student_user_id == user_id,
-                CourseEnrollment.status == "enrolled",
+            lecturer_class_ids = (
+                select(ClassLecturer.class_id).where(ClassLecturer.lecturer_user_id == user_id)
+            )
+            lecturer_course_ids = (
+                select(CourseLecturer.course_id).where(CourseLecturer.lecturer_user_id == user_id)
+            )
+            lecturer_audience_meetings = (
+                select(MEETING_AUDIENCE.c.meeting_id).where(
+                    MEETING_AUDIENCE.c.class_id.in_(lecturer_class_ids)
+                )
             )
             stmt = stmt.where(
-                OnlineMeeting.meeting_id.in_(audience_meetings),
-                LmsCourse.status == "active",
+                or_(
+                    OnlineMeeting.lecturer_user_id == user_id,
+                    OnlineMeeting.class_id.in_(lecturer_class_ids),
+                    OnlineMeeting.meeting_id.in_(lecturer_audience_meetings),
+                    LmsClass.course_id.in_(lecturer_course_ids),
+                )
+            )
+        else:
+            now = datetime.now(timezone.utc)
+            audience_class = aliased(LmsClass)
+            valid_student_classes = (
+                select(ClassStudent.class_id)
+                .join(audience_class, audience_class.class_id == ClassStudent.class_id)
+                .join(
+                    CourseEnrollment,
+                    and_(
+                        CourseEnrollment.course_id == audience_class.course_id,
+                        CourseEnrollment.student_user_id == user_id,
+                    ),
+                )
+                .where(
+                    ClassStudent.student_user_id == user_id,
+                    CourseEnrollment.status == "enrolled",
+                    audience_class.status != "cancelled",
+                )
+            )
+            student_audience_meetings = (
+                select(MEETING_AUDIENCE.c.meeting_id).where(
+                    MEETING_AUDIENCE.c.class_id.in_(valid_student_classes)
+                )
+            )
+            stmt = stmt.where(
+                or_(
+                    OnlineMeeting.class_id.in_(valid_student_classes),
+                    OnlineMeeting.meeting_id.in_(student_audience_meetings),
+                ),
+                LmsClass.status != "cancelled",
+                LmsCourse.status != "archived",
                 OnlineMeeting.status == "scheduled",
                 OnlineMeeting.end_time >= now,
             )
