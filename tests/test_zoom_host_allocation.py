@@ -11,6 +11,7 @@ from app.modules.lms.zoom_service import (
     _zak_token_url,
     delete_class_recording,
     receive_webhook,
+    sweep_missing_attendance,
 )
 
 
@@ -48,6 +49,31 @@ class _WebhookDatabase:
 
     async def commit(self):
         self.commits += 1
+
+
+class _EmptyMappings:
+    def all(self):
+        return []
+
+
+class _SweepResult:
+    def mappings(self):
+        return _EmptyMappings()
+
+
+class _SweepDatabase:
+    def __init__(self):
+        self.statements = []
+
+    async def scalar(self, statement, parameters=None):
+        return True
+
+    async def execute(self, statement, parameters):
+        self.statements.append((str(statement), parameters))
+        return _SweepResult()
+
+    async def commit(self):
+        pass
 
 
 class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
@@ -119,6 +145,27 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("INSERT INTO lms_zoom_jobs", database.statements[1][0])
         self.assertEqual(database.statements[1][1]["kind"], "attendance")
         self.assertEqual(database.commits, 1)
+
+    async def test_recording_completed_does_not_mark_live_meeting_complete(self):
+        database = _WebhookDatabase()
+
+        await receive_webhook(database, {
+            "event": "recording.completed",
+            "payload": {"object": {"id": "123456", "uuid": "meeting-uuid"}},
+        })
+
+        self.assertEqual(len(database.statements), 1)
+        self.assertNotIn("SET status='completed'", database.statements[0][0])
+        self.assertIn("INSERT INTO lms_zoom_jobs", database.statements[0][0])
+        self.assertEqual(database.statements[0][1]["kind"], "recording")
+        self.assertEqual(database.commits, 1)
+
+    async def test_attendance_sweep_only_targets_confirmed_completed_meetings(self):
+        database = _SweepDatabase()
+
+        await sweep_missing_attendance(database, datetime.now(timezone.utc))
+
+        self.assertIn("m.status='completed'", database.statements[0][0])
 
 
 if __name__ == "__main__":
