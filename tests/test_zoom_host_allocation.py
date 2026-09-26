@@ -36,12 +36,15 @@ class _Database:
 
 
 class _WebhookDatabase:
-    def __init__(self):
+    def __init__(self, confirmed_end=True):
         self.statements = []
         self.commits = 0
+        self.confirmed_end = confirmed_end
+        self.scalar_calls = 0
 
     async def scalar(self, statement, parameters):
-        return 7
+        self.scalar_calls += 1
+        return 7 if self.scalar_calls == 1 else self.confirmed_end
 
     async def execute(self, statement, parameters):
         self.statements.append((str(statement), parameters))
@@ -158,6 +161,17 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SET status='completed'", database.statements[0][0])
         self.assertIn("INSERT INTO lms_zoom_jobs", database.statements[0][0])
         self.assertEqual(database.statements[0][1]["kind"], "recording")
+        self.assertEqual(database.commits, 1)
+
+    async def test_meeting_ended_without_explicit_end_for_all_stays_scheduled(self):
+        database = _WebhookDatabase(confirmed_end=False)
+
+        await receive_webhook(database, {
+            "event": "meeting.ended",
+            "payload": {"object": {"id": "123456", "uuid": "meeting-uuid"}},
+        })
+
+        self.assertEqual(database.statements, [])
         self.assertEqual(database.commits, 1)
 
     async def test_attendance_sweep_only_targets_confirmed_completed_meetings(self):
