@@ -73,8 +73,24 @@ def _require_configuration() -> None:
         )
 
 
+def _vimeo_error_detail(response: httpx.Response) -> str:
+    """Vimeo's own explanation for a rejected call, for the server log only."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    parts = [
+        f"HTTP {response.status_code}",
+        str(payload.get("error") or "").strip(),
+        str(payload.get("developer_message") or "").strip(),
+        f"error_code {payload['error_code']}" if payload.get("error_code") else "",
+    ]
+    return " | ".join(part for part in parts if part)
+
+
 def _api_error(response: httpx.Response, action: str) -> ValidationError:
     # Vimeo errors can include account details. Keep the client-facing error useful but safe.
+    logger.warning("Vimeo refused to %s — %s", action, _vimeo_error_detail(response))
     if response.status_code in {401, 403}:
         if "organize the video" in action:
             return VimeoPermissionError(
@@ -89,7 +105,12 @@ def _api_error(response: httpx.Response, action: str) -> ValidationError:
         return VimeoPermissionError(f"Vimeo refused permission to {action}. Check the token scopes.")
     if response.status_code == 429:
         return ValidationError("Vimeo is busy. Please wait a moment and try again.")
-    return ValidationError(f"Vimeo could not {action}. Please try again or review the Vimeo app settings.")
+    # Vimeo's own wording is the only way to tell a quota, plan, or outage
+    # failure apart once a background job has recorded the error and moved on.
+    return ValidationError(
+        f"Vimeo could not {action}. Please try again or review the Vimeo app settings. "
+        f"Vimeo said — {_vimeo_error_detail(response)}"
+    )
 
 
 class VimeoClient:
