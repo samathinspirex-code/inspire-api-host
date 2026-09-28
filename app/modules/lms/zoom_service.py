@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -623,6 +624,29 @@ async def _past_participants(context, token: str) -> list[dict]:
     raise ValidationError(f"{message} Zoom said — {detail}" if detail else message)
 
 
+def _name_key(value) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).split())
+
+
+def _student_for_zoom_name(zoom_name: str, roster: list) -> dict | None:
+    """Match a Zoom display name to one enrolled student name. Email is not used."""
+    zoom_key = _name_key(zoom_name)
+    if len(zoom_key) < 2:
+        return None
+    exact = [row for row in roster if _name_key(row["full_name"]) == zoom_key]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    zoom_words = set(zoom_key.split())
+    partial = []
+    for row in roster:
+        enrolled_words = set(_name_key(row["full_name"]).split())
+        if zoom_words and enrolled_words and (zoom_words <= enrolled_words or enrolled_words <= zoom_words):
+            partial.append(row)
+    return partial[0] if len(partial) == 1 else None
+
+
 async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> None:
     context=(await db.execute(text("""SELECT m.*,s.attendance_threshold_percentage FROM lms_online_meetings m
       JOIN lms_zoom_settings s ON s.settings_id=1 WHERE m.meeting_id=:id AND m.provider='zoom'"""),{"id":meeting_id})).mappings().first()
@@ -632,20 +656,21 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
         raise ValidationError("The Zoom host account for this class is no longer connected, so attendance cannot be imported. Reconnect it in LMS Settings.")
     token=await _access_token(db,dict(host))
     participants=await _past_participants(context,token); actual_start=min((_dt(p.get("join_time")) for p in participants if p.get("join_time")),default=context["start_time"]); actual_end=max((_dt(p.get("leave_time")) for p in participants if p.get("leave_time")),default=context["end_time"]); window=max(1,int((actual_end-actual_start).total_seconds()))
-    roster=(await db.execute(text("""SELECT u.user_id,lower(u.email) email,u.full_name FROM lms_class_students cs JOIN users u ON u.user_id=cs.student_user_id
+    roster=(await db.execute(text("""SELECT u.user_id,u.full_name FROM lms_class_students cs JOIN users u ON u.user_id=cs.student_user_id
       WHERE cs.class_id=:class_id AND cs.assigned_at<=:ended AND u.is_active"""),{"class_id":context["class_id"],"ended":actual_end})).mappings().all()
-    buckets={row["email"]:[] for row in roster}; unmatched=[]
+    buckets={row["user_id"]:[] for row in roster}; unmatched=[]
     for p in participants:
-        email=str(p.get("user_email") or "").lower(); duration=int(p.get("duration") or 0)
-        if email in buckets: buckets[email].append(p)
-        else: unmatched.append({"display_name":p.get("name") or "Unknown participant","participant_type":"zoom","attended_seconds":duration})
+        duration=int(p.get("duration") or 0)
+        student=_student_for_zoom_name(p.get("name"), roster)
+        if student: buckets[student["user_id"]].append(p)
+        else: unmatched.append({"display_name":p.get("name") or "Unknown participant","participant_type":"anonymous","attended_seconds":duration})
     session=await db.scalar(text("""INSERT INTO lms_attendance_sessions(meeting_id,class_id,provider_reference,actual_start_time,actual_end_time,threshold_percentage,sync_status,unmatched_participants,synced_by,synced_at)
       VALUES(:m,:c,:ref,:start,:end,:threshold,'synced',CAST(:unmatched AS jsonb),:by,now()) ON CONFLICT(meeting_id) DO UPDATE SET provider_reference=EXCLUDED.provider_reference,
       actual_start_time=EXCLUDED.actual_start_time,actual_end_time=EXCLUDED.actual_end_time,threshold_percentage=EXCLUDED.threshold_percentage,sync_status='synced',sync_error=NULL,unmatched_participants=EXCLUDED.unmatched_participants,synced_by=EXCLUDED.synced_by,synced_at=now() RETURNING attendance_session_id"""),
       {"m":meeting_id,"c":context["class_id"],"ref":context["provider_meeting_uuid"],"start":actual_start,"end":actual_end,"threshold":context["attendance_threshold_percentage"],"unmatched":json.dumps(unmatched),"by":synced_by})
     from app.modules.lms.attendance_service import _attendance_status, _merge_duration
     for student in roster:
-        entries=buckets[student["email"]]
+        entries=buckets[student["user_id"]]
         # Zoom reports one row per join, so a student who reconnects or is signed
         # in on two devices appears several times. Merge the intervals instead of
         # summing durations so overlapping sessions are not counted twice.
@@ -697,11 +722,13 @@ async def process_recordings(db: AsyncSession, meeting_id: int, payload: dict) -
     if not preferred: return
     course=await db.get(__import__('app.modules.lms.models',fromlist=['LmsCourse']).LmsCourse,meeting["course_id"])
     course_folder=await vimeo_service.ensure_course_workspace(db,course)
+    await db.commit()
     async with vimeo_service.VimeoClient() as vimeo:
         folder=await vimeo.ensure_folder(f"Recordings · {meeting['class_code']}",course_folder)
     for part,file in enumerate(preferred,1):
         exists=await db.scalar(text("SELECT 1 FROM lms_zoom_recordings WHERE zoom_recording_file_id=:id AND status IN ('published','deleted')"),{"id":file["id"]})
         if exists: continue
+        await db.commit()
         temp=None
         try:
             fd,temp=tempfile.mkstemp(suffix='.mp4'); os.close(fd)

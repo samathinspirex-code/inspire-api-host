@@ -647,6 +647,7 @@ async def ingest_course_content(
             elif item_type == "pdf":
                 if not item_resource_url:
                     raise ValidationError("PDF learning item has no resource URL")
+                await _release_connection(db)
                 pdf_data = await _download_pdf(item_resource_url)
                 pages = await asyncio.to_thread(_extract_pdf_pages, pdf_data)
                 chunks = [
@@ -660,6 +661,7 @@ async def ingest_course_content(
             else:
                 if not item_resource_url:
                     raise ValidationError("Video learning item has no Vimeo URL")
+                await _release_connection(db)
                 chunks = await _download_vimeo_transcript(item_resource_url)
                 source.content = " ".join(content for content, _, _, _ in chunks)[:50000]
             await _replace_chunks(db, source, chunks)
@@ -692,12 +694,31 @@ async def ingest_course_content(
     )
 
 
+_course_automation_locks: dict[int, asyncio.Lock] = {}
+
+
+def _course_automation_lock(course_id: int) -> asyncio.Lock:
+    lock = _course_automation_locks.get(course_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _course_automation_locks[course_id] = lock
+    return lock
+
+
+async def _release_connection(db: AsyncSession) -> None:
+    """Return the pooled connection before a slow download or model call."""
+    await db.commit()
+
+
 async def automate_course_intelligence(
     course_id: int, user_id: int, target_item_id: int | None = None, *, ingest: bool = True
 ) -> None:
     """Synchronize a course and quality-publish missing video question banks."""
+    lock = _course_automation_lock(course_id)
+    if lock.locked():
+        return
     try:
-        async with AsyncSessionLocal() as db:
+        async with lock, AsyncSessionLocal() as db:
             system = await get_system_settings(db)
             if not system.automation_enabled:
                 return
@@ -857,6 +878,10 @@ def rank_chunks(question: str, rows: list[tuple[LmsCourseKnowledgeChunk, LmsCour
             meaningful -= {"caption", "captions", "transcript", "video", "vimeo", "watch"}
     elif pdf_request and any(source.source_type == "pdf" for _, source in rows):
         rows = [(chunk, source) for chunk, source in rows if source.source_type == "pdf"]
+        # "pdf" only chooses the document. It is not a word the lesson text has to contain.
+        meaningful -= {"document", "pdf", "slide", "slides"}
+        if not meaningful:
+            summary_request = True
     ranked = []
     for chunk, source in rows:
         title = _terms(source.title)
@@ -1275,6 +1300,9 @@ async def generate_questions(
         f"[{('page ' + str(chunk.page_number)) if chunk.page_number else ('time ' + str(chunk.start_seconds) + ' seconds') if chunk.start_seconds is not None else 'lecture content'}]\n{chunk.content}"
         for chunk in chunk_rows
     )[:60000]
+    learning_item_id = item.learning_item_id
+    lecture_title = item.title
+    await _release_connection(db)
     candidate_count = min(30, max(payload.count, payload.count + 8))
     question_schema = {
         "type": "object",
@@ -1313,7 +1341,7 @@ async def generate_questions(
             "Use roughly one-third easy, one-half medium, and the remainder hard. "
             "Explanations must teach why the answer is correct. Use a timestamp or page in source_locator when the content provides one."
         ),
-        "input": f"Lecture: {item.title}\nGenerate exactly {candidate_count} candidates.\n\nApproved content:\n{context}",
+        "input": f"Lecture: {lecture_title}\nGenerate exactly {candidate_count} candidates.\n\nApproved content:\n{context}",
         "reasoning": {"effort": "medium"},
         "text": {"format": {"type": "json_schema", "name": "lecture_question_bank", "strict": True, "schema": question_schema}},
         "max_output_tokens": max(settings.OPENAI_MAX_OUTPUT_TOKENS, 12000),
@@ -1328,7 +1356,7 @@ async def generate_questions(
             )
             response.raise_for_status()
             generated = json.loads(_response_output_text(response.json()))["questions"]
-            generated = (await _review_generated_questions(context, item.title, generated))[:payload.count]
+            generated = (await _review_generated_questions(context, lecture_title, generated))[:payload.count]
     except httpx.HTTPStatusError as exc:
         try:
             api_error = exc.response.json().get("error", {})
@@ -1366,13 +1394,13 @@ async def generate_questions(
         # Keep lecturer-written questions and past student attempts intact.  Old AI
         # questions are retained for audit/history but no longer appear in the bank.
         await db.execute(update(LmsLectureQuestion).where(
-            LmsLectureQuestion.learning_item_id == item.learning_item_id,
+            LmsLectureQuestion.learning_item_id == learning_item_id,
             LmsLectureQuestion.generated_by_ai.is_(True),
             LmsLectureQuestion.status.in_(["generated", "approved"]),
         ).values(status="rejected"))
     else:
         await db.execute(delete(LmsLectureQuestion).where(
-            LmsLectureQuestion.learning_item_id == item.learning_item_id,
+            LmsLectureQuestion.learning_item_id == learning_item_id,
             LmsLectureQuestion.status.in_(["generated", "rejected"]),
             ~select(LmsLectureQuizAttemptQuestion.question_id).where(
                 LmsLectureQuizAttemptQuestion.question_id == LmsLectureQuestion.question_id
@@ -1381,7 +1409,7 @@ async def generate_questions(
     for data in generated:
         db.add(LmsLectureQuestion(
             course_id=course_id,
-            learning_item_id=item.learning_item_id,
+            learning_item_id=learning_item_id,
             created_by=user_id,
             generated_by_ai=True,
             status="approved" if auto_approve else "generated",

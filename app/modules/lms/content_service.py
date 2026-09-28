@@ -279,6 +279,25 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
     return item
 
 
+async def read_learning_item_pdf(db: AsyncSession, item_id: int, user_id: int, role: str) -> bytes:
+    """Load a lesson PDF on the server so the student viewer is not blocked by file-store rules."""
+    item = await db.get(LmsLearningItem, item_id)
+    if item is None or item.item_type != "pdf" or not item.resource_url:
+        raise NotFoundError("PDF material not found")
+    module = await db.get(LmsModule, item.module_id)
+    if module is None:
+        raise NotFoundError("PDF material not found")
+    if role == "STUDENT":
+        await get_accessible_student_item(db, item_id, user_id)
+    else:
+        await _ensure_course_access(db, module.course_id, user_id, role)
+    resource_url = item.resource_url
+    await db.commit()
+    from app.modules.lms.assistant_service import _download_pdf
+
+    return await _download_pdf(resource_url)
+
+
 def _item_response(
     item,
     expose_resource: bool = True,
