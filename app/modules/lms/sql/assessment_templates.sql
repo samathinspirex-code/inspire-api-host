@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS lms_assessment_templates (
     submission_type VARCHAR(30),
     duration_minutes INTEGER,
     max_marks NUMERIC(8, 2) NOT NULL DEFAULT 0,
+    template_name VARCHAR(255),
     created_by INTEGER NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -33,3 +34,6 @@ CREATE TABLE IF NOT EXISTS lms_assessment_template_questions (
 
 CREATE INDEX IF NOT EXISTS idx_lms_assessment_template_questions
     ON lms_assessment_template_questions (template_id, position);
+
+ALTER TABLE lms_assessment_templates ADD COLUMN IF NOT EXISTS template_name VARCHAR(255);
+UPDATE lms_assessment_templates SET template_name = title WHERE template_name IS NULL OR btrim(template_name) = '';

@@ -40,6 +40,14 @@ logger = logging.getLogger(__name__)
 _thumbnail_refresh_slots = asyncio.Semaphore(2)
 
 
+def _vimeo_name(value: str) -> str:
+    """Vimeo rejects a video title longer than 128 characters."""
+    name = " ".join(value.split())
+    if len(name) <= 128:
+        return name
+    return name[:125].rstrip() + "..."
+
+
 def _vimeo_description(value: str | None) -> str | None:
     """Convert the LMS rich-text description to Vimeo-safe plain text."""
     if not value or not value.strip():
@@ -138,7 +146,7 @@ class VimeoClient:
 
     async def create_upload(self, title: str, description: str | None, file_size: int) -> VimeoUploadTicketResponse:
         payload = {
-            "name": title,
+            "name": _vimeo_name(title),
             "description": _vimeo_description(description),
             "upload": {"approach": "tus", "size": file_size},
             "privacy": {"view": "unlisted", "embed": "whitelist", "download": False},
@@ -163,7 +171,7 @@ class VimeoClient:
 
     async def update_video(self, video_uri: str, title: str, description: str | None) -> dict:
         return await self.request(
-            "PATCH", video_uri, action="update the Vimeo video", json={"name": title, "description": _vimeo_description(description)}
+            "PATCH", video_uri, action="update the Vimeo video", json={"name": _vimeo_name(title), "description": _vimeo_description(description)}
         )
 
     async def update_video_privacy(self, video_uri: str) -> dict:
@@ -261,14 +269,21 @@ async def _course_programme(db: AsyncSession, course: LmsCourse) -> Program:
 async def ensure_course_workspace(db: AsyncSession, course: LmsCourse) -> str:
     if course.vimeo_folder_uri:
         return course.vimeo_folder_uri
+    await db.commit()
+    is_orientation = bool(course.is_orientation or course.program_id is None)
+    programme_label = None
+    if not is_orientation:
+        programme = await _course_programme(db, course)
+        programme_label = f"{programme.code} · {programme.title}"
+        await db.commit()
+    course_label = f"{course.code} · {course.title}"
     async with VimeoClient() as vimeo:
         root = await vimeo.ensure_folder(settings.VIMEO_ROOT_FOLDER.strip() or "INSPIRE COLLEGE")
-        if course.is_orientation or course.program_id is None:
+        if is_orientation:
             parent_folder = await vimeo.ensure_folder("Orientation", root)
         else:
-            programme = await _course_programme(db, course)
-            parent_folder = await vimeo.ensure_folder(f"{programme.code} · {programme.title}", root)
-        course_folder = await vimeo.ensure_folder(f"{course.code} · {course.title}", parent_folder)
+            parent_folder = await vimeo.ensure_folder(programme_label, root)
+        course_folder = await vimeo.ensure_folder(course_label, parent_folder)
     course.vimeo_folder_uri = course_folder
     await db.commit()
     return course_folder

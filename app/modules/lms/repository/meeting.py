@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, column, func, or_, select, table, text
+from sqlalchemy import and_, case, column, func, or_, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -179,6 +179,7 @@ class MeetingRepository:
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
             .where(OnlineMeeting.status != "cancelled")
         )
+        now = datetime.now(timezone.utc)
         if role in {"SUPER_ADMIN", "ADMIN"}:
             pass
         elif role == "LECTURER":
@@ -197,7 +198,6 @@ class MeetingRepository:
                 )
             )
         else:
-            now = datetime.now(timezone.utc)
             audience_class = aliased(LmsClass)
             valid_student_classes = (
                 select(ClassStudent.class_id)
@@ -230,5 +230,12 @@ class MeetingRepository:
                 OnlineMeeting.status == "scheduled",
                 OnlineMeeting.end_time >= now,
             )
-        stmt = stmt.order_by(OnlineMeeting.start_time.desc())
+        # Next scheduled class first. A meeting already marked completed stays with
+        # the held classes even if its scheduled end time has not passed yet.
+        still_to_be_held = and_(OnlineMeeting.status == "scheduled", OnlineMeeting.end_time >= now)
+        stmt = stmt.order_by(
+            case((still_to_be_held, 0), else_=1),
+            case((still_to_be_held, OnlineMeeting.start_time)).asc().nulls_last(),
+            OnlineMeeting.start_time.desc(),
+        )
         return list((await self.db.execute(stmt)).all())

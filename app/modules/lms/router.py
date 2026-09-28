@@ -1156,6 +1156,21 @@ async def delete_studio_lecture_question(
     return Response(status_code=204)
 
 
+@router.get("/my/learning-items/{item_id}/pdf")
+async def get_learning_item_pdf(
+    item_id: int,
+    current_user: CurrentUser = Depends(portal_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    role = service.resolve_role(current_user.access)
+    data = await content_service.read_learning_item_pdf(db, item_id, current_user.user_id, role)
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline", "Cache-Control": "private, no-store"},
+    )
+
+
 @router.get("/my/learning-items/{item_id}/lecture-quiz", response_model=LectureQuizAttemptResponse)
 async def get_my_lecture_quiz(
     item_id: int,

@@ -19,6 +19,7 @@ class LmsAssessmentTemplate(Base):
     submission_type: Mapped[str | None] = mapped_column(String(30))
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     max_marks: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=0)
+    template_name: Mapped[str | None] = mapped_column(String(255))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

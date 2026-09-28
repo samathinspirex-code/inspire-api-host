@@ -126,6 +126,17 @@ def _report_item(row) -> AttendanceReportItem:
     )
 
 
+def _unmatched_participant(item: dict) -> UnmatchedParticipantItem:
+    kind = item.get("participant_type")
+    if kind not in {"signed_in", "anonymous", "phone"}:
+        kind = "anonymous"
+    return UnmatchedParticipantItem(
+        display_name=item.get("display_name") or "Unknown participant",
+        participant_type=kind,
+        attended_seconds=int(item.get("attended_seconds") or 0),
+    )
+
+
 async def _session_item(repository: AttendanceRepository, context) -> AttendanceSessionItem:
     session, meeting, class_, course = context
     rows = await repository.list_session_records(session.attendance_session_id)
@@ -147,7 +158,7 @@ async def _session_item(repository: AttendanceRepository, context) -> Attendance
         synced_at=session.synced_at,
         present_count=sum(item.status == "present" for item in records),
         absent_count=sum(item.status == "absent" for item in records),
-        unmatched_participants=[UnmatchedParticipantItem(**item) for item in session.unmatched_participants],
+        unmatched_participants=[_unmatched_participant(item) for item in (session.unmatched_participants or [])],
         records=records,
     )
 
@@ -181,6 +192,14 @@ async def sync_meeting_attendance(
     return await _session_item(repository, context)
 
 
+async def _require_lecturer_class_access(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> None:
+    """Lecturers may review attendance for a class they are assigned to, even when an admin scheduled it."""
+    if role != "LECTURER":
+        return
+    if await MeetingRepository(db).get_for_organiser(meeting_id, user_id, role) is None:
+        raise ForbiddenError("You can view attendance only for classes assigned to you")
+
+
 async def get_meeting_attendance(
     db: AsyncSession, meeting_id: int, user_id: int, role: str
 ) -> AttendanceSessionItem:
@@ -188,9 +207,7 @@ async def get_meeting_attendance(
     context = await repository.get_session_context(meeting_id)
     if context is None:
         raise NotFoundError("Attendance has not been synchronized for this meeting")
-    _session, meeting, _class, _course = context
-    if role == "LECTURER" and meeting.lecturer_user_id != user_id:
-        raise ForbiddenError("You can view attendance only for your assigned meetings")
+    await _require_lecturer_class_access(db, meeting_id, user_id, role)
     if role == "STUDENT":
         raise ForbiddenError("Students can view attendance only through their personal attendance page")
     return await _session_item(repository, context)
@@ -208,8 +225,7 @@ async def override_attendance_record(
     if context is None:
         raise NotFoundError("Attendance record not found")
     record, _session, meeting, user, profile = context
-    if role == "LECTURER" and meeting.lecturer_user_id != user_id:
-        raise ForbiddenError("You can update attendance only for your assigned meetings")
+    await _require_lecturer_class_access(db, meeting.meeting_id, user_id, role)
     if role not in {"SUPER_ADMIN", "ADMIN", "LECTURER"}:
         raise ForbiddenError("Your LMS role cannot update attendance")
     record = await repository.override_record(record, payload.status, payload.reason.strip(), user_id)

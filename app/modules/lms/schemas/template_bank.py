@@ -10,13 +10,15 @@ from app.modules.lms.schemas.exam import ExamEditorResponse
 
 class AssessmentTemplateCreate(BaseModel):
     kind: Literal["assignment", "practice_test"]
+    template_name: str = Field(..., min_length=2, max_length=255)
     title: str = Field(..., min_length=2, max_length=255)
     instructions: str = Field("Answer every question.", min_length=2, max_length=20_000)
     assignment_type: Literal["regular", "timed"] = "regular"
-    submission_type: Literal["written", "multimedia", "coding"] = "written"
+    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding", "mcq"] = "written"
     duration_minutes: int | None = Field(None, ge=1, le=1440)
+    max_marks: Decimal = Field(Decimal("100"), gt=0)
 
-    @field_validator("title", "instructions")
+    @field_validator("template_name", "title", "instructions")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -30,6 +32,9 @@ class AssessmentTemplateCreate(BaseModel):
             self.assignment_type = "timed"
             self.submission_type = "written"
             self.duration_minutes = self.duration_minutes or 30
+        elif self.submission_type == "mcq":
+            self.assignment_type = "timed"
+            self.duration_minutes = self.duration_minutes or 60
         elif self.assignment_type == "timed" and self.duration_minutes is None:
             self.duration_minutes = 60
         elif self.assignment_type != "timed":
@@ -38,13 +43,15 @@ class AssessmentTemplateCreate(BaseModel):
 
 
 class AssessmentTemplateUpdate(BaseModel):
+    template_name: str = Field(..., min_length=2, max_length=255)
     title: str = Field(..., min_length=2, max_length=255)
     instructions: str = Field(..., min_length=2, max_length=20_000)
     assignment_type: Literal["regular", "timed"] = "regular"
-    submission_type: Literal["written", "multimedia", "coding"] = "written"
+    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding", "mcq"] = "written"
     duration_minutes: int | None = Field(None, ge=1, le=1440)
+    max_marks: Decimal = Field(Decimal("100"), gt=0)
 
-    @field_validator("title", "instructions")
+    @field_validator("template_name", "title", "instructions")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -68,6 +75,7 @@ class BankQuestionItem(BaseModel):
 class AssessmentTemplateSummary(BaseModel):
     template_id: int
     kind: str
+    template_name: str
     title: str
     instructions: str
     assignment_type: str | None = None
@@ -92,6 +100,11 @@ class TemplateApplyRequest(BaseModel):
     available_from: datetime | None = None
     due_at: datetime | None = None
     duration_minutes: int | None = Field(None, ge=1, le=1440)
+    title: str | None = Field(None, min_length=2, max_length=255)
+    instructions: str | None = Field(None, min_length=2, max_length=20_000)
+    assignment_type: Literal["regular", "timed"] | None = None
+    submission_type: Literal["written", "pdf_annotation", "multimedia", "coding", "mcq"] | None = None
+    max_marks: Decimal | None = Field(None, gt=0)
     randomize_questions: bool = True
     randomize_options: bool = True
     status: Literal["draft", "published"] = "draft"
