@@ -187,6 +187,7 @@ class CrmDashboardStats(BaseModel):
     enrolled_30d: int
     conversion_rate: float
     followups_today: int
+    unassigned: int = 0
     by_source: dict[str, int]
     by_programme: dict[str, int] = {}
     pipeline_counts: dict[str, int]

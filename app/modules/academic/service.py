@@ -140,14 +140,24 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             "highest_qualification": payload.highest_qualification.strip(),
             "interested_programme": pathway["programme_name"] if pathway else None,
             "interested_course": pathway["course_name"] if pathway else None,
-            "notes": f"Submitted via Website Admission Form. Submission ID: {submission_id}",
+            "notes": (
+                f"Submitted via Website Admission Form. Submission ID: {submission_id}. "
+                f"Study mode: {payload.preferred_study_mode or 'To be confirmed'}. "
+                f"Specific course: {pathway['course_name'] if pathway and pathway['course_name'] else 'To be confirmed with admissions'}."
+            ),
         })).mappings().one()
         await db.execute(text("""
             INSERT INTO crm_activities (lead_id, activity_type, content)
             VALUES (:lead_id, 'note', :content)
         """), {
             "lead_id": new_crm_lead["lead_id"],
-            "content": f"New application submitted via website for {(pathway['course_name'] if pathway else None) or 'Academic Pathway'}",
+            "content": (
+                f"New application submitted via website for "
+                f"{(pathway['course_name'] if pathway and pathway['course_name'] else 'Academic Pathway')} "
+                f"({pathway['programme_name'] if pathway else 'Programme'}); "
+                f"highest qualification: {payload.highest_qualification.strip()}; "
+                f"study mode: {payload.preferred_study_mode or 'to be confirmed'}."
+            ),
         })
         await db.commit()
     except Exception:

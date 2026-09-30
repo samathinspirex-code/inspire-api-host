@@ -3,7 +3,7 @@ import io
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
@@ -198,27 +198,19 @@ async def delete_lead(db: AsyncSession, lead_id: int) -> None:
     await repo.delete(lead)
 
 
-async def get_pipeline(db: AsyncSession) -> CrmPipelineResponse:
+async def get_pipeline(db: AsyncSession, preview_per_stage: int = 40) -> CrmPipelineResponse:
     repo = CrmLeadRepository(db)
-    all_leads = await repo.list_all_active()
-    by_stage: dict[str, list[CrmLead]] = {s: [] for s in PIPELINE_STAGES}
-    for lead in all_leads:
-        if lead.stage in by_stage:
-            by_stage[lead.stage].append(lead)
-        else:
-            by_stage.setdefault(lead.stage, []).append(lead)
-
-    stages = [
-        CrmPipelineStage(
-            stage=stage,
-            count=len(leads),
-            leads=[CrmLeadSummary.model_validate(l) for l in leads],
+    count_map = {row[0]: row[1] for row in await repo.stage_counts()}
+    stages = []
+    for stage in PIPELINE_STAGES:
+        leads = await repo.list_leads(stage, None, None, None, False, 1, preview_per_stage)
+        stages.append(
+            CrmPipelineStage(
+                stage=stage,
+                count=int(count_map.get(stage, 0)),
+                leads=[CrmLeadSummary.model_validate(lead) for lead in leads],
+            )
         )
-        for stage, leads in by_stage.items()
-        if stage in PIPELINE_STAGES
-    ]
-    # Sort by canonical order
-    stages.sort(key=lambda s: PIPELINE_STAGES.index(s.stage) if s.stage in PIPELINE_STAGES else 999)
     return CrmPipelineResponse(stages=stages)
 
 
@@ -281,6 +273,15 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     )
     followups_today_count: int = (await db.execute(stmt_fup_count)).scalar_one()
 
+    stmt_unassigned = select(func.count()).where(
+        and_(
+            CrmLead.is_archived == False,  # noqa: E712
+            CrmLead.assigned_counsellor_id.is_(None),
+            or_(CrmLead.counsellor_name.is_(None), CrmLead.counsellor_name == ""),
+        )
+    )
+    unassigned: int = (await db.execute(stmt_unassigned)).scalar_one()
+
     # by_source
     repo = CrmLeadRepository(db)
     source_rows = await repo.source_counts()
@@ -341,6 +342,7 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
         enrolled_30d=enrolled_30d,
         conversion_rate=conversion_rate,
         followups_today=followups_today_count,
+        unassigned=unassigned,
         by_source=by_source,
         by_programme=by_programme,
         pipeline_counts=pipeline_counts,

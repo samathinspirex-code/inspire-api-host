@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from openpyxl import load_workbook
 from sqlalchemy import text
@@ -167,6 +168,75 @@ def cell(row: tuple[Any, ...], indexes: dict[str, int], name: str) -> Any:
     return row[index] if index is not None and index < len(row) else None
 
 
+def first_name_key(value: str | None) -> str | None:
+    words = normalize_words(value)
+    if not words:
+        return None
+    first = words.split()[0]
+    return {"jeniffer": "jennifer", "jenniffer": "jennifer"}.get(first, first)
+
+
+def richness(record: dict[str, Any]) -> int:
+    return sum(1 for field in FIELDS if record.get(field) not in (None, ""))
+
+
+def record_from_getter(
+    get: Callable[[str], Any],
+    row_number: int,
+    unknown_stages: Counter[str],
+) -> dict[str, Any] | None:
+    full_name = clean(get("Students Pipeline Name")) or clean(get("Contact Name"))
+    external_id = clean(get("Record Id"))
+    if not full_name or not external_id:
+        return None
+    raw_stage = clean(get("Stage"))
+    student_status = clean(get("Student Status"))
+    stage, recognized = mapped_stage(raw_stage, student_status)
+    if not recognized:
+        unknown_stages[raw_stage or "(blank)"] += 1
+    email = normalize_email(get("Email") or get("Email 1"))
+    phone_raw = clean(get("Phone")) or clean(get("Phone 1")) or clean(get("Mobile"))
+    mobile_raw = clean(get("Mobile")) or phone_raw
+    reason = clean(get("Reason For Loss"))
+    source_raw = clean(get("Lead Source")) or "zoho_import"
+    source = re.sub(r"[^a-z0-9]+", "_", source_raw.lower()).strip("_")
+    priority = "high" if stage in {"offer_sent", "enrolled"} else "medium"
+    return {
+        "_row": row_number,
+        "_email_key": email,
+        "_phone_key": normalize_phone(phone_raw),
+        "full_name": full_name,
+        "email": email,
+        "phone": phone_raw,
+        "whatsapp": mobile_raw,
+        "city": clean(get("City")),
+        "highest_qualification": clean(get("Student Highest Education Qualification")),
+        "interested_programme": clean(get("Faculty  (Schools)")),
+        "interested_course": clean(get("Selected Program")),
+        "message": clean(get("Description")),
+        "source": source or "zoho_import",
+        "stage": stage,
+        "priority": priority,
+        "counsellor_name": clean(get("Students Pipeline Owner")),
+        "notes": f"Reason for loss: {reason}" if reason else None,
+        "followup_date": parse_datetime(get("Closing Date")),
+        "amount": parse_amount(get("Amount")),
+        "school": clean(get("School")),
+        "nationality": clean(get("Nationality")),
+        "faculty": clean(get("Faculty  (Schools)")),
+        "student_status": student_status,
+        "parents_occupation": clean(get("Parents Occupation")),
+        "parents_email": normalize_email(get("Parents Email")),
+        "address_line1": clean(get("Address Line 1")),
+        "address_line2": clean(get("Address Line 2")),
+        "country": clean(get("Country")),
+        "social_lead_id": clean(get("Social Lead ID")),
+        "external_record_id": external_id,
+        "_created_at": parse_datetime(get("Created Time")),
+        "_updated_at": parse_datetime(get("Modified Time")),
+    }
+
+
 def read_workbook(path: Path) -> tuple[list[dict[str, Any]], Counter[str]]:
     sheet = load_workbook(path, read_only=True, data_only=True).active
     headers = [clean(item.value) for item in next(sheet.iter_rows())]
@@ -174,72 +244,62 @@ def read_workbook(path: Path) -> tuple[list[dict[str, Any]], Counter[str]]:
     required = {"Record Id", "Students Pipeline Name", "Stage"}
     missing = required.difference(indexes)
     if missing:
-        raise ValueError(f"Workbook is missing required columns: {sorted(missing)}")
+        raise ValueError(f"{path.name} is missing required columns: {sorted(missing)}")
 
     records: list[dict[str, Any]] = []
     unknown_stages: Counter[str] = Counter()
     for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-        full_name = clean(cell(row, indexes, "Students Pipeline Name")) or clean(
-            cell(row, indexes, "Contact Name")
-        )
-        external_id = clean(cell(row, indexes, "Record Id"))
-        if not full_name or not external_id:
-            continue
-        raw_stage = clean(cell(row, indexes, "Stage"))
-        student_status = clean(cell(row, indexes, "Student Status"))
-        stage, recognized = mapped_stage(raw_stage, student_status)
-        if not recognized:
-            unknown_stages[raw_stage or "(blank)"] += 1
-        email = normalize_email(
-            cell(row, indexes, "Email") or cell(row, indexes, "Email 1")
-        )
-        phone_raw = clean(cell(row, indexes, "Phone")) or clean(
-            cell(row, indexes, "Phone 1")
-        ) or clean(cell(row, indexes, "Mobile"))
-        mobile_raw = clean(cell(row, indexes, "Mobile")) or phone_raw
-        reason = clean(cell(row, indexes, "Reason For Loss"))
-        source_raw = clean(cell(row, indexes, "Lead Source")) or "zoho_import"
-        source = re.sub(r"[^a-z0-9]+", "_", source_raw.lower()).strip("_")
-        priority = "high" if stage in {"offer_sent", "enrolled"} else "medium"
-        records.append(
-            {
-                "_row": row_number,
-                "_email_key": email,
-                "_phone_key": normalize_phone(phone_raw),
-                "full_name": full_name,
-                "email": email,
-                "phone": phone_raw,
-                "whatsapp": mobile_raw,
-                "city": clean(cell(row, indexes, "City")),
-                "highest_qualification": clean(
-                    cell(row, indexes, "Student Highest Education Qualification")
-                ),
-                "interested_programme": clean(cell(row, indexes, "Faculty  (Schools)")),
-                "interested_course": clean(cell(row, indexes, "Selected Program")),
-                "message": clean(cell(row, indexes, "Description")),
-                "source": source or "zoho_import",
-                "stage": stage,
-                "priority": priority,
-                "counsellor_name": clean(cell(row, indexes, "Students Pipeline Owner")),
-                "notes": f"Reason for loss: {reason}" if reason else None,
-                "followup_date": parse_datetime(cell(row, indexes, "Closing Date")),
-                "amount": parse_amount(cell(row, indexes, "Amount")),
-                "school": clean(cell(row, indexes, "School")),
-                "nationality": clean(cell(row, indexes, "Nationality")),
-                "faculty": clean(cell(row, indexes, "Faculty  (Schools)")),
-                "student_status": student_status,
-                "parents_occupation": clean(cell(row, indexes, "Parents Occupation")),
-                "parents_email": normalize_email(cell(row, indexes, "Parents Email")),
-                "address_line1": clean(cell(row, indexes, "Address Line 1")),
-                "address_line2": clean(cell(row, indexes, "Address Line 2")),
-                "country": clean(cell(row, indexes, "Country")),
-                "social_lead_id": clean(cell(row, indexes, "Social Lead ID")),
-                "external_record_id": external_id,
-                "_created_at": parse_datetime(cell(row, indexes, "Created Time")),
-                "_updated_at": parse_datetime(cell(row, indexes, "Modified Time")),
-            }
-        )
+        record = record_from_getter(lambda name, r=row: cell(r, indexes, name), row_number, unknown_stages)
+        if record:
+            records.append(record)
     return records, unknown_stages
+
+
+def read_csv_file(path: Path) -> tuple[list[dict[str, Any]], Counter[str]]:
+    records: list[dict[str, Any]] = []
+    unknown_stages: Counter[str] = Counter()
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError(f"{path.name} has no header row")
+        required = {"Record Id", "Students Pipeline Name", "Stage"}
+        missing = required.difference(set(reader.fieldnames))
+        if missing:
+            raise ValueError(f"{path.name} is missing required columns: {sorted(missing)}")
+        for row_number, row in enumerate(reader, start=2):
+            record = record_from_getter(lambda name, current=row: current.get(name), row_number, unknown_stages)
+            if record:
+                records.append(record)
+    return records, unknown_stages
+
+
+def read_source(path: Path) -> tuple[list[dict[str, Any]], Counter[str]]:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return read_csv_file(path)
+    if suffix in {".xlsx", ".xlsm"}:
+        return read_workbook(path)
+    raise ValueError(f"Unsupported file type: {path.name}")
+
+
+def merge_records(paths: list[Path]) -> tuple[list[dict[str, Any]], Counter[str]]:
+    merged: dict[str, dict[str, Any]] = {}
+    unknown_stages: Counter[str] = Counter()
+    for path in paths:
+        records, file_unknown = read_source(path)
+        unknown_stages.update(file_unknown)
+        print(f"Read {len(records):,} rows from {path.name}")
+        for record in records:
+            key = record["external_record_id"]
+            current = merged.get(key)
+            if current is None or richness(record) >= richness(current):
+                merged[key] = record
+    return list(merged.values()), unknown_stages
+
+
+def batched(items: list[dict[str, Any]], size: int = 400):
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
 
 
 async def column_exists(connection: Any) -> bool:
@@ -262,11 +322,50 @@ def build_lookup(rows: list[dict[str, Any]], field: str) -> dict[str, list[int]]
     return result
 
 
-async def run(path: Path, apply: bool) -> None:
-    records, unknown_stages = read_workbook(path)
-    external_counts = Counter(row["external_record_id"] for row in records)
-    duplicate_external_ids = {key for key, count in external_counts.items() if count > 1}
-    records = [row for row in records if row["external_record_id"] not in duplicate_external_ids]
+async def load_counsellor_index(connection: Any) -> dict[str, dict[str, Any]]:
+    rows = (
+        await connection.execute(
+            text(
+                """
+                SELECT u.user_id, u.full_name,
+                       bool_or(al.access_key = 'COUNSELLOR') AS is_counsellor
+                FROM users u
+                JOIN user_access_levels ual ON ual.user_id = u.user_id
+                JOIN access_levels al ON al.access_level_id = ual.access_level_id
+                WHERE u.is_active = true
+                  AND al.is_active = true
+                  AND al.access_key IN ('COUNSELLOR', 'CRM')
+                GROUP BY u.user_id, u.full_name
+                ORDER BY bool_or(al.access_key = 'COUNSELLOR') DESC, u.user_id
+                """
+            )
+        )
+    ).mappings().all()
+    index: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = first_name_key(row["full_name"])
+        if not key:
+            continue
+        current = index.get(key)
+        if current is None or (row["is_counsellor"] and not current["is_counsellor"]):
+            index[key] = dict(row)
+    return index
+
+
+def resolve_counsellor(
+    name: str | None, index: dict[str, dict[str, Any]]
+) -> tuple[int | None, str | None]:
+    key = first_name_key(name)
+    if not key:
+        return None, name
+    match = index.get(key)
+    if match:
+        return match["user_id"], match["full_name"]
+    return None, name
+
+
+async def run(paths: list[Path], apply: bool) -> None:
+    records, unknown_stages = merge_records(paths)
     workbook_email_counts = Counter(row["_email_key"] for row in records if row["_email_key"])
     workbook_phone_counts = Counter(row["_phone_key"] for row in records if row["_phone_key"])
 
@@ -276,10 +375,12 @@ async def run(path: Path, apply: bool) -> None:
             raise RuntimeError(
                 "Run scripts/apply_crm_external_record_id_migration.py before --apply."
             )
+        counsellor_index = await load_counsellor_index(connection)
         external_select = "external_record_id" if has_external_id else "NULL AS external_record_id"
         existing_result = await connection.execute(
             text(
                 "SELECT lead_id, lower(email) AS email_key, phone, "
+                "assigned_counsellor_id, counsellor_name, "
                 f"{external_select} FROM crm_leads"
             )
         )
@@ -291,6 +392,8 @@ async def run(path: Path, apply: bool) -> None:
                     "email_key": normalize_email(item["email_key"]),
                     "phone_key": normalize_phone(item["phone"]),
                     "external_record_id": clean(item["external_record_id"]),
+                    "assigned_counsellor_id": item["assigned_counsellor_id"],
+                    "counsellor_name": item["counsellor_name"],
                 }
             )
 
@@ -299,8 +402,10 @@ async def run(path: Path, apply: bool) -> None:
             for row in existing
             if row["external_record_id"]
         }
-        by_email = build_lookup(existing, "email_key")
-        by_phone = build_lookup(existing, "phone_key")
+        unlinked = [row for row in existing if not row["external_record_id"]]
+        by_email = build_lookup(unlinked, "email_key")
+        by_phone = build_lookup(unlinked, "phone_key")
+        existing_by_id = {row["lead_id"]: row for row in existing}
 
         creates: list[dict[str, Any]] = []
         updates: list[dict[str, Any]] = []
@@ -309,18 +414,33 @@ async def run(path: Path, apply: bool) -> None:
         claimed_existing: set[int] = set()
 
         for record in records:
+            user_id, official_name = resolve_counsellor(record["counsellor_name"], counsellor_index)
+            if official_name:
+                record["counsellor_name"] = official_name
+            record["assigned_counsellor_id"] = user_id
+
             lead_id = by_external.get(record["external_record_id"])
             match_kind = "external"
             if lead_id is None:
                 candidates: set[int] = set()
                 email_key = record["_email_key"]
                 phone_key = record["_phone_key"]
-                if email_key and workbook_email_counts[email_key] == 1:
-                    email_matches = by_email.get(email_key, [])
-                    if len(email_matches) == 1:
+                if email_key:
+                    email_matches = [
+                        lead_id
+                        for lead_id in by_email.get(email_key, [])
+                        if lead_id not in claimed_existing
+                    ]
+                    if len(email_matches) == 1 and (
+                        workbook_email_counts[email_key] == 1 or not record["_phone_key"]
+                    ):
                         candidates.add(email_matches[0])
-                if phone_key and workbook_phone_counts[phone_key] == 1:
-                    phone_matches = by_phone.get(phone_key, [])
+                if phone_key:
+                    phone_matches = [
+                        lead_id
+                        for lead_id in by_phone.get(phone_key, [])
+                        if lead_id not in claimed_existing
+                    ]
                     if len(phone_matches) == 1:
                         candidates.add(phone_matches[0])
                 if len(candidates) > 1:
@@ -330,6 +450,7 @@ async def run(path: Path, apply: bool) -> None:
                     lead_id = candidates.pop()
                     match_kind = "email" if email_key and lead_id in by_email.get(email_key, []) else "phone"
             values = {field: record.get(field) for field in FIELDS}
+            values["assigned_counsellor_id"] = record["assigned_counsellor_id"]
             if lead_id is None:
                 values["created_at"] = record["_created_at"] or datetime.now()
                 values["updated_at"] = record["_updated_at"] or values["created_at"]
@@ -338,6 +459,10 @@ async def run(path: Path, apply: bool) -> None:
                 conflicts.append((record["_row"], "fallback match was already claimed"))
             else:
                 claimed_existing.add(lead_id)
+                current = existing_by_id[lead_id]
+                if current["assigned_counsellor_id"] and match_kind != "external":
+                    values["assigned_counsellor_id"] = current["assigned_counsellor_id"]
+                    values["counsellor_name"] = current["counsellor_name"] or values["counsellor_name"]
                 values["lead_id"] = lead_id
                 values["import_updated_at"] = record["_updated_at"] or datetime.now()
                 updates.append(values)
@@ -348,7 +473,7 @@ async def run(path: Path, apply: bool) -> None:
                 else:
                     matched_phone += 1
 
-        print(f"Workbook rows ready: {len(records):,}")
+        print(f"Unique Zoho records ready: {len(records):,}")
         print(f"Existing CRM leads: {len(existing):,}")
         print(f"Would create: {len(creates):,}")
         print(f"Would update: {len(updates):,}")
@@ -357,7 +482,6 @@ async def run(path: Path, apply: bool) -> None:
             f"Zoho ID={matched_external:,}, email={matched_email:,}, phone={matched_phone:,}"
         )
         print(f"Conflicts skipped: {len(conflicts):,}")
-        print(f"Duplicate Zoho IDs skipped: {len(duplicate_external_ids):,}")
         if unknown_stages:
             print(f"Unrecognized stage rows defaulted to new inquiry: {sum(unknown_stages.values()):,}")
             print("Unrecognized stages:", unknown_stages.most_common(20))
@@ -368,25 +492,26 @@ async def run(path: Path, apply: bool) -> None:
             print("Dry run only; no CRM records were changed.")
             return
 
-        insert_fields = list(FIELDS) + ["created_at", "updated_at"]
+        insert_fields = list(FIELDS) + ["assigned_counsellor_id", "created_at", "updated_at"]
         insert_columns = ", ".join(insert_fields)
         insert_values = ", ".join(f":{field}" for field in insert_fields)
-        if creates:
+        for batch in batched(creates):
             await connection.execute(
                 text(f"INSERT INTO crm_leads ({insert_columns}) VALUES ({insert_values})"),
-                creates,
+                batch,
             )
 
         assignments = ", ".join(
             f"{field} = COALESCE(:{field}, {field})" for field in FIELDS
         )
-        if updates:
+        for batch in batched(updates):
             await connection.execute(
                 text(
                     f"UPDATE crm_leads SET {assignments}, "
+                    "assigned_counsellor_id = COALESCE(:assigned_counsellor_id, assigned_counsellor_id), "
                     "updated_at = :import_updated_at WHERE lead_id = :lead_id"
                 ),
-                updates,
+                batch,
             )
         print(f"Applied successfully: {len(creates):,} created, {len(updates):,} updated.")
 
@@ -395,10 +520,10 @@ async def run(path: Path, apply: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("workbook", type=Path)
+    parser.add_argument("files", nargs="+", type=Path)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    asyncio.run(run(args.workbook.resolve(), args.apply))
+    asyncio.run(run([path.resolve() for path in args.files], args.apply))
 
 
 if __name__ == "__main__":
