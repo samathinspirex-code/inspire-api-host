@@ -24,6 +24,48 @@ class CrmCounsellorOut(BaseModel):
     user_id: int
     name: str
     email: str
+    is_active: bool = True
+
+
+class CrmCounsellorLeadPreview(BaseModel):
+    lead_id: int
+    full_name: str
+    phone: Optional[str] = None
+    stage: str
+    interested_course: Optional[str] = None
+    interested_programme: Optional[str] = None
+
+
+class CrmCounsellorRosterItem(BaseModel):
+    user_id: int
+    name: str
+    email: str
+    is_active: bool
+    assign_order: int = 0
+    assigned_leads: int
+    active_leads: int
+    leads: list[CrmCounsellorLeadPreview] = []
+
+
+class CrmCounsellorStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class CrmAssignmentSettingsOut(BaseModel):
+    auto_assign_enabled: bool
+    last_counsellor_id: Optional[int] = None
+    last_assigned_on: Optional[str] = None
+    next_counsellor_id: Optional[int] = None
+    next_counsellor_name: Optional[str] = None
+    rotation: list[CrmCounsellorOut] = []
+
+
+class CrmAssignmentSettingsUpdate(BaseModel):
+    auto_assign_enabled: bool
+
+
+class CrmCounsellorOrderUpdate(BaseModel):
+    user_ids: list[int]
 
 
 class CrmLeadOut(BaseModel):
@@ -39,6 +81,7 @@ class CrmLeadOut(BaseModel):
     highest_qualification: Optional[str] = None
     interested_programme: Optional[str] = None
     interested_course: Optional[str] = None
+    awarding_body: Optional[str] = None
     message: Optional[str] = None
     source: str
     stage: str
@@ -78,6 +121,7 @@ class CrmLeadSummary(BaseModel):
     city: Optional[str] = None
     interested_programme: Optional[str] = None
     interested_course: Optional[str] = None
+    awarding_body: Optional[str] = None
     source: str
     stage: str
     priority: str
@@ -104,6 +148,7 @@ class CrmLeadCreate(BaseModel):
     highest_qualification: Optional[str] = None
     interested_programme: Optional[str] = None
     interested_course: Optional[str] = None
+    awarding_body: Optional[str] = None
     message: Optional[str] = None
     source: str = "manual"
     stage: str = "new_inquiry"
@@ -121,6 +166,7 @@ class CrmLeadCreate(BaseModel):
     country: Optional[str] = None
     social_lead_id: Optional[str] = None
     external_record_id: Optional[str] = None
+    assigned_counsellor_id: Optional[int] = None
 
 
 class CrmLeadUpdate(BaseModel):
@@ -133,6 +179,7 @@ class CrmLeadUpdate(BaseModel):
     highest_qualification: Optional[str] = None
     interested_programme: Optional[str] = None
     interested_course: Optional[str] = None
+    awarding_body: Optional[str] = None
     message: Optional[str] = None
     source: Optional[str] = None
     stage: Optional[str] = None
@@ -168,6 +215,11 @@ class CrmLeadListResponse(BaseModel):
     total: int
 
 
+class CrmLeadFilterOptions(BaseModel):
+    awarding_bodies: list[str] = []
+    programmes: list[str] = []
+
+
 class CrmPipelineStage(BaseModel):
     stage: str
     count: int
@@ -197,3 +249,36 @@ class CrmDashboardResponse(BaseModel):
     stats: CrmDashboardStats
     recent_leads: list[CrmLeadSummary]
     followups_today: list[CrmLeadSummary]
+
+
+class CrmCounsellorReportRow(BaseModel):
+    counsellor_id: Optional[int] = None
+    counsellor_name: str
+    new_leads: int = 0
+    activities: int = 0
+    offers: int = 0
+    enrolled: int = 0
+    lost: int = 0
+    followups: int = 0
+    current_assigned: int = 0
+    conversion_rate: float = 0
+    by_stage: dict[str, int] = {}
+
+
+class CrmReportDailyPoint(BaseModel):
+    date: str
+    new_leads: int = 0
+    enrolled: int = 0
+    activities: int = 0
+
+
+class CrmCounsellorReportResponse(BaseModel):
+    date_from: str
+    date_to: str
+    counsellor_id: Optional[int] = None
+    totals: CrmCounsellorReportRow
+    counsellors: list[CrmCounsellorReportRow] = []
+    by_stage: dict[str, int] = {}
+    by_source: dict[str, int] = {}
+    by_awarding_body: dict[str, int] = {}
+    daily: list[CrmReportDailyPoint] = []

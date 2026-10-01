@@ -148,7 +148,7 @@ async def test_csv_template_export_structure():
     class FakeRepo:
         def __init__(self, db):
             pass
-        async def list_export(self, stage, source):
+        async def list_export(self, stage, source, *filters):
             return [MockLeadRecord()]
 
     orig_repo = crm_service.CrmLeadRepository
