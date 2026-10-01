@@ -127,11 +127,12 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
 
         # The admissions record and the visible CRM pipeline lead are one unit.
         # Do not report success unless both have been persisted.
+        await db.execute(text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS awarding_body VARCHAR(100)"))
         new_crm_lead = (await db.execute(text("""
             INSERT INTO crm_leads
-              (full_name, email, phone, highest_qualification, interested_programme, interested_course, source, stage, priority, notes, is_archived)
+              (full_name, email, phone, highest_qualification, interested_programme, interested_course, awarding_body, source, stage, priority, notes, is_archived)
             VALUES
-              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course, 'website_admission', 'new_inquiry', 'high', :notes, FALSE)
+              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course, :awarding_body, 'website_admission', 'new_inquiry', 'high', :notes, FALSE)
             RETURNING lead_id
         """), {
             "full_name": payload.full_name.strip(),
@@ -140,15 +141,28 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             "highest_qualification": payload.highest_qualification.strip(),
             "interested_programme": pathway["programme_name"] if pathway else None,
             "interested_course": pathway["course_name"] if pathway else None,
-            "notes": f"Submitted via Website Admission Form. Submission ID: {submission_id}",
+            "awarding_body": pathway["awarding_body"] if pathway else None,
+            "notes": (
+                f"Submitted via Website Admission Form. Submission ID: {submission_id}. "
+                f"Study mode: {payload.preferred_study_mode or 'To be confirmed'}. "
+                f"Specific course: {pathway['course_name'] if pathway and pathway['course_name'] else 'To be confirmed with admissions'}."
+            ),
         })).mappings().one()
         await db.execute(text("""
             INSERT INTO crm_activities (lead_id, activity_type, content)
             VALUES (:lead_id, 'note', :content)
         """), {
             "lead_id": new_crm_lead["lead_id"],
-            "content": f"New application submitted via website for {(pathway['course_name'] if pathway else None) or 'Academic Pathway'}",
+            "content": (
+                f"New application submitted via website for "
+                f"{(pathway['course_name'] if pathway and pathway['course_name'] else 'Academic Pathway')} "
+                f"({pathway['programme_name'] if pathway else 'Programme'}); "
+                f"highest qualification: {payload.highest_qualification.strip()}; "
+                f"study mode: {payload.preferred_study_mode or 'to be confirmed'}."
+            ),
         })
+        from app.modules.crm.service import apply_auto_assignment
+        await apply_auto_assignment(db, new_crm_lead["lead_id"], commit=False)
         await db.commit()
     except Exception:
         await db.rollback()
@@ -215,6 +229,8 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
             "lead_id": lead_row["lead_id"],
             "content": f"New contact enquiry submitted on website: {payload.message.strip()}",
         })
+        from app.modules.crm.service import apply_auto_assignment
+        await apply_auto_assignment(db, lead_row["lead_id"], commit=False)
         await db.commit()
     except Exception as exc:
         await db.rollback()
@@ -732,7 +748,7 @@ async def list_programme_enrolments(db: AsyncSession, status: str | None = None)
         JOIN academic_programmes p ON p.programme_id=e.programme_id
         LEFT JOIN academic_schools s ON s.school_id=e.preferred_school_id
         LEFT JOIN academic_courses c ON c.course_id=e.preferred_course_id
-        WHERE (:status IS NULL OR e.status=:status)
+        WHERE (CAST(:status AS TEXT) IS NULL OR e.status=:status)
         ORDER BY e.created_at DESC
     """), {"status": status})
     return _rows(result)

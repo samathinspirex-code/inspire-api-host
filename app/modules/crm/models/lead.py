@@ -25,6 +25,7 @@ class CrmLead(Base):
     highest_qualification: Mapped[Optional[str]] = mapped_column(String(100))
     interested_programme: Mapped[Optional[str]] = mapped_column(String(255))
     interested_course: Mapped[Optional[str]] = mapped_column(String(255))
+    awarding_body: Mapped[Optional[str]] = mapped_column(String(100))
     message: Mapped[Optional[str]] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
     stage: Mapped[str] = mapped_column(String(50), nullable=False, default="new_inquiry")

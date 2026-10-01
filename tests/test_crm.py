@@ -71,7 +71,7 @@ def test_crm_csv_export_format():
     class MockRepo:
         def __init__(self, db):
             pass
-        async def list_export(self, stage, source):
+        async def list_export(self, stage, source, *filters):
             return [DummyLead()]
 
     # Verify template export
