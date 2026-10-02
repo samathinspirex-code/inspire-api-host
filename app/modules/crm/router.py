@@ -34,7 +34,7 @@ from app.modules.crm.schemas import (
 
 
 def require_crm_staff(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    allowed = {"CRM", "COUNSELLOR", "SUPER_ADMIN", "ADMIN", "USER_MANAGEMENT"}
+    allowed = {"CRM", "COUNSELLOR", "SUPER_ADMIN", "ADMIN"}
     if not any(role in current_user.access for role in allowed):
         raise ForbiddenError("Requires 'CRM' or administrative access")
     return current_user
@@ -42,7 +42,7 @@ def require_crm_staff(current_user: CurrentUser = Depends(get_current_user)) -> 
 
 def _counsellor_only(user: CurrentUser) -> bool:
     return "COUNSELLOR" in user.access and not any(
-        role in user.access for role in ("CRM", "ADMIN", "SUPER_ADMIN", "USER_MANAGEMENT")
+        role in user.access for role in ("CRM", "ADMIN", "SUPER_ADMIN")
     )
 
 
