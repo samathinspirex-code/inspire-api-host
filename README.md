@@ -232,3 +232,38 @@ worker also processes the durable Zoom attendance and recording jobs. Completed
 cloud recordings are downloaded server-side, uploaded to Vimeo, and published in
 the class-copy Course under `Recordings · <class code>` with AI question creation
 disabled.
+
+## CRM rebuild cutover
+
+`CRM-corrected.xlsx` supplies field requirements only. Do not run the old CRM
+workbook import scripts for this release. The reset does not touch users,
+academic courses, or LMS students.
+
+1. Apply the additive schema, then deploy the revised API and CMS together:
+
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\apply_crm_rebuild_migration.py
+   ```
+
+2. Verify that manual creation, website admission and contact submissions,
+   programme selection, counselor rotation, ownership access, status reasons,
+   activity history, and failed save messages work on the deployed release.
+   Enrollment now requires a valid student email, personalizes the approved
+   Offer Letter template, and sends the configured registration form link. A
+   failed delivery is recorded on the lead and can be retried from Lead Detail.
+3. Select a restricted, separate backup directory outside this repository.
+   Inspect the live CRM counts without changing records:
+
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\reset_crm_leads.py --backup-dir C:\protected-crm-backups
+   ```
+
+4. At the agreed cutover, run the same command with `--apply`. It locks the
+   three CRM lead tables, writes and reads back a compressed snapshot, checks
+   all three record counts, then clears the records in the same transaction.
+   Any verification or deletion error rolls back the deletion. Retain the
+   backup and the separate private admission document objects.
+5. Refresh the CMS in each browser session. The revised client removes old CRM
+   session and local storage caches when it starts. Confirm the leads and
+   pipeline are empty, submit a new public inquiry, and verify it receives the
+   next available counselor. Record the new lead ID and its timeline entry.

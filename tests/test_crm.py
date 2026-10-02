@@ -98,6 +98,6 @@ def test_crm_csv_export_format():
     # Verify data row values
     assert row[header.index("Record Id")] == "zcrm_123"
     assert row[header.index("Students Pipeline Name")] == "Samal Dimalye"
-    assert row[header.index("Stage")] == "Payment Done"
+    assert row[header.index("Stage")] == "Enrolled"
     assert row[header.index("Faculty  (Schools)")] == "School of Psychology"
     assert row[header.index("Nationality")] == "Mauritius"

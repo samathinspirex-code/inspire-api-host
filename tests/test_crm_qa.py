@@ -195,16 +195,15 @@ async def test_csv_template_export_structure():
 # 4. Pipeline Stages & Kanban Logic QA
 # ─────────────────────────────────────────────────────────────
 def test_canonical_pipeline_stages_order():
-    """Ensure the 9 Kanban pipeline stages match the admissions journey."""
+    """Ensure the CRM exposes only the approved lead outcomes."""
     expected_order = [
-        "new_inquiry",
-        "contacted",
-        "counselling",
-        "application_started",
-        "documents_pending",
-        "app_submitted",
-        "offer_sent",
+        "new_lead",
+        "uncontactable",
+        "contactable",
+        "future_prospect",
+        "not_interested",
+        "lost_to_competitor",
+        "cant_afford",
         "enrolled",
-        "lost_deferred",
     ]
     assert crm_service.PIPELINE_STAGES == expected_order

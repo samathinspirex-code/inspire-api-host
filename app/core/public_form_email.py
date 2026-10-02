@@ -47,13 +47,13 @@ def form_email_html(title: str, intro: str, rows: list[tuple[str, str | None]], 
     )
 
 
-async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form") -> FormEmailResult:
+async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form", attachments: list[dict[str, str]] | None = None, to_email: str | None = None, to_name: str = "Inspire Admissions") -> FormEmailResult:
     if not settings.MAILJET_API_KEY.strip() or not settings.MAILJET_SECRET_KEY.strip() or not settings.PUBLIC_FORM_FROM_EMAIL.strip():
         return FormEmailResult(False, "Mailjet is not configured")
-    recipient = settings.PUBLIC_FORM_RECIPIENT_EMAIL.strip()
+    recipient = (to_email or settings.PUBLIC_FORM_RECIPIENT_EMAIL).strip()
     if not recipient:
         return FormEmailResult(False, "The form recipient is not configured")
-    recipients = [{"Email": r.strip(), "Name": "Inspire Admissions"} for r in recipient.split(",") if r.strip()]
+    recipients = [{"Email": r.strip(), "Name": to_name} for r in recipient.split(",") if r.strip()]
     if not recipients:
         return FormEmailResult(False, "No valid form recipients configured")
     message = {
@@ -68,6 +68,8 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
     }
     if reply_to:
         message["ReplyTo"] = {"Email": reply_to}
+    if attachments:
+        message["Attachments"] = attachments
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import smtplib
 import ssl
@@ -34,6 +35,15 @@ def _build_email(message: dict) -> EmailMessage:
     email.set_content(str(message.get("TextPart") or ""))
     if message.get("HTMLPart"):
         email.add_alternative(str(message["HTMLPart"]), subtype="html")
+    for attachment in message.get("Attachments", []):
+        content_type = attachment["ContentType"]
+        maintype, subtype = content_type.split("/", 1)
+        email.add_attachment(
+            base64.b64decode(attachment["Base64Content"], validate=True),
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment["Filename"],
+        )
     return email
 
 

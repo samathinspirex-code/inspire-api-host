@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -28,9 +28,35 @@ class CrmLead(Base):
     awarding_body: Mapped[Optional[str]] = mapped_column(String(100))
     message: Mapped[Optional[str]] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
-    stage: Mapped[str] = mapped_column(String(50), nullable=False, default="new_inquiry")
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, default="new_lead")
+    status_reason: Mapped[Optional[str]] = mapped_column(String(150))
+    status_remarks: Mapped[Optional[str]] = mapped_column(Text)
+    affordability_reason: Mapped[Optional[str]] = mapped_column(String(150))
+    expected_intake: Mapped[Optional[str]] = mapped_column(String(100))
+    expected_month: Mapped[Optional[str]] = mapped_column(String(20))
+    delay_reason: Mapped[Optional[str]] = mapped_column(String(150))
+    campaign: Mapped[Optional[str]] = mapped_column(String(255))
+    academic_course_id: Mapped[Optional[int]] = mapped_column(Integer)
+    programme_fee: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    registration_fee: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    programme_duration: Mapped[Optional[str]] = mapped_column(String(100))
+    intake: Mapped[Optional[str]] = mapped_column(String(100))
+    payment_plan: Mapped[Optional[str]] = mapped_column(Text)
+    last_contacted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    followup_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    student_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    student_id: Mapped[Optional[str]] = mapped_column(String(100))
+    payment_status: Mapped[Optional[str]] = mapped_column(String(30))
+    amount_paid: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    payment_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    enrollment_email_status: Mapped[Optional[str]] = mapped_column(String(30))
+    enrollment_email_error: Mapped[Optional[str]] = mapped_column(Text)
+    enrollment_email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
     assigned_counsellor_id: Mapped[Optional[int]] = mapped_column(Integer)
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     counsellor_name: Mapped[Optional[str]] = mapped_column(String(100))
     notes: Mapped[Optional[str]] = mapped_column(Text)
     followup_date: Mapped[Optional[datetime]] = mapped_column(DateTime)

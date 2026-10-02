@@ -131,7 +131,7 @@ async def submit_website_admission(
         parents_occupation=payload.parents_occupation,
         parents_email=payload.parents_email,
         source="website_admission",
-        stage="new_inquiry",
+        stage="new_lead",
         priority="high" if payload.highest_qualification in ("A/L", "Degree", "Diploma") else "medium",
         notes=payload.notes,
     )
@@ -176,7 +176,7 @@ async def submit_website_contact(
         interested_programme=payload.interested_programme,
         message=payload.message.strip(),
         source="website_contact",
-        stage="new_inquiry",
+        stage="new_lead",
         priority="medium",
     )
     lead = await service.create_lead(
@@ -218,7 +218,7 @@ async def submit_whatsapp_lead(
         interested_course=payload.interested_course,
         message=payload.last_message,
         source="whatsapp",
-        stage="new_inquiry",
+        stage="new_lead",
         priority="medium",
         notes="\n".join(notes_parts) if notes_parts else None,
     )
@@ -251,7 +251,7 @@ async def submit_meta_lead(
         city=payload.city,
         interested_programme=payload.interested_programme,
         source=source_name,
-        stage="new_inquiry",
+        stage="new_lead",
         priority="medium",
         social_lead_id=payload.lead_id,
         notes=f"Meta Ad Form ID: {payload.form_id or 'N/A'}, Ad ID: {payload.ad_id or 'N/A'}",
