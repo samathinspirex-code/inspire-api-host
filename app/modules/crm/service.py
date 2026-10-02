@@ -1,12 +1,18 @@
 import csv
+import base64
 import io
+from pathlib import Path
+import zipfile
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
+from types import SimpleNamespace
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
+from app.core.config import settings
+from app.core.public_form_email import form_email_html, send_public_form_email
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
@@ -33,39 +39,133 @@ from app.modules.crm.schemas import (
     CrmPipelineResponse,
     CrmPipelineStage,
     CrmReportDailyPoint,
+    validate_status_fields,
 )
 
 # Canonical pipeline stage order
 PIPELINE_STAGES = [
-    "new_inquiry",
-    "contacted",
-    "counselling",
-    "application_started",
-    "documents_pending",
-    "app_submitted",
-    "offer_sent",
+    "new_lead",
+    "uncontactable",
+    "contactable",
+    "future_prospect",
+    "not_interested",
+    "lost_to_competitor",
+    "cant_afford",
     "enrolled",
-    "lost_deferred",
 ]
 
 IN_PROGRESS_STAGES = [
-    "contacted",
-    "counselling",
-    "application_started",
-    "documents_pending",
-    "app_submitted",
+    "uncontactable", "contactable", "future_prospect",
 ]
 
 
 ACTIVE_ASSIGNED_STAGES = [
-    "new_inquiry",
-    "contacted",
-    "counselling",
-    "application_started",
-    "documents_pending",
-    "app_submitted",
-    "offer_sent",
+    "new_lead", "uncontactable", "contactable", "future_prospect",
 ]
+
+CONTACT_ACTIVITY_TYPES = {"call", "email", "whatsapp", "counselling_session", "follow_up_completed"}
+
+
+def _validate_lead_state(lead: CrmLead, changes: dict) -> None:
+    state = {name: changes.get(name, getattr(lead, name)) for name in (
+        "stage", "status_reason", "status_remarks", "affordability_reason",
+        "delay_reason", "email",
+    )}
+    try:
+        validate_status_fields(SimpleNamespace(**state))
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    # Enrollment is available once a valid email is supplied. Delivery is tracked
+    # separately so a provider failure can be retried without undoing the status.
+
+
+async def _send_enrollment_email(db: AsyncSession, lead_id: int) -> CrmLead:
+    lead = await CrmLeadRepository(db).get(lead_id)
+    if lead is None:
+        raise NotFoundError(f"Lead {lead_id} not found")
+    if not lead.email:
+        raise ValidationError("Email is required before sending enrollment documents")
+    template = Path(settings.CRM_OFFER_LETTER_PATH)
+    if not template.is_absolute():
+        template = Path(__file__).resolve().parents[3] / template
+    if not template.exists():
+        await db.execute(text("UPDATE crm_leads SET enrollment_email_status='failed', enrollment_email_error=:error WHERE lead_id=:id"), {"id": lead_id, "error": "Offer Letter template is not available"})
+        await db.commit()
+        raise ValidationError("Offer Letter template is not available")
+    name = (lead.full_name or "Student").strip()
+    first_name = name.split()[0] if name else "Student"
+    programme = lead.interested_course or lead.interested_programme or "your selected programme"
+    raw_template = template.read_bytes()
+    rendered = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(raw_template), "r") as source, zipfile.ZipFile(rendered, "w", zipfile.ZIP_DEFLATED) as target:
+        replacements = {"[Student First Name]": first_name, "[Full Name]": name, "[Programme Name]": programme}
+        for item in source.infolist():
+            content = source.read(item.filename)
+            if item.filename == "word/document.xml":
+                xml = content.decode("utf-8")
+                for marker, value in replacements.items():
+                    xml = xml.replace(marker, value)
+                content = xml.encode("utf-8")
+            target.writestr(item, content)
+    attachment = {
+        "ContentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Filename": "Inspire-College-Conditional-Offer.docx",
+        "Base64Content": base64.b64encode(rendered.getvalue()).decode("ascii"),
+    }
+    form_url = settings.CRM_REGISTRATION_FORM_URL
+    subject = "Your Conditional Offer from Inspire College"
+    text_body = (f"Dear {first_name},\n\nCongratulations. Please find your Conditional Offer of Admission attached. "
+                 f"Complete the registration form here: {form_url}\n\nProgramme: {programme}\n\nInspire College Admissions")
+    html_body = form_email_html(subject, f"Congratulations, {first_name}. Your conditional offer is attached.", [
+        ("Student", name), ("Programme", programme), ("Offer status", "Conditional Offer"),
+        ("Registration form", form_url),
+    ])
+    result = await send_public_form_email(subject, text_body, html_body, custom_id=f"enrollment-{lead_id}", attachments=[attachment], to_email=lead.email, to_name=name)
+    if result.sent:
+        await db.execute(text("UPDATE crm_leads SET enrollment_email_status='sent', enrollment_email_error=NULL, enrollment_email_sent_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    else:
+        await db.execute(text("UPDATE crm_leads SET enrollment_email_status='failed', enrollment_email_error=:error WHERE lead_id=:id"), {"id": lead_id, "error": result.error or "Email provider rejected the message"})
+    await db.commit()
+    return await CrmLeadRepository(db).get(lead_id)
+
+
+async def list_programme_choices(db: AsyncSession) -> list[dict]:
+    """Return only active CMS courses and their populated hierarchy."""
+    rows = (await db.execute(text("""
+        SELECT c.course_id, c.title, c.awarding_body, c.programme_id,
+               p.name AS programme_name, c.school_id, s.name AS school_name,
+               o.price AS programme_fee, o.duration
+        FROM academic_courses c
+        JOIN academic_programmes p ON p.programme_id=c.programme_id
+        JOIN academic_schools s ON s.school_id=c.school_id
+        LEFT JOIN LATERAL (
+            SELECT price, duration FROM academic_course_study_options
+            WHERE course_id=c.course_id AND is_enabled=true
+            ORDER BY price, study_option_id LIMIT 1
+        ) o ON true
+        WHERE c.status='active' AND p.status='active' AND s.status='active'
+        ORDER BY c.awarding_body, s.name, c.title
+    """))).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def _resolve_course(db: AsyncSession, course_id: int) -> dict:
+    choice = next((item for item in await list_programme_choices(db) if item["course_id"] == course_id), None)
+    if choice is None:
+        raise ValidationError("Select an active programme")
+    return choice
+
+
+def _apply_course_choice(data: dict, choice: dict) -> None:
+    data["interested_programme"] = choice["programme_name"]
+    data["interested_course"] = choice["title"]
+    data["awarding_body"] = choice["awarding_body"]
+    if choice.get("school_name"):
+        data["school"] = choice["school_name"]
+    if data.get("programme_fee") is None and choice["programme_fee"] is not None:
+        data["programme_fee"] = choice["programme_fee"]
+    if not data.get("programme_duration"):
+        data["programme_duration"] = choice["duration"]
 
 
 _counsellor_schema_ready = False
@@ -385,7 +485,7 @@ async def apply_auto_assignment(db: AsyncSession, lead_id: int, *, commit: bool 
     settings.last_assigned_on = today
     await db.execute(
         text(
-            "UPDATE crm_leads SET assigned_counsellor_id = :cid, counsellor_name = :name "
+            "UPDATE crm_leads SET assigned_counsellor_id = :cid, counsellor_name = :name, assigned_at=now() "
             "WHERE lead_id = :lead_id"
         ),
         {"cid": nxt.user_id, "name": nxt.name, "lead_id": lead_id},
@@ -519,11 +619,12 @@ async def list_leads(
     unassigned: bool = False,
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
+    extra: Optional[dict] = None,
 ) -> CrmLeadListResponse:
     await _ensure_awarding_body_column(db)
     leads, total = await CrmLeadRepository(db).list_with_total(
         stage, source, counsellor_id, search, include_archived, page, size, awarding_body, programme, unassigned,
-        created_from, created_to,
+        created_from, created_to, extra,
     )
     return CrmLeadListResponse(
         data=[CrmLeadSummary.model_validate(lead) for lead in leads],
@@ -531,26 +632,45 @@ async def list_leads(
     )
 
 
-async def list_lead_filters(db: AsyncSession) -> CrmLeadFilterOptions:
+async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = None) -> CrmLeadFilterOptions:
     await _ensure_awarding_body_column(db)
-    programme_expr = func.coalesce(CrmLead.interested_programme, CrmLead.interested_course)
+    programme_expr = func.coalesce(CrmLead.interested_course, CrmLead.interested_programme)
+    scope = [CrmLead.is_archived == False]  # noqa: E712
+    if counsellor_id is not None:
+        scope.append(CrmLead.assigned_counsellor_id == counsellor_id)
     rows = (
         await db.execute(
-            select(CrmLead.awarding_body, programme_expr)
-            .where(CrmLead.is_archived == False)  # noqa: E712
+            select(CrmLead.awarding_body, programme_expr, CrmLead.city, CrmLead.country, CrmLead.campaign, CrmLead.intake)
+            .where(*scope)
             .distinct()
         )
     ).all()
     bodies: set[str] = set()
     programmes: set[str] = set()
-    for body, programme in rows:
+    cities: set[str] = set()
+    countries: set[str] = set()
+    campaigns: set[str] = set()
+    intakes: set[str] = set()
+    for body, programme, city, country, campaign, intake in rows:
         if body:
             bodies.add(body)
         if programme:
             programmes.add(programme)
+        if city:
+            cities.add(city)
+        if country:
+            countries.add(country)
+        if campaign:
+            campaigns.add(campaign)
+        if intake:
+            intakes.add(intake)
     return CrmLeadFilterOptions(
         awarding_bodies=sorted(bodies),
         programmes=sorted(programmes)[:200],
+        cities=sorted(cities)[:200],
+        countries=sorted(countries)[:200],
+        campaigns=sorted(campaigns)[:200],
+        intakes=sorted(intakes)[:200],
     )
 
 
@@ -569,22 +689,29 @@ async def create_lead(
     counsellor_name: Optional[str] = None,
 ) -> CrmLeadOut:
     await _ensure_awarding_body_column(db)
+    await _ensure_counsellor_status_table(db)
     repo = CrmLeadRepository(db)
     data = payload.model_dump()
+    if data.get("stage") not in PIPELINE_STAGES:
+        raise ValidationError("Unsupported lead status")
+    _validate_lead_state(CrmLead(full_name=data["full_name"], stage="new_lead", email=data.get("email")), data)
+    if data.get("academic_course_id") is not None:
+        _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
     explicit_id = data.pop("assigned_counsellor_id", None)
     assignment_note = ""
     if explicit_id is not None:
         counsellor = await _registered_counsellor(db, explicit_id)
         data["assigned_counsellor_id"] = counsellor.user_id
+        data["assigned_at"] = datetime.utcnow()
         data["counsellor_name"] = counsellor.name
         assignment_note = f" Manually assigned to {counsellor.name}."
     else:
         data["assigned_counsellor_id"] = None
         data["counsellor_name"] = None
-    lead = await repo.create(data)
+    lead = await repo.create(data, commit=False)
 
     if explicit_id is None:
-        picked = await apply_auto_assignment(db, lead.lead_id, commit=True)
+        picked = await apply_auto_assignment(db, lead.lead_id, commit=False)
         if picked:
             assignment_note = f" Auto-assigned to {picked.name} (daily rotation)."
 
@@ -596,8 +723,12 @@ async def create_lead(
             "content": f"Lead created from source: {lead.source}.{assignment_note}",
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
-        }
+        },
+        commit=False,
     )
+    await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead.lead_id})
+    await db.commit()
+    await db.refresh(lead)
     return await get_lead(db, lead.lead_id)
 
 
@@ -605,6 +736,8 @@ async def update_lead(
     db: AsyncSession,
     lead_id: int,
     payload: CrmLeadUpdate,
+    actor_id: Optional[int] = None,
+    actor_name: Optional[str] = None,
 ) -> CrmLeadOut:
     repo = CrmLeadRepository(db)
     lead = await repo.get(lead_id)
@@ -612,14 +745,50 @@ async def update_lead(
         raise NotFoundError(f"Lead {lead_id} not found")
 
     data = payload.model_dump(include=payload.model_fields_set)
+    enrolling = data.get("stage") == "enrolled" and lead.stage != "enrolled"
+    if enrolling:
+        data["enrolled_at"] = datetime.utcnow()
+    if "stage" in data and data["stage"] != lead.stage:
+        if data["stage"] not in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect"):
+            data.update(status_reason=None, status_remarks=None)
+        elif data["stage"] not in ("not_interested", "lost_to_competitor"):
+            data["status_reason"] = None
+        if data["stage"] != "cant_afford":
+            data["affordability_reason"] = None
+        if data["stage"] != "future_prospect":
+            data.update(expected_intake=None, expected_month=None, delay_reason=None)
+    _validate_lead_state(lead, data)
+    if "academic_course_id" in data and data["academic_course_id"] is not None:
+        _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
     if "assigned_counsellor_id" in data:
         counsellor_id = data["assigned_counsellor_id"]
+        if counsellor_id != lead.assigned_counsellor_id:
+            data["assigned_at"] = datetime.utcnow() if counsellor_id is not None else None
         if counsellor_id is None:
             data["counsellor_name"] = None
         else:
             counsellor = await _registered_counsellor(db, counsellor_id)
             data["counsellor_name"] = counsellor.name
-    await repo.update(lead, data)
+    changes = {key: (getattr(lead, key), value) for key, value in data.items() if getattr(lead, key) != value}
+    await repo.update(lead, data, commit=False)
+    tracked = {
+        "stage": "Status", "interested_course": "Programme", "assigned_counsellor_id": "Counselor",
+        "followup_date": "Follow-up", "notes": "Notes", "programme_fee": "Programme fee",
+    }
+    for key, label in tracked.items():
+        if key in changes:
+            old, new = changes[key]
+            await CrmActivityRepository(db).create({
+                "lead_id": lead_id, "activity_type": "lead_change",
+                "content": f"{label} changed from {old or 'blank'} to {new or 'blank'}",
+                "counsellor_id": actor_id,
+                "counsellor_name": actor_name,
+            }, commit=False)
+    if changes:
+        await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
+        await db.commit()
+        if enrolling:
+            await _send_enrollment_email(db, lead_id)
     return await get_lead(db, lead_id)
 
 
@@ -629,6 +798,13 @@ async def update_stage(
     stage: str,
     counsellor_id: Optional[int] = None,
     counsellor_name: Optional[str] = None,
+    status_reason: Optional[str] = None,
+    status_remarks: Optional[str] = None,
+    affordability_reason: Optional[str] = None,
+    expected_intake: Optional[str] = None,
+    expected_month: Optional[str] = None,
+    delay_reason: Optional[str] = None,
+    followup_date: Optional[datetime] = None,
 ) -> CrmLeadOut:
     repo = CrmLeadRepository(db)
     lead = await repo.get(lead_id)
@@ -636,7 +812,20 @@ async def update_stage(
         raise NotFoundError(f"Lead {lead_id} not found")
 
     old_stage = lead.stage
-    await repo.update(lead, {"stage": stage})
+    enrolling = stage == "enrolled" and old_stage != "enrolled"
+    changes = {
+        "stage": stage,
+        "status_reason": status_reason if stage in ("not_interested", "lost_to_competitor") else None,
+        "status_remarks": status_remarks if stage in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect") else None,
+        "affordability_reason": affordability_reason if stage == "cant_afford" else None,
+        "expected_intake": expected_intake if stage == "future_prospect" else None,
+        "expected_month": expected_month if stage == "future_prospect" else None,
+        "delay_reason": delay_reason if stage == "future_prospect" else None,
+    }
+    if followup_date is not None:
+        changes["followup_date"] = followup_date
+    _validate_lead_state(lead, changes)
+    await repo.update(lead, changes, commit=False)
 
     # Log the stage change
     activity_repo = CrmActivityRepository(db)
@@ -647,8 +836,15 @@ async def update_stage(
             "content": f"Stage changed from '{old_stage}' to '{stage}'",
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
-        }
+        },
+        commit=False,
     )
+    await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    if enrolling:
+        await db.execute(text("UPDATE crm_leads SET enrolled_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    await db.commit()
+    if enrolling:
+        await _send_enrollment_email(db, lead_id)
     return await get_lead(db, lead_id)
 
 
@@ -690,23 +886,28 @@ async def get_pipeline(
     )
 
 
-async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
+async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None) -> CrmDashboardResponse:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     thirty_days_ago = now - timedelta(days=30)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    active = CrmLead.is_archived == False  # noqa: E712
+    week_ago = now - timedelta(days=7)
+    active = and_(CrmLead.is_archived == False, CrmLead.assigned_counsellor_id == counsellor_id) if counsellor_id is not None else CrmLead.is_archived == False  # noqa: E712
 
     totals = (
         await db.execute(
             select(
                 func.count(),
                 func.count().filter(CrmLead.created_at >= thirty_days_ago),
-                func.count().filter(CrmLead.stage == "new_inquiry"),
+                func.count().filter(and_(CrmLead.created_at >= today_start, CrmLead.created_at < today_end)),
+                func.count().filter(CrmLead.stage == "new_lead"),
                 func.count().filter(CrmLead.stage.in_(IN_PROGRESS_STAGES)),
-                func.count().filter(CrmLead.stage == "offer_sent"),
+                func.count().filter(and_(CrmLead.stage.in_(IN_PROGRESS_STAGES), CrmLead.updated_at >= week_ago)),
+                func.count().filter(CrmLead.stage == "future_prospect"),
                 func.count().filter(and_(CrmLead.stage == "enrolled", CrmLead.updated_at >= thirty_days_ago)),
                 func.count().filter(CrmLead.stage == "enrolled"),
+                func.count().filter(CrmLead.assigned_counsellor_id.is_not(None)),
+                func.count().filter(and_(CrmLead.assigned_counsellor_id.is_not(None), CrmLead.stage == "enrolled")),
                 func.count().filter(and_(CrmLead.followup_date >= today_start, CrmLead.followup_date < today_end)),
                 func.count().filter(
                     and_(
@@ -720,15 +921,19 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     (
         total_leads,
         new_leads_30d,
+        today_leads,
         awaiting_contact,
         in_progress,
+        recently_active_leads,
         offers_sent,
         enrolled_30d,
         enrolled_total,
+        assigned_total,
+        assigned_enrolled,
         followups_today_count,
         unassigned,
     ) = (int(value or 0) for value in totals)
-    conversion_rate = round((enrolled_total / total_leads) * 100, 2) if total_leads > 0 else 0.0
+    conversion_rate = round((assigned_enrolled / assigned_total) * 100, 2) if assigned_total > 0 else 0.0
 
     programme_name = func.coalesce(
         func.nullif(CrmLead.interested_course, ""),
@@ -776,6 +981,8 @@ async def get_dashboard(db: AsyncSession) -> CrmDashboardResponse:
     return CrmDashboardResponse(
         stats=CrmDashboardStats(
             total_leads=total_leads,
+            today_leads=today_leads,
+            recently_active_leads=recently_active_leads,
             new_leads_30d=new_leads_30d,
             awaiting_contact=awaiting_contact,
             in_progress=in_progress,
@@ -842,6 +1049,7 @@ async def get_counsellor_report(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     counsellor_id: Optional[int] = None,
+    programme: Optional[str] = None,
 ) -> CrmCounsellorReportResponse:
     start, end, start_d, end_d = _period_bounds(date_from, date_to)
     name_rows = (
@@ -861,20 +1069,32 @@ async def get_counsellor_report(
     lead_scope = [CrmLead.is_archived == False]  # noqa: E712
     if counsellor_id is not None:
         lead_scope.append(CrmLead.assigned_counsellor_id == counsellor_id)
+    if programme:
+        lead_scope.append(or_(CrmLead.interested_programme == programme, CrmLead.interested_course == programme))
 
-    in_created = and_(CrmLead.created_at >= start, CrmLead.created_at < end)
+    in_created = and_(CrmLead.assigned_at >= start, CrmLead.assigned_at < end)
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
+    in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
     metric_rows = (
         await db.execute(
             select(
                 CrmLead.assigned_counsellor_id,
                 func.count().filter(in_created),
-                func.count().filter(and_(in_updated, CrmLead.stage == "offer_sent")),
+                func.count().filter(and_(in_updated, CrmLead.stage == "future_prospect")),
                 func.count().filter(and_(in_updated, CrmLead.stage == "enrolled")),
-                func.count().filter(and_(in_updated, CrmLead.stage == "lost_deferred")),
+                func.count().filter(and_(in_updated, CrmLead.stage.in_(("not_interested", "lost_to_competitor")))),
                 func.count().filter(in_follow),
                 func.count(),
+                func.count().filter(in_contacted),
+                func.count().filter(and_(in_created, CrmLead.last_contacted_at.is_(None))),
+                func.count().filter(and_(in_created, CrmLead.stage == "enrolled")),
+                func.count().filter(and_(in_created, CrmLead.stage == "future_prospect")),
+                func.count().filter(and_(in_created, CrmLead.stage == "uncontactable")),
+                func.count().filter(and_(in_created, CrmLead.stage == "not_interested")),
+                func.count().filter(and_(in_created, CrmLead.stage == "lost_to_competitor")),
+                func.count().filter(and_(in_created, CrmLead.stage == "cant_afford")),
+                func.count().filter(and_(CrmLead.followup_date < datetime.utcnow(), CrmLead.stage != "enrolled")),
             )
             .where(and_(*lead_scope))
             .group_by(CrmLead.assigned_counsellor_id)
@@ -886,12 +1106,14 @@ async def get_counsellor_report(
     lost_map: dict[Optional[int], int] = {}
     follow_map: dict[Optional[int], int] = {}
     current_assigned: dict[int, int] = {}
-    for cid, new_leads, offers, enrolled, lost, followups, assigned in metric_rows:
+    extra_map: dict[Optional[int], tuple[int, ...]] = {}
+    for cid, new_leads, offers, enrolled, lost, followups, assigned, contacted, not_contacted, cohort_enrolled, future, uncontactable, not_interested, competitor, cant_afford, overdue in metric_rows:
         new_map[cid] = int(new_leads or 0)
         offers_map[cid] = int(offers or 0)
-        enrolled_map[cid] = int(enrolled or 0)
+        enrolled_map[cid] = int(cohort_enrolled or 0)
         lost_map[cid] = int(lost or 0)
         follow_map[cid] = int(followups or 0)
+        extra_map[cid] = tuple(int(value or 0) for value in (contacted, not_contacted, future, uncontactable, not_interested, competitor, cant_afford, overdue))
         if cid is not None:
             current_assigned[int(cid)] = int(assigned or 0)
 
@@ -907,6 +1129,7 @@ async def get_counsellor_report(
         )
     ).all()
     activity_map: dict[Optional[int], int] = {}
+    completed_map: dict[Optional[int], int] = {}
     daily_activities: dict[str, int] = {}
     for cid, day, cnt in activity_rows:
         value = int(cnt or 0)
@@ -915,36 +1138,52 @@ async def get_counsellor_report(
             key = _day_key(day)
             daily_activities[key] = daily_activities.get(key, 0) + value
 
-    created_day = func.date(CrmLead.created_at)
+    completed_rows = (await db.execute(
+        select(CrmActivity.counsellor_id, func.count())
+        .where(*activity_filters, CrmActivity.activity_type == "follow_up_completed")
+        .group_by(CrmActivity.counsellor_id)
+    )).all()
+    completed_map = _count_map(completed_rows)
+
+    created_day = func.date(CrmLead.assigned_at)
+    programme_expr = func.coalesce(func.nullif(CrmLead.interested_course, ""), func.nullif(CrmLead.interested_programme, ""), "Unspecified")
     mix_rows = (
         await db.execute(
-            select(CrmLead.stage, CrmLead.source, CrmLead.awarding_body, created_day, func.count())
+            select(CrmLead.stage, CrmLead.source, programme_expr, created_day, func.count())
             .where(and_(*lead_scope, in_created))
-            .group_by(CrmLead.stage, CrmLead.source, CrmLead.awarding_body, created_day)
+            .group_by(CrmLead.stage, CrmLead.source, programme_expr, created_day)
         )
     ).all()
     by_stage: dict[str, int] = {}
     by_source: dict[str, int] = {}
+    by_source_enrolled: dict[str, int] = {}
+    by_programme: dict[str, int] = {}
+    by_programme_enrolled: dict[str, int] = {}
     by_awarding_body: dict[str, int] = {}
     daily_new: dict[str, int] = {}
-    for stage, source, body, day, cnt in mix_rows:
+    for stage, source, programme_name, day, cnt in mix_rows:
         value = int(cnt or 0)
         if stage:
             by_stage[stage] = by_stage.get(stage, 0) + value
         if source:
             by_source[source] = by_source.get(source, 0) + value
-        by_awarding_body[body or "Unspecified"] = by_awarding_body.get(body or "Unspecified", 0) + value
+            if stage == "enrolled":
+                by_source_enrolled[source] = by_source_enrolled.get(source, 0) + value
+        by_programme[programme_name or "Unspecified"] = by_programme.get(programme_name or "Unspecified", 0) + value
+        if stage == "enrolled":
+            programme_key = programme_name or "Unspecified"
+            by_programme_enrolled[programme_key] = by_programme_enrolled.get(programme_key, 0) + value
         if day:
             key = _day_key(day)
             daily_new[key] = daily_new.get(key, 0) + value
 
-    enrolled_day = func.date(CrmLead.updated_at)
+    enrolled_day = func.date(CrmLead.enrolled_at)
     daily_enrolled = {
         _day_key(row[0]): int(row[1] or 0)
         for row in (
             await db.execute(
                 select(enrolled_day, func.count())
-                .where(and_(*lead_scope, CrmLead.stage == "enrolled", in_updated))
+                .where(and_(*lead_scope, CrmLead.stage == "enrolled", CrmLead.enrolled_at >= start, CrmLead.enrolled_at < end))
                 .group_by(enrolled_day)
             )
         ).all()
@@ -977,11 +1216,21 @@ async def get_counsellor_report(
     for cid in sorted(ids, key=lambda item: names.get(item, f"Counsellor {item}")):
         new_leads = new_map.get(cid, 0)
         enrolled = enrolled_map.get(cid, 0)
+        contacted, not_contacted, future, uncontactable, not_interested, competitor, cant_afford, overdue = extra_map.get(cid, (0,) * 8)
         rows.append(
             CrmCounsellorReportRow(
                 counsellor_id=cid,
                 counsellor_name=names.get(cid, f"Counsellor {cid}"),
                 new_leads=new_leads,
+                leads_contacted=contacted,
+                leads_not_contacted=not_contacted,
+                followups_completed=completed_map.get(cid, 0),
+                followups_overdue=overdue,
+                future_prospects=future,
+                uncontactable=uncontactable,
+                not_interested=not_interested,
+                lost_to_competitor=competitor,
+                cant_afford=cant_afford,
                 activities=activity_map.get(cid, 0),
                 offers=offers_map.get(cid, 0),
                 enrolled=enrolled,
@@ -1011,6 +1260,15 @@ async def get_counsellor_report(
     totals = CrmCounsellorReportRow(
         counsellor_name="All counsellors" if counsellor_id is None else rows[0].counsellor_name if rows else "Counsellor",
         new_leads=sum(row.new_leads for row in rows),
+        leads_contacted=sum(row.leads_contacted for row in rows),
+        leads_not_contacted=sum(row.leads_not_contacted for row in rows),
+        followups_completed=sum(row.followups_completed for row in rows),
+        followups_overdue=sum(row.followups_overdue for row in rows),
+        future_prospects=sum(row.future_prospects for row in rows),
+        uncontactable=sum(row.uncontactable for row in rows),
+        not_interested=sum(row.not_interested for row in rows),
+        lost_to_competitor=sum(row.lost_to_competitor for row in rows),
+        cant_afford=sum(row.cant_afford for row in rows),
         activities=sum(row.activities for row in rows),
         offers=sum(row.offers for row in rows),
         enrolled=sum(row.enrolled for row in rows),
@@ -1028,6 +1286,9 @@ async def get_counsellor_report(
         counsellors=rows,
         by_stage=by_stage,
         by_source=by_source,
+        by_source_enrolled=by_source_enrolled,
+        by_programme=by_programme,
+        by_programme_enrolled=by_programme_enrolled,
         by_awarding_body=by_awarding_body,
         daily=daily,
     )
@@ -1053,8 +1314,18 @@ async def add_activity(
             "content": payload.content,
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
-        }
+        },
+        commit=False,
     )
+    if payload.activity_type in CONTACT_ACTIVITY_TYPES:
+        await db.execute(text("""
+            UPDATE crm_leads SET last_contacted_at=now(), last_activity_at=now(),
+                followup_count=followup_count + CASE WHEN :followup THEN 1 ELSE 0 END
+            WHERE lead_id=:id
+        """), {"id": lead_id, "followup": payload.activity_type == "follow_up_completed"})
+    else:
+        await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    await db.commit()
     return CrmActivityOut.model_validate(activity)
 
 
@@ -1069,11 +1340,14 @@ async def export_leads_csv(
     unassigned: bool = False,
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+    extra: Optional[dict] = None,
 ) -> str:
     repo = CrmLeadRepository(db)
     leads = await repo.list_export(
         stage, source, counsellor_id, awarding_body, programme, unassigned,
-        created_from, created_to,
+        created_from, created_to, priority, search, extra,
     )
 
     output = io.StringIO()
@@ -1134,21 +1408,20 @@ async def export_leads_csv(
             ]
         )
         stage_display = {
-            "new_inquiry": "New Inquiry",
-            "contacted": "Contacted",
-            "counselling": "Counselling",
-            "application_started": "Application Started",
-            "documents_pending": "Documents Pending",
-            "app_submitted": "App Submitted",
-            "offer_sent": "Offer Sent",
-            "enrolled": "Payment Done",
-            "lost_deferred": "Not Interested / Declined",
+            "new_lead": "New Lead",
+            "uncontactable": "Uncontactable",
+            "contactable": "Contactable",
+            "future_prospect": "Future Prospect",
+            "not_interested": "Not Interested",
+            "lost_to_competitor": "Lost to Competitor",
+            "cant_afford": "Can't Afford",
+            "enrolled": "Enrolled",
         }
         for lead in leads:
             closing_date = (
                 lead.followup_date.strftime("%Y-%m-%d") if lead.followup_date else ""
             )
-            prob = 100 if lead.stage == "enrolled" else (90 if lead.stage == "offer_sent" else 50)
+            prob = 100 if lead.stage == "enrolled" else (50 if lead.stage in IN_PROGRESS_STAGES else 0)
             writer.writerow(
                 [
                     getattr(lead, "external_record_id", None) or f"zcrm_{lead.lead_id}",

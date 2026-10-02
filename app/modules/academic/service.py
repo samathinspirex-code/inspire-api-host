@@ -76,6 +76,8 @@ async def _store_admission_document(payload, submission_id: str) -> str:
 
 
 async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationCreate):
+    from app.modules.crm.service import _ensure_counsellor_status_table
+    await _ensure_counsellor_status_table(db)
     submission_id = str(payload.submission_id)
     existing = (await db.execute(text("SELECT lead_id, status FROM crm_admission_leads WHERE submission_id=:submission_id"), {"submission_id": submission_id})).mappings().first()
     if existing:
@@ -101,7 +103,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
                result_document_content_type, status, source)
             VALUES (:submission_id, :full_name, :email, :phone, :highest_qualification, :programme_id,
                     :preferred_course_id, :document_key, :document_name, :document_content_type,
-                    'new_inquiry', 'website_admissions')
+                    'new_lead', 'website_admissions')
             RETURNING lead_id
         """), {
             "submission_id": submission_id,
@@ -130,9 +132,13 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
         await db.execute(text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS awarding_body VARCHAR(100)"))
         new_crm_lead = (await db.execute(text("""
             INSERT INTO crm_leads
-              (full_name, email, phone, highest_qualification, interested_programme, interested_course, awarding_body, source, stage, priority, notes, is_archived)
+              (full_name, email, phone, highest_qualification, interested_programme, interested_course,
+               awarding_body, academic_course_id, programme_fee, programme_duration,
+               source, stage, priority, notes, is_archived)
             VALUES
-              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course, :awarding_body, 'website_admission', 'new_inquiry', 'high', :notes, FALSE)
+              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course,
+               :awarding_body, :academic_course_id, :programme_fee, :programme_duration,
+               'website_admission', 'new_lead', 'high', :notes, FALSE)
             RETURNING lead_id
         """), {
             "full_name": payload.full_name.strip(),
@@ -142,6 +148,9 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
             "interested_programme": pathway["programme_name"] if pathway else None,
             "interested_course": pathway["course_name"] if pathway else None,
             "awarding_body": pathway["awarding_body"] if pathway else None,
+            "academic_course_id": payload.preferred_course_id,
+            "programme_fee": pathway["price"] if pathway else None,
+            "programme_duration": pathway["duration"] if pathway else None,
             "notes": (
                 f"Submitted via Website Admission Form. Submission ID: {submission_id}. "
                 f"Study mode: {payload.preferred_study_mode or 'To be confirmed'}. "
@@ -163,6 +172,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
         })
         from app.modules.crm.service import apply_auto_assignment
         await apply_auto_assignment(db, new_crm_lead["lead_id"], commit=False)
+        await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:lead_id"), {"lead_id": new_crm_lead["lead_id"]})
         await db.commit()
     except Exception:
         await db.rollback()
@@ -198,10 +208,15 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
         html_body=form_email_html("New admission application", "A prospective student submitted the admissions form.", rows),
         reply_to=str(payload.email),
         custom_id=f"admission-{submission_id}",
+        attachments=[{
+            "ContentType": document.content_type,
+            "Filename": re.sub(r"[\r\n]", "", document.filename.replace("\\", "/").split("/")[-1]),
+            "Base64Content": document.data_base64,
+        }] if document else None,
     )
     if not email_result.sent:
         logger.warning("Admission lead %s was saved but its notification email failed: %s", lead_id, email_result.error)
-    return {"lead_id": lead_id, "status": "new_inquiry", "message": "Your application was received. An advisor will contact you within one business day."}
+    return {"lead_id": lead_id, "status": "new_lead", "message": "Your application was received. An advisor will contact you within one business day."}
 
 
 async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
@@ -213,7 +228,7 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
             INSERT INTO crm_leads
               (full_name, email, phone, message, source, stage, priority, notes, is_archived)
             VALUES
-              (:full_name, :email, :phone, :message, 'website_contact', 'new_inquiry', 'medium', :notes, FALSE)
+              (:full_name, :email, :phone, :message, 'website_contact', 'new_lead', 'medium', :notes, FALSE)
             RETURNING lead_id
         """), {
             "full_name": payload.full_name.strip(),
@@ -274,6 +289,35 @@ async def list_admission_leads(db: AsyncSession, status: str | None = None):
         ORDER BY l.created_at DESC
     """), {"status": status}))
     return rows
+
+
+async def get_crm_admission_document(db: AsyncSession, crm_lead_id: int) -> dict[str, str | None]:
+    """Return a short-lived private download link for a website admission lead."""
+    row = (await db.execute(text("""
+        SELECT a.result_document_key, a.result_document_name, a.result_document_content_type
+        FROM crm_leads AS l
+        JOIN crm_admission_leads AS a
+          ON a.submission_id::text = substring(l.notes from 'Submission ID: ([0-9a-f-]{36})')
+        WHERE l.lead_id = :lead_id AND l.source = 'website_admission'
+    """), {"lead_id": crm_lead_id})).mappings().first()
+    if not row or not row["result_document_key"]:
+        return {"name": None, "url": None}
+    safe_name = re.sub(r"[^\x20-\x7e]", "_", (row["result_document_name"] or "results").replace("\\", "/").split("/")[-1]).replace('"', "_")
+    try:
+        url = await asyncio.to_thread(
+            media_service._client().generate_presigned_url,
+            "get_object",
+            Params={
+                "Bucket": settings.MEDIA_BUCKET,
+                "Key": row["result_document_key"],
+                "ResponseContentType": row["result_document_content_type"] or "application/octet-stream",
+                "ResponseContentDisposition": f'attachment; filename="{safe_name}"',
+            },
+            ExpiresIn=300,
+        )
+    except Exception as exc:
+        raise APIError(503, "DOCUMENT_UNAVAILABLE", "The result document is temporarily unavailable") from exc
+    return {"name": row["result_document_name"], "url": url}
 
 
 def _json(value: dict[str, Any]) -> str:

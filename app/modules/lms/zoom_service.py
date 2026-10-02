@@ -656,8 +656,22 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
         raise ValidationError("The Zoom host account for this class is no longer connected, so attendance cannot be imported. Reconnect it in LMS Settings.")
     token=await _access_token(db,dict(host))
     participants=await _past_participants(context,token); actual_start=min((_dt(p.get("join_time")) for p in participants if p.get("join_time")),default=context["start_time"]); actual_end=max((_dt(p.get("leave_time")) for p in participants if p.get("leave_time")),default=context["end_time"]); window=max(1,int((actual_end-actual_start).total_seconds()))
-    roster=(await db.execute(text("""SELECT u.user_id,u.full_name FROM lms_class_students cs JOIN users u ON u.user_id=cs.student_user_id
-      WHERE cs.class_id=:class_id AND cs.assigned_at<=:ended AND u.is_active"""),{"class_id":context["class_id"],"ended":actual_end})).mappings().all()
+    # Include every audience class and any students already recorded for this
+    # session. Enrolments or account status may have changed since the class,
+    # but a re-import must still reconcile its existing attendance records.
+    roster=(await db.execute(text("""SELECT u.user_id,u.full_name,u.is_active,MIN(eligible.assigned_at) AS assigned_at
+      FROM (
+        SELECT cs.student_user_id,cs.assigned_at FROM lms_class_students cs
+        WHERE cs.class_id IN (
+          SELECT class_id FROM lms_meeting_audience_classes WHERE meeting_id=:meeting_id
+          UNION SELECT :class_id
+        )
+        UNION ALL
+        SELECT ar.student_user_id,:ended AS assigned_at FROM lms_attendance_records ar
+        JOIN lms_attendance_sessions s ON s.attendance_session_id=ar.attendance_session_id
+        WHERE s.meeting_id=:meeting_id
+      ) eligible JOIN users u ON u.user_id=eligible.student_user_id
+      GROUP BY u.user_id,u.full_name,u.is_active"""),{"meeting_id":meeting_id,"class_id":context["class_id"],"ended":actual_end})).mappings().all()
     buckets={row["user_id"]:[] for row in roster}; unmatched=[]
     for p in participants:
         duration=int(p.get("duration") or 0)
@@ -671,6 +685,11 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
     from app.modules.lms.attendance_service import _attendance_status, _merge_duration
     for student in roster:
         entries=buckets[student["user_id"]]
+        # Do not mark a student absent for a class that ended before they were
+        # enrolled. A matching Zoom row is evidence they did attend, including
+        # when their enrolment was later restored.
+        if (student["assigned_at"] > actual_end or not student["is_active"]) and not entries:
+            continue
         # Zoom reports one row per join, so a student who reconnects or is signed
         # in on two devices appears several times. Merge the intervals instead of
         # summing durations so overlapping sessions are not counted twice.
@@ -795,6 +814,36 @@ async def sweep_missing_attendance(db: AsyncSession, now: datetime, limit: int=1
         await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
           VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
           {"key":f"sweep:{row['meeting_id']}:attendance","meeting":row["meeting_id"]})
+    await db.commit(); return len(rows)
+
+
+async def sweep_mismatched_attendance(db: AsyncSession, now: datetime, limit: int=10) -> int:
+    """Re-import older Zoom sessions with known students incorrectly unmatched.
+
+    The event key makes this a one-time repair for each meeting. The worker's
+    normal retry handling covers Zoom reports that are temporarily unavailable.
+    """
+    enabled=await db.scalar(text("SELECT attendance_sync_enabled FROM lms_zoom_settings WHERE settings_id=1"))
+    if not enabled: return 0
+    rows=(await db.execute(text("""SELECT DISTINCT m.meeting_id FROM lms_online_meetings m
+      JOIN lms_attendance_sessions s ON s.meeting_id=m.meeting_id
+      JOIN lms_attendance_records ar ON ar.attendance_session_id=s.attendance_session_id
+      JOIN users u ON u.user_id=ar.student_user_id
+      WHERE m.provider='zoom' AND m.status='completed' AND s.sync_status='synced'
+        AND m.end_time >= :oldest AND ar.attended_seconds=0
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(s.unmatched_participants::jsonb) participant
+          WHERE btrim(regexp_replace(lower(participant->>'display_name'),'[^a-z0-9]+',' ','g'))
+              = btrim(regexp_replace(lower(u.full_name),'[^a-z0-9]+',' ','g'))
+        )
+        AND NOT EXISTS (SELECT 1 FROM lms_zoom_jobs j
+          WHERE j.event_key='repair:attendance-roster-v2:' || m.meeting_id)
+      ORDER BY m.meeting_id LIMIT :limit"""),
+      {"oldest":now-timedelta(days=450),"limit":limit})).mappings().all()
+    for row in rows:
+        await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
+          VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
+          {"key":f"repair:attendance-roster-v2:{row['meeting_id']}","meeting":row["meeting_id"]})
     await db.commit(); return len(rows)
 
 

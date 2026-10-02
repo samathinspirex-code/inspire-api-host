@@ -34,10 +34,10 @@ async def _contact_submission_keeps_crm_lead_when_alert_email_fails():
         message="Please call me about a course.",
     )
 
-    with patch.object(
-        service,
-        "send_public_form_email",
-        AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable")),
+    with (
+        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))),
+        patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
+        patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
     ):
         response = await service.send_contact_inquiry(db, payload)
 
@@ -90,7 +90,7 @@ async def _admission_and_main_crm_leads_commit_together():
     })
     crm_lead = _mapping_result(one={"lead_id": 202})
     db = SimpleNamespace(
-        execute=AsyncMock(side_effect=[existing, pathway, crm_lead, MagicMock()]),
+        execute=AsyncMock(side_effect=[existing, pathway, MagicMock(), crm_lead, MagicMock(), MagicMock()]),
         scalar=AsyncMock(side_effect=[True, True, 101]),
         commit=AsyncMock(),
         rollback=AsyncMock(),
@@ -106,10 +106,10 @@ async def _admission_and_main_crm_leads_commit_together():
         preferred_study_mode="full_time",
     )
 
-    with patch.object(
-        service,
-        "send_public_form_email",
-        AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable")),
+    with (
+        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))),
+        patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
+        patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
     ):
         response = await service.create_admission_lead(db, payload)
 
@@ -119,6 +119,7 @@ async def _admission_and_main_crm_leads_commit_together():
     statements = [str(call.args[0]) for call in db.execute.await_args_list]
     assert any("INSERT INTO crm_leads" in statement for statement in statements)
     assert any("INSERT INTO crm_activities" in statement for statement in statements)
+    assert any("last_activity_at" in statement for statement in statements)
 
 
 def test_admission_and_main_crm_leads_commit_together():
@@ -151,7 +152,7 @@ async def _admission_rolls_back_if_main_crm_lead_cannot_save():
         preferred_study_mode="full_time",
     )
 
-    with pytest.raises(RuntimeError, match="crm unavailable"):
+    with pytest.raises(RuntimeError, match="crm unavailable"), patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock):
         await service.create_admission_lead(db, payload)
 
     db.commit.assert_not_awaited()

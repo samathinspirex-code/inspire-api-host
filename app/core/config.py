@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     PUBLIC_FORM_FROM_EMAIL: str = "enrol@inspire.college"
     PUBLIC_FORM_FROM_NAME: str = "Inspire College"
     PUBLIC_FORM_RECIPIENT_EMAIL: str = "enrol@inspire.college"
+    CRM_REGISTRATION_FORM_URL: str = "https://docs.google.com/forms/d/1hz96j-mr0xfSK1gGjB8TmD6-XkKY_KCSagSTCeRGwfw/viewform?edit_requested=true"
+    CRM_OFFER_LETTER_PATH: str = "app/modules/crm/assets/offer-letter-template.docx"
     AUTHENTICATOR_INVITATION_SUBJECT: str = "Set up your Inspire College Authenticator"
 
     GOOGLE_OAUTH_CLIENT_ID: str = ""

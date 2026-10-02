@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, load_only, selectinload
 
@@ -25,6 +25,7 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> list[Any]:
         filters: list[Any] = []
         if not include_archived:
@@ -64,6 +65,27 @@ class CrmLeadRepository:
             filters.append(CrmLead.created_at >= created_from)
         if created_to:
             filters.append(CrmLead.created_at < created_to)
+        extra = extra or {}
+        if extra.get("priority") in ("high", "medium", "low"):
+            filters.append(CrmLead.priority == extra["priority"])
+        for field in ("city", "country", "intake"):
+            if extra.get(field):
+                filters.append(getattr(CrmLead, field).ilike(str(extra[field])))
+        for field in ("updated_at", "last_contacted_at", "followup_date"):
+            if extra.get(f"{field}_from"):
+                filters.append(getattr(CrmLead, field) >= extra[f"{field}_from"])
+            if extra.get(f"{field}_to"):
+                filters.append(getattr(CrmLead, field) < extra[f"{field}_to"])
+        if extra.get("days_since_contact") is not None:
+            cutoff = datetime.utcnow() - timedelta(days=int(extra["days_since_contact"]))
+            filters.append(or_(CrmLead.last_contacted_at.is_(None), CrmLead.last_contacted_at < cutoff))
+        if extra.get("followup_state") == "missing":
+            filters.append(CrmLead.followup_date.is_(None))
+        elif extra.get("followup_state") == "overdue":
+            filters.append(CrmLead.followup_date < datetime.utcnow())
+        elif extra.get("followup_state") == "due_today":
+            start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+            filters.extend((CrmLead.followup_date >= start, CrmLead.followup_date < start + timedelta(days=1)))
         return filters
 
     async def count(
@@ -78,10 +100,11 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> int:
         filters = self._build_filters(
             stage, source, counsellor_id, search, include_archived, awarding_body, programme, unassigned,
-            created_from, created_to,
+            created_from, created_to, extra,
         )
         stmt = select(func.count()).select_from(select(CrmLead).where(*filters).subquery())
         return (await self.db.execute(stmt)).scalar_one()
@@ -128,16 +151,27 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> tuple[list[CrmLead], int]:
         """One round trip for a page of leads plus the unpaginated total."""
         filters = self._build_filters(
             stage, source, counsellor_id, search, include_archived, awarding_body, programme, unassigned,
-            created_from, created_to,
+            created_from, created_to, extra,
         )
+        sort = (extra or {}).get("sort", "newest")
+        if sort == "oldest":
+            order = (CrmLead.created_at.asc(), CrmLead.lead_id.asc())
+        elif sort == "updated":
+            order = (CrmLead.updated_at.desc(), CrmLead.lead_id.desc())
+        elif sort == "priority":
+            priority_order = case((CrmLead.priority == "high", 0), (CrmLead.priority == "medium", 1), (CrmLead.priority == "low", 2), else_=3)
+            order = (priority_order, CrmLead.created_at.desc(), CrmLead.lead_id.desc())
+        else:
+            order = (CrmLead.created_at.desc(), CrmLead.lead_id.desc())
         stmt = (
             select(CrmLead, func.count().over().label("total"))
             .where(*filters)
-            .order_by(CrmLead.created_at.desc())
+            .order_by(*order)
             .offset((page - 1) * size)
             .limit(size)
         )
@@ -145,7 +179,7 @@ class CrmLeadRepository:
         if not rows:
             total = await self.count(
                 stage, source, counsellor_id, search, include_archived, awarding_body, programme, unassigned,
-                created_from, created_to,
+                created_from, created_to, extra,
             )
             return [], total
         return [row[0] for row in rows], int(rows[0][1] or 0)
@@ -229,18 +263,22 @@ class CrmLeadRepository:
         )
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
-    async def create(self, data: dict[str, Any]) -> CrmLead:
+    async def create(self, data: dict[str, Any], commit: bool = True) -> CrmLead:
         lead = CrmLead(**data)
         self.db.add(lead)
-        await self.db.commit()
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
         await self.db.refresh(lead)
         # Re-fetch with activities loaded
         return await self.get(lead.lead_id)  # type: ignore[return-value]
 
-    async def update(self, lead: CrmLead, data: dict[str, Any]) -> CrmLead:
+    async def update(self, lead: CrmLead, data: dict[str, Any], commit: bool = True) -> CrmLead:
         for field, value in data.items():
             setattr(lead, field, value)
-        await self.db.commit()
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
         await self.db.refresh(lead)
         return await self.get(lead.lead_id)  # type: ignore[return-value]
 
@@ -285,10 +323,14 @@ class CrmLeadRepository:
         counsellor_id: Optional[int] = None, awarding_body: Optional[str] = None,
         programme: Optional[str] = None, unassigned: bool = False,
         created_from: Optional[datetime] = None, created_to: Optional[datetime] = None,
+        priority: Optional[str] = None,
+        search: Optional[str] = None,
+        extra: Optional[dict[str, Any]] = None,
     ) -> list[CrmLead]:
+        filters_extra = {**(extra or {}), "priority": priority}
         filters = self._build_filters(
-            stage, source, counsellor_id, None, False, awarding_body,
-            programme, unassigned, created_from, created_to,
+            stage, source, counsellor_id, search, False, awarding_body,
+            programme, unassigned, created_from, created_to, filters_extra,
         )
         stmt = select(CrmLead).where(*filters).order_by(CrmLead.created_at.desc())
         return list((await self.db.execute(stmt)).scalars().all())
@@ -298,9 +340,11 @@ class CrmActivityRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, data: dict[str, Any]) -> CrmActivity:
+    async def create(self, data: dict[str, Any], commit: bool = True) -> CrmActivity:
         activity = CrmActivity(**data)
         self.db.add(activity)
-        await self.db.commit()
+        await self.db.flush()
+        if commit:
+            await self.db.commit()
         await self.db.refresh(activity)
         return activity
