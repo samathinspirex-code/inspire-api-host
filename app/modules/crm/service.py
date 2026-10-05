@@ -1030,13 +1030,12 @@ def _day_key(value) -> str:
 
 
 async def get_followups(db: AsyncSession) -> list[CrmLeadSummary]:
-    today_start = datetime.combine(datetime.now(timezone.utc).date(), time.min)
     leads = (
         await db.execute(
             select(CrmLead)
             .where(
                 CrmLead.is_archived == False,  # noqa: E712
-                CrmLead.followup_date >= today_start,
+                CrmLead.followup_date.is_not(None),
             )
             .order_by(CrmLead.followup_date)
         )
@@ -1076,6 +1075,9 @@ async def get_counsellor_report(
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
+    contacted_stages = CrmLead.stage.in_(("contactable", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
+    contacted_cohort = and_(in_created, or_(in_contacted, contacted_stages))
+    not_contacted_cohort = and_(in_created, ~or_(in_contacted, contacted_stages))
     metric_rows = (
         await db.execute(
             select(
@@ -1086,8 +1088,8 @@ async def get_counsellor_report(
                 func.count().filter(and_(in_updated, CrmLead.stage.in_(("not_interested", "lost_to_competitor")))),
                 func.count().filter(in_follow),
                 func.count(),
-                func.count().filter(in_contacted),
-                func.count().filter(and_(in_created, CrmLead.last_contacted_at.is_(None))),
+                func.count().filter(contacted_cohort),
+                func.count().filter(not_contacted_cohort),
                 func.count().filter(and_(in_created, CrmLead.stage == "enrolled")),
                 func.count().filter(and_(in_created, CrmLead.stage == "future_prospect")),
                 func.count().filter(and_(in_created, CrmLead.stage == "uncontactable")),
@@ -1238,21 +1240,6 @@ async def get_counsellor_report(
                 followups=follow_map.get(cid, 0),
                 current_assigned=current_assigned.get(cid, 0),
                 conversion_rate=_conversion_rate(enrolled, new_leads),
-            )
-        )
-    if counsellor_id is None and (new_map.get(None) or activity_map.get(None)):
-        rows.append(
-            CrmCounsellorReportRow(
-                counsellor_id=None,
-                counsellor_name="Unassigned",
-                new_leads=new_map.get(None, 0),
-                activities=activity_map.get(None, 0),
-                offers=offers_map.get(None, 0),
-                enrolled=enrolled_map.get(None, 0),
-                lost=lost_map.get(None, 0),
-                followups=follow_map.get(None, 0),
-                current_assigned=0,
-                conversion_rate=_conversion_rate(enrolled_map.get(None, 0), new_map.get(None, 0)),
             )
         )
     rows.sort(key=lambda row: (row.new_leads, row.enrolled, row.activities), reverse=True)

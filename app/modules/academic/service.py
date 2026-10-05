@@ -159,7 +159,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
         })).mappings().one()
         await db.execute(text("""
             INSERT INTO crm_activities (lead_id, activity_type, content)
-            VALUES (:lead_id, 'note', :content)
+            VALUES (:lead_id, 'application_submitted', :content)
         """), {
             "lead_id": new_crm_lead["lead_id"],
             "content": (
