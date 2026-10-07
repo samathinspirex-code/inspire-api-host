@@ -252,6 +252,7 @@ async def get_followups(db: AsyncSession = Depends(get_db), current_user: Curren
 async def counsellor_report(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    all_time: bool = Query(False),
     counsellor_id: Optional[int] = Query(None),
     programme: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -260,7 +261,7 @@ async def counsellor_report(
     if _counsellor_only(current_user):
         raise ForbiddenError("Counsellor reports require CRM management access")
     try:
-        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme)
+        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time)
     except APIError:
         raise
     except Exception as exc:
