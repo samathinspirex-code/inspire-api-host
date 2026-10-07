@@ -1049,8 +1049,13 @@ async def get_counsellor_report(
     date_to: Optional[date] = None,
     counsellor_id: Optional[int] = None,
     programme: Optional[str] = None,
+    all_time: bool = False,
 ) -> CrmCounsellorReportResponse:
-    start, end, start_d, end_d = _period_bounds(date_from, date_to)
+    if all_time:
+        start, end = datetime(1900, 1, 1), datetime(9999, 12, 31)
+        start_d, end_d = start.date(), datetime.now(timezone.utc).date()
+    else:
+        start, end, start_d, end_d = _period_bounds(date_from, date_to)
     name_rows = (
         await db.execute(
             select(User.user_id, User.full_name, User.email)
@@ -1071,7 +1076,8 @@ async def get_counsellor_report(
     if programme:
         lead_scope.append(or_(CrmLead.interested_programme == programme, CrmLead.interested_course == programme))
 
-    in_created = and_(CrmLead.assigned_at >= start, CrmLead.assigned_at < end)
+    assignment_time = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
+    in_created = and_(assignment_time >= start, assignment_time < end)
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
@@ -1096,7 +1102,7 @@ async def get_counsellor_report(
                 func.count().filter(and_(in_created, CrmLead.stage == "not_interested")),
                 func.count().filter(and_(in_created, CrmLead.stage == "lost_to_competitor")),
                 func.count().filter(and_(in_created, CrmLead.stage == "cant_afford")),
-                func.count().filter(and_(CrmLead.followup_date < datetime.utcnow(), CrmLead.stage != "enrolled")),
+                func.count().filter(and_(in_follow, CrmLead.followup_date < datetime.utcnow(), CrmLead.stage != "enrolled")),
             )
             .where(and_(*lead_scope))
             .group_by(CrmLead.assigned_counsellor_id)
@@ -1147,7 +1153,7 @@ async def get_counsellor_report(
     )).all()
     completed_map = _count_map(completed_rows)
 
-    created_day = func.date(CrmLead.assigned_at)
+    created_day = func.date(assignment_time)
     programme_expr = func.coalesce(func.nullif(CrmLead.interested_course, ""), func.nullif(CrmLead.interested_programme, ""), "Unspecified")
     mix_rows = (
         await db.execute(
@@ -1193,18 +1199,19 @@ async def get_counsellor_report(
     }
 
     daily: list[CrmReportDailyPoint] = []
-    cursor = start_d
-    while cursor <= end_d:
-        key = cursor.isoformat()
-        daily.append(
-            CrmReportDailyPoint(
-                date=key,
-                new_leads=daily_new.get(key, 0),
-                enrolled=daily_enrolled.get(key, 0),
-                activities=daily_activities.get(key, 0),
+    if not all_time:
+        cursor = start_d
+        while cursor <= end_d:
+            key = cursor.isoformat()
+            daily.append(
+                CrmReportDailyPoint(
+                    date=key,
+                    new_leads=daily_new.get(key, 0),
+                    enrolled=daily_enrolled.get(key, 0),
+                    activities=daily_activities.get(key, 0),
+                )
             )
-        )
-        cursor += timedelta(days=1)
+            cursor += timedelta(days=1)
 
     ids = set(names)
     ids.update(k for k in new_map if k is not None)
