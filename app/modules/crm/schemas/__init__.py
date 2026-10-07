@@ -45,9 +45,10 @@ def validate_status_fields(values):
     if values.stage == "future_prospect" and values.delay_reason == "Other" and not values.status_remarks:
         raise ValueError("Enter remarks for Other")
     if values.stage == "enrolled":
-        if not values.email:
+        if not values.email and not getattr(values, "legacy_enrolled_email_pending", False):
             raise ValueError("Email is required for enrollment")
-        TypeAdapter(EmailStr).validate_python(values.email)
+        if values.email:
+            TypeAdapter(EmailStr).validate_python(values.email)
     return values
 
 

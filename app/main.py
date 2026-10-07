@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.api.public_campus import router as public_campus_router
 from app.core.activity_audit import record_request_change
 from app.core.config import settings
 from app.core.errors import APIError, api_error_handler, request_validation_handler
@@ -41,6 +42,7 @@ app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, request_validation_handler)
 
 app.include_router(health_router)
+app.include_router(public_campus_router)
 app.include_router(auth_router)
 app.include_router(academic_public_router)
 app.include_router(academic_cms_router)

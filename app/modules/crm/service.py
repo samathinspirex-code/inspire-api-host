@@ -71,6 +71,13 @@ def _validate_lead_state(lead: CrmLead, changes: dict) -> None:
         "stage", "status_reason", "status_remarks", "affordability_reason",
         "delay_reason", "email",
     )}
+    state["legacy_enrolled_email_pending"] = (
+        lead.lead_id is not None
+        and lead.stage == "enrolled"
+        and lead.enrollment_email_status == "pending_email_legacy"
+        and state["stage"] == "enrolled"
+        and not state["email"]
+    )
     try:
         validate_status_fields(SimpleNamespace(**state))
     except ValueError as exc:
@@ -746,6 +753,12 @@ async def update_lead(
 
     data = payload.model_dump(include=payload.model_fields_set)
     enrolling = data.get("stage") == "enrolled" and lead.stage != "enrolled"
+    legacy_email_added = (
+        lead.stage == "enrolled"
+        and lead.enrollment_email_status == "pending_email_legacy"
+        and not lead.email
+        and bool(data.get("email"))
+    )
     if enrolling:
         data["enrolled_at"] = datetime.utcnow()
     if "stage" in data and data["stage"] != lead.stage:
@@ -787,7 +800,7 @@ async def update_lead(
     if changes:
         await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
         await db.commit()
-        if enrolling:
+        if enrolling or legacy_email_added:
             await _send_enrollment_email(db, lead_id)
     return await get_lead(db, lead_id)
 
