@@ -693,6 +693,32 @@ async def get_lead(db: AsyncSession, lead_id: int) -> CrmLeadOut:
     return CrmLeadOut.model_validate(lead)
 
 
+async def was_manual_lead_created_by(db: AsyncSession, lead_id: int, user_id: int) -> bool:
+    first_activity = (
+        await db.execute(
+            select(CrmActivity)
+            .where(CrmActivity.lead_id == lead_id)
+            .order_by(CrmActivity.activity_id.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return bool(
+        first_activity
+        and first_activity.activity_type == "note"
+        and first_activity.content.startswith("Lead created from source: manual.")
+        and first_activity.counsellor_id == user_id
+    )
+
+
+def _crm_created_at_utc(value: datetime) -> datetime:
+    sri_lanka = timezone(timedelta(hours=5, minutes=30))
+    localized = value.replace(tzinfo=sri_lanka) if value.tzinfo is None else value
+    created_at = localized.astimezone(timezone.utc).replace(tzinfo=None)
+    if created_at > datetime.now(timezone.utc).replace(tzinfo=None):
+        raise ValidationError("Created date and time cannot be in the future")
+    return created_at
+
+
 async def create_lead(
     db: AsyncSession,
     payload: CrmLeadCreate,
@@ -712,10 +738,7 @@ async def create_lead(
     requested_created_at = data.pop("created_at", None)
     backdated_created_at = None
     if requested_created_at is not None:
-        sri_lanka_time = requested_created_at.replace(tzinfo=timezone(timedelta(hours=5, minutes=30))) if requested_created_at.tzinfo is None else requested_created_at
-        backdated_created_at = sri_lanka_time.astimezone(timezone.utc).replace(tzinfo=None)
-        if backdated_created_at > datetime.now(timezone.utc).replace(tzinfo=None):
-            raise ValidationError("Created date and time cannot be in the future")
+        backdated_created_at = _crm_created_at_utc(requested_created_at)
         data["created_at"] = backdated_created_at
     explicit_id = data.pop("assigned_counsellor_id", None)
     assignment_note = ""
@@ -748,7 +771,8 @@ async def create_lead(
                 )
 
     if backdated_created_at is not None:
-        assignment_note += f" Historical creation date: {sri_lanka_time.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y, %I:%M %p')} Sri Lanka time."
+        local_creation_time = backdated_created_at.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30)))
+        assignment_note += f" Historical creation date: {local_creation_time.strftime('%d %b %Y, %I:%M %p')} Sri Lanka time."
 
     activity_repo = CrmActivityRepository(db)
     await activity_repo.create(
@@ -780,6 +804,19 @@ async def update_lead(
         raise NotFoundError(f"Lead {lead_id} not found")
 
     data = payload.model_dump(include=payload.model_fields_set)
+    if "created_at" in data:
+        if data["created_at"] is None:
+            raise ValidationError("Choose a created date and time")
+        created_at_utc = _crm_created_at_utc(data["created_at"])
+        # Imported workbook dates are stored as Sri Lanka wall-clock values;
+        # live leads are stored as UTC-naive values.
+        sri_lanka = timezone(timedelta(hours=5, minutes=30))
+        data["created_at"] = (
+            created_at_utc.replace(tzinfo=timezone.utc).astimezone(sri_lanka).replace(tzinfo=None)
+            if lead.external_record_id is not None else created_at_utc
+        )
+        if lead.assigned_at and abs(lead.assigned_at - lead.created_at) <= timedelta(minutes=2):
+            data["assigned_at"] = data["created_at"]
     enrolling = data.get("stage") == "enrolled" and lead.stage != "enrolled"
     legacy_email_added = (
         lead.stage == "enrolled"
@@ -815,13 +852,23 @@ async def update_lead(
     tracked = {
         "stage": "Status", "interested_course": "Programme", "assigned_counsellor_id": "Counselor",
         "followup_date": "Follow-up", "notes": "Notes", "programme_fee": "Programme fee",
+        "created_at": "Created date",
     }
     for key, label in tracked.items():
         if key in changes:
             old, new = changes[key]
+            if key == "created_at":
+                sri_lanka = timezone(timedelta(hours=5, minutes=30))
+                format_local = lambda value: (
+                    value if lead.external_record_id is not None
+                    else value.replace(tzinfo=timezone.utc).astimezone(sri_lanka)
+                ).strftime("%d %b %Y, %I:%M %p")
+                content = f"Created date changed from {format_local(old)} to {format_local(new)} Sri Lanka time"
+            else:
+                content = f"{label} changed from {old or 'blank'} to {new or 'blank'}"
             await CrmActivityRepository(db).create({
                 "lead_id": lead_id, "activity_type": "lead_change",
-                "content": f"{label} changed from {old or 'blank'} to {new or 'blank'}",
+                "content": content,
                 "counsellor_id": actor_id,
                 "counsellor_name": actor_name,
             }, commit=False)

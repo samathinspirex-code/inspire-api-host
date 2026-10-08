@@ -58,6 +58,7 @@ class CrmActivityOut(BaseModel):
     activity_type: str
     content: str
     counsellor_name: Optional[str] = None
+    counsellor_id: Optional[int] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -268,6 +269,7 @@ class CrmLeadCreate(BaseModel):
 
 class CrmLeadUpdate(BaseModel):
     full_name: Optional[str] = None
+    created_at: Optional[datetime] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     whatsapp: Optional[str] = None
