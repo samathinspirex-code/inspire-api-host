@@ -220,6 +220,7 @@ class CrmLeadSummary(BaseModel):
 
 class CrmLeadCreate(BaseModel):
     full_name: str
+    created_at: Optional[datetime] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     whatsapp: Optional[str] = None

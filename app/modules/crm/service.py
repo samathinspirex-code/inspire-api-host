@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from types import SimpleNamespace
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
@@ -709,19 +709,27 @@ async def create_lead(
     _validate_lead_state(CrmLead(full_name=data["full_name"], stage="new_lead", email=data.get("email")), data)
     if data.get("academic_course_id") is not None:
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
+    requested_created_at = data.pop("created_at", None)
+    backdated_created_at = None
+    if requested_created_at is not None:
+        sri_lanka_time = requested_created_at.replace(tzinfo=timezone(timedelta(hours=5, minutes=30))) if requested_created_at.tzinfo is None else requested_created_at
+        backdated_created_at = sri_lanka_time.astimezone(timezone.utc).replace(tzinfo=None)
+        if backdated_created_at > datetime.now(timezone.utc).replace(tzinfo=None):
+            raise ValidationError("Created date and time cannot be in the future")
+        data["created_at"] = backdated_created_at
     explicit_id = data.pop("assigned_counsellor_id", None)
     assignment_note = ""
     if assign_to_creator:
         if counsellor_id is None or explicit_id is not None:
             raise ValidationError("Counsellor-created leads must be assigned to their creator")
         data["assigned_counsellor_id"] = counsellor_id
-        data["assigned_at"] = datetime.utcnow()
+        data["assigned_at"] = backdated_created_at or datetime.now(timezone.utc).replace(tzinfo=None)
         data["counsellor_name"] = counsellor_name
         assignment_note = f" Assigned to creator {counsellor_name or counsellor_id}."
     elif explicit_id is not None:
         counsellor = await _registered_counsellor(db, explicit_id)
         data["assigned_counsellor_id"] = counsellor.user_id
-        data["assigned_at"] = datetime.utcnow()
+        data["assigned_at"] = backdated_created_at or datetime.now(timezone.utc).replace(tzinfo=None)
         data["counsellor_name"] = counsellor.name
         assignment_note = f" Manually assigned to {counsellor.name}."
     else:
@@ -733,6 +741,14 @@ async def create_lead(
         picked = await apply_auto_assignment(db, lead.lead_id, commit=False)
         if picked:
             assignment_note = f" Auto-assigned to {picked.name} (daily rotation)."
+            if backdated_created_at is not None:
+                await db.execute(
+                    text("UPDATE crm_leads SET assigned_at=:assigned_at WHERE lead_id=:id"),
+                    {"assigned_at": backdated_created_at, "id": lead.lead_id},
+                )
+
+    if backdated_created_at is not None:
+        assignment_note += f" Historical creation date: {sri_lanka_time.astimezone(timezone(timedelta(hours=5, minutes=30))).strftime('%d %b %Y, %I:%M %p')} Sri Lanka time."
 
     activity_repo = CrmActivityRepository(db)
     await activity_repo.create(
@@ -1028,7 +1044,7 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None) -
 def _period_bounds(
     date_from: Optional[date], date_to: Optional[date]
 ) -> tuple[datetime, datetime, date, date]:
-    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
     start_d = date_from or today
     end_d = date_to or today
     if end_d < start_d:
@@ -1108,7 +1124,11 @@ async def get_counsellor_report(
         lead_scope.append(CrmLead.source == source)
 
     assignment_time = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
-    in_created = and_(assignment_time >= start, assignment_time < end)
+    colombo_offset = timedelta(hours=5, minutes=30)
+    in_created = or_(
+        and_(CrmLead.external_record_id.is_not(None), assignment_time >= start, assignment_time < end),
+        and_(CrmLead.external_record_id.is_(None), assignment_time >= start - colombo_offset, assignment_time < end - colombo_offset),
+    )
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
@@ -1186,7 +1206,10 @@ async def get_counsellor_report(
     )).all()
     completed_map = _count_map(completed_rows)
 
-    created_day = func.date(assignment_time)
+    created_day = func.date(case(
+        (CrmLead.external_record_id.is_(None), assignment_time + colombo_offset),
+        else_=assignment_time,
+    ))
     programme_expr = func.coalesce(func.nullif(CrmLead.interested_course, ""), func.nullif(CrmLead.interested_programme, ""), "Unspecified")
     mix_rows = (
         await db.execute(

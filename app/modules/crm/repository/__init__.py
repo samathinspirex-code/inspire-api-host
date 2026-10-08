@@ -61,10 +61,19 @@ class CrmLeadRepository:
                     CrmLead.counsellor_name.ilike(pattern),
                 )
             )
-        if created_from:
-            filters.append(CrmLead.created_at >= created_from)
-        if created_to:
-            filters.append(CrmLead.created_at < created_to)
+        if created_from or created_to:
+            # Imported workbook timestamps are Sri Lanka wall-clock values;
+            # CRM-created timestamps are UTC values in the same naive column.
+            colombo_offset = timedelta(hours=5, minutes=30)
+            imported = [CrmLead.external_record_id.is_not(None)]
+            live = [CrmLead.external_record_id.is_(None)]
+            if created_from:
+                imported.append(CrmLead.created_at >= created_from)
+                live.append(CrmLead.created_at >= created_from - colombo_offset)
+            if created_to:
+                imported.append(CrmLead.created_at < created_to)
+                live.append(CrmLead.created_at < created_to - colombo_offset)
+            filters.append(or_(and_(*imported), and_(*live)))
         extra = extra or {}
         if extra.get("priority") in ("high", "medium", "low"):
             filters.append(CrmLead.priority == extra["priority"])
