@@ -189,6 +189,7 @@ class CrmLeadSummary(BaseModel):
     """Lightweight version for list views / kanban."""
 
     lead_id: int
+    external_record_id: Optional[str] = None
     full_name: str
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -333,6 +334,7 @@ class CrmLeadListResponse(BaseModel):
 class CrmLeadFilterOptions(BaseModel):
     awarding_bodies: list[str] = []
     programmes: list[str] = []
+    sources: list[str] = []
     cities: list[str] = []
     countries: list[str] = []
     campaigns: list[str] = []

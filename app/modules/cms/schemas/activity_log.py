@@ -9,15 +9,16 @@ class ActivityLogItem(BaseModel):
     actor_email: str | None = None
     action: str
     module: str
+    target: str | None = None
     result: str
     is_sensitive: bool
     occurred_at: datetime
 
 
 class ActivityLogMetrics(BaseModel):
-    events_today: int
-    user_changes_today: int
-    sensitive_actions_today: int
+    events_last_7_days: int
+    user_changes_last_7_days: int
+    sensitive_actions_last_7_days: int
 
 
 class ActivityLogResponse(BaseModel):

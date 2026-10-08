@@ -1,4 +1,6 @@
-"""Safe request-level audit logging for administrative CMS and LMS changes."""
+"""Safe request-level audit logging for CMS and LMS actions."""
+
+import re
 
 from fastapi import Request
 
@@ -8,7 +10,7 @@ from app.modules.cms import activity_service
 
 
 def _describe_change(method: str, path: str) -> tuple[str, str, bool] | None:
-    """Return a concise activity-log description, excluding learner routine activity."""
+    """Describe the actual endpoint action, including permitted learner actions."""
     if method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
     if not (path.startswith("/api/v1/cms/") or path.startswith("/api/v1/lms/")):
@@ -22,6 +24,54 @@ def _describe_change(method: str, path: str) -> tuple[str, str, bool] | None:
         return None
 
     lower_path = path.lower()
+    # These POST requests perform actions on existing resources. Keep this
+    # mapping before the generic method-based descriptions below.
+    if re.fullmatch(r"/api/v1/lms/meetings/\d+/zoom/join", lower_path):
+        return "Requested meeting join", "Online Meetings", False
+    if re.fullmatch(r"/api/v1/lms/meetings/\d+/zoom/end-intent", lower_path):
+        return "Requested meeting end", "Online Meetings", False
+    if re.fullmatch(r"/api/v1/lms/meetings/\d+/zoom/end-confirmed", lower_path):
+        return "Ended meeting", "Online Meetings", False
+    if re.fullmatch(r"/api/v1/lms/exams/\d+/start", lower_path):
+        return "Started exam", "Exams", False
+    if lower_path == "/api/v1/lms/profile":
+        return "Saved own profile", "Profile", False
+    if lower_path == "/api/v1/lms/profile/media/uploads":
+        return "Requested profile photo upload", "Profile", False
+    if re.fullmatch(r"/api/v1/lms/profile/media/\d+/complete", lower_path):
+        return "Updated profile photo", "Profile", False
+    for prefix, label in (
+        ("/api/v1/cms/media", "media"),
+        ("/api/v1/lms/studio/media", "course media"),
+        ("/api/v1/lms/coursework/media", "coursework media"),
+        ("/api/v1/lms/coursework/materials", "coursework material"),
+    ):
+        if lower_path == f"{prefix}/uploads":
+            return f"Requested {label} upload", "Media Library" if label == "media" else "Course Content", False
+        if re.fullmatch(re.escape(prefix) + r"/\d+/complete", lower_path):
+            return f"Completed {label} upload", "Media Library" if label == "media" else "Course Content", False
+    if lower_path == "/api/v1/cms/crm/leads":
+        return "Created lead", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/leads/\d+/stage", lower_path):
+        return "Updated lead stage", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/leads/\d+/activities", lower_path):
+        return "Added lead activity", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/leads/\d+", lower_path):
+        return "Updated lead", "CRM", False
+    if lower_path == "/api/v1/cms/crm/assignment-settings":
+        return "Updated lead assignment settings", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/counsellors/\d+", lower_path):
+        return "Updated counsellor", "CRM", False
+    if re.fullmatch(r"/api/v1/lms/exams/\d+/questions/import", lower_path):
+        return "Imported exam questions", "Exams", False
+    if re.fullmatch(r"/api/v1/lms/exams/\d+/schedule", lower_path):
+        return "Updated exam schedule", "Exams", False
+    if re.fullmatch(r"/api/v1/lms/exams/\d+/status", lower_path):
+        return "Updated exam status", "Exams", False
+    if lower_path == "/api/v1/lms/coursework/assignments":
+        return "Created coursework assignment", "Coursework", False
+    if lower_path == "/api/v1/lms/assessment-templates":
+        return "Created assessment template", "Assessments", False
     module = "LMS"
     resource = "LMS record"
     if "/api/v1/cms/" in lower_path:
