@@ -647,22 +647,25 @@ async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = Non
         scope.append(CrmLead.assigned_counsellor_id == counsellor_id)
     rows = (
         await db.execute(
-            select(CrmLead.awarding_body, programme_expr, CrmLead.city, CrmLead.country, CrmLead.campaign, CrmLead.intake)
+            select(CrmLead.awarding_body, programme_expr, CrmLead.city, CrmLead.country, CrmLead.campaign, CrmLead.intake, CrmLead.source)
             .where(*scope)
             .distinct()
         )
     ).all()
     bodies: set[str] = set()
     programmes: set[str] = set()
+    sources: set[str] = set()
     cities: set[str] = set()
     countries: set[str] = set()
     campaigns: set[str] = set()
     intakes: set[str] = set()
-    for body, programme, city, country, campaign, intake in rows:
+    for body, programme, city, country, campaign, intake, source in rows:
         if body:
             bodies.add(body)
         if programme:
             programmes.add(programme)
+        if source:
+            sources.add(source)
         if city:
             cities.add(city)
         if country:
@@ -674,6 +677,7 @@ async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = Non
     return CrmLeadFilterOptions(
         awarding_bodies=sorted(bodies),
         programmes=sorted(programmes)[:200],
+        sources=sorted(sources),
         cities=sorted(cities)[:200],
         countries=sorted(countries)[:200],
         campaigns=sorted(campaigns)[:200],
@@ -694,6 +698,7 @@ async def create_lead(
     payload: CrmLeadCreate,
     counsellor_id: Optional[int] = None,
     counsellor_name: Optional[str] = None,
+    assign_to_creator: bool = False,
 ) -> CrmLeadOut:
     await _ensure_awarding_body_column(db)
     await _ensure_counsellor_status_table(db)
@@ -706,7 +711,14 @@ async def create_lead(
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
     explicit_id = data.pop("assigned_counsellor_id", None)
     assignment_note = ""
-    if explicit_id is not None:
+    if assign_to_creator:
+        if counsellor_id is None or explicit_id is not None:
+            raise ValidationError("Counsellor-created leads must be assigned to their creator")
+        data["assigned_counsellor_id"] = counsellor_id
+        data["assigned_at"] = datetime.utcnow()
+        data["counsellor_name"] = counsellor_name
+        assignment_note = f" Assigned to creator {counsellor_name or counsellor_id}."
+    elif explicit_id is not None:
         counsellor = await _registered_counsellor(db, explicit_id)
         data["assigned_counsellor_id"] = counsellor.user_id
         data["assigned_at"] = datetime.utcnow()
@@ -717,7 +729,7 @@ async def create_lead(
         data["counsellor_name"] = None
     lead = await repo.create(data, commit=False)
 
-    if explicit_id is None:
+    if explicit_id is None and not assign_to_creator:
         picked = await apply_auto_assignment(db, lead.lead_id, commit=False)
         if picked:
             assignment_note = f" Auto-assigned to {picked.name} (daily rotation)."
@@ -1063,6 +1075,8 @@ async def get_counsellor_report(
     counsellor_id: Optional[int] = None,
     programme: Optional[str] = None,
     all_time: bool = False,
+    stage: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> CrmCounsellorReportResponse:
     if all_time:
         start, end = datetime(1900, 1, 1), datetime(9999, 12, 31)
@@ -1088,6 +1102,10 @@ async def get_counsellor_report(
         lead_scope.append(CrmLead.assigned_counsellor_id == counsellor_id)
     if programme:
         lead_scope.append(or_(CrmLead.interested_programme == programme, CrmLead.interested_course == programme))
+    if stage:
+        lead_scope.append(CrmLead.stage == stage)
+    if source:
+        lead_scope.append(CrmLead.source == source)
 
     assignment_time = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
     in_created = and_(assignment_time >= start, assignment_time < end)
@@ -1115,7 +1133,7 @@ async def get_counsellor_report(
                 func.count().filter(and_(in_created, CrmLead.stage == "not_interested")),
                 func.count().filter(and_(in_created, CrmLead.stage == "lost_to_competitor")),
                 func.count().filter(and_(in_created, CrmLead.stage == "cant_afford")),
-                func.count().filter(and_(in_follow, CrmLead.followup_date < datetime.utcnow(), CrmLead.stage != "enrolled")),
+                func.count().filter(and_(in_follow, CrmLead.followup_date < datetime.utcnow())),
             )
             .where(and_(*lead_scope))
             .group_by(CrmLead.assigned_counsellor_id)
@@ -1145,7 +1163,8 @@ async def get_counsellor_report(
     activity_rows = (
         await db.execute(
             select(CrmActivity.counsellor_id, activity_day, func.count())
-            .where(and_(*activity_filters))
+            .join(CrmLead, CrmLead.lead_id == CrmActivity.lead_id)
+            .where(and_(*activity_filters, *lead_scope))
             .group_by(CrmActivity.counsellor_id, activity_day)
         )
     ).all()
@@ -1161,7 +1180,8 @@ async def get_counsellor_report(
 
     completed_rows = (await db.execute(
         select(CrmActivity.counsellor_id, func.count())
-        .where(*activity_filters, CrmActivity.activity_type == "follow_up_completed")
+        .join(CrmLead, CrmLead.lead_id == CrmActivity.lead_id)
+        .where(*activity_filters, *lead_scope, CrmActivity.activity_type == "follow_up_completed")
         .group_by(CrmActivity.counsellor_id)
     )).all()
     completed_map = _count_map(completed_rows)

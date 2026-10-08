@@ -201,6 +201,7 @@ async def create_lead(
         payload,
         counsellor_id=current_user.user_id,
         counsellor_name=counsellor_name,
+        assign_to_creator=_counsellor_only(current_user),
     )
 
 
@@ -255,13 +256,16 @@ async def counsellor_report(
     all_time: bool = Query(False),
     counsellor_id: Optional[int] = Query(None),
     programme: Optional[str] = Query(None),
+    stage: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmCounsellorReportResponse:
     if _counsellor_only(current_user):
-        raise ForbiddenError("Counsellor reports require CRM management access")
+        # Counsellors may read their own aggregate figures, never another person's.
+        counsellor_id = current_user.user_id
     try:
-        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time)
+        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time, stage, source)
     except APIError:
         raise
     except Exception as exc:
