@@ -53,11 +53,13 @@ router = APIRouter(prefix="/api/v1/cms", tags=["cms"], dependencies=[Depends(req
 
 @router.get("/activity-log", response_model=ActivityLogResponse)
 async def get_activity_log(
+    response: Response,
     search: str | None = Query(None, max_length=100),
     size: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = Depends(require_access("USER_MANAGEMENT")),
 ) -> ActivityLogResponse:
+    response.headers["Cache-Control"] = "no-store"
     return await activity_service.list_activity_log(db, search, size)
 
 
