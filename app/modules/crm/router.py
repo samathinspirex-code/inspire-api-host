@@ -354,6 +354,9 @@ async def update_lead(
     await _check_lead_access(db, lead_id, current_user)
     if _counsellor_only(current_user) and "assigned_counsellor_id" in payload.model_fields_set:
         raise ForbiddenError("Only management can reassign leads")
+    if _counsellor_only(current_user) and "created_at" in payload.model_fields_set:
+        if not await service.was_manual_lead_created_by(db, lead_id, current_user.user_id):
+            raise ForbiddenError("Only the counsellor who added this lead can change its created date")
     actor_name = await service._actor_name(db, current_user.user_id, current_user.email)
     return await service.update_lead(db, lead_id, payload, current_user.user_id, actor_name)
 
@@ -386,7 +389,9 @@ async def update_stage(
 @router.delete("/leads/{lead_id}", status_code=204)
 async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> None:
     if _counsellor_only(current_user):
-        raise ForbiddenError("Only management can archive leads")
+        await _check_lead_access(db, lead_id, current_user)
+        if not await service.was_manual_lead_created_by(db, lead_id, current_user.user_id):
+            raise ForbiddenError("Only the counsellor who added this lead can delete it")
     await service.delete_lead(db, lead_id)
 
 
