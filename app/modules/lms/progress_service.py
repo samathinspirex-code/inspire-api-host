@@ -250,10 +250,10 @@ async def get_course_progress(
 
 
 async def get_course_progress_summary(
-    db: AsyncSession, course_id: int, requester_user_id: int,
+    db: AsyncSession, course_id: int, requester_user_id: int, requester_role: str,
 ) -> CourseProgressSummaryResponse:
     """Roster percentages in constant queries, without every student's full report."""
-    await content_service._ensure_course_access(db, course_id, requester_user_id, "LECTURER")
+    await content_service._ensure_course_access(db, course_id, requester_user_id, requester_role)
     modules = [
         module for module in await ModuleRepository(db).list_by_course(course_id)
         if module.status == "active" and not content_service.is_practice_test_module(module)

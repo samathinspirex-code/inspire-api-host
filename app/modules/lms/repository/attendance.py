@@ -9,7 +9,9 @@ from app.modules.cms.models import Program
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
+    ClassLecturer,
     ClassStudent,
+    CourseEnrollment,
     LmsClass,
     LmsCourse,
     LecturerProfile,
@@ -185,8 +187,18 @@ class AttendanceRepository:
             .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
             .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+            .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
+            .join(
+                CourseEnrollment,
+                CourseEnrollment.course_id == LmsCourse.course_id,
+            )
             .where(
                 AttendanceRecord.student_user_id == student_user_id,
+                ClassStudent.student_user_id == student_user_id,
+                CourseEnrollment.student_user_id == student_user_id,
+                CourseEnrollment.status == "enrolled",
+                LmsClass.status != "cancelled",
+                LmsCourse.status != "archived",
                 AttendanceSession.sync_status == "synced",
             )
             .order_by(OnlineMeeting.start_time.desc())
@@ -223,9 +235,20 @@ class AttendanceRepository:
         status: str | None = None,
         search: str | None = None,
     ) -> list:
-        conditions = [AttendanceSession.sync_status == "synced"]
+        conditions = [
+            AttendanceSession.sync_status == "synced",
+            LmsClass.status != "cancelled",
+            LmsCourse.status != "archived",
+        ]
         if lecturer_scope_user_id is not None:
-            conditions.append(OnlineMeeting.lecturer_user_id == lecturer_scope_user_id)
+            conditions.append(
+                select(ClassLecturer.class_id)
+                .where(
+                    ClassLecturer.class_id == LmsClass.class_id,
+                    ClassLecturer.lecturer_user_id == lecturer_scope_user_id,
+                )
+                .exists()
+            )
         if program_id is not None:
             conditions.append(LmsCourse.program_id == program_id)
         if course_id is not None:
@@ -394,7 +417,7 @@ class AttendanceRepository:
         class_rows = list((await self.db.execute(
             self._report_base(select(
                 LmsClass.class_id, LmsCourse.code, LmsClass.code, LmsClass.name, student_count,
-            )).where(*conditions).distinct(LmsClass.class_id).order_by(LmsClass.class_id)
+            )).where(*conditions).distinct().order_by(LmsClass.class_id)
         )).all())
         class_rows.sort(key=lambda row: ((row[1] or ""), (row[2] or "")))
 

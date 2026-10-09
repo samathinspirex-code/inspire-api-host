@@ -647,6 +647,29 @@ def _student_for_zoom_name(zoom_name: str, roster: list) -> dict | None:
     return partial[0] if len(partial) == 1 else None
 
 
+def _zoom_staff_identity(participant: dict, lecturers: list, students: list, host: dict) -> tuple[bool, dict | None]:
+    """Keep known staff out of student attendance without guessing ambiguous names."""
+    email = str(participant.get("user_email") or participant.get("email") or "").strip().casefold()
+    staff_emails = {str(row.get("email") or "").strip().casefold() for row in lecturers}
+    staff_emails.add(str(host.get("email") or "").strip().casefold())
+    if email and email in staff_emails:
+        return True, None
+    # Zoom's `id` can identify a signed-in host. Its `user_id` is a meeting
+    # session identifier, so it must not be compared with the host account ID.
+    host_zoom_id = str(host.get("zoom_user_id") or "")
+    if host_zoom_id and str(participant.get("id") or "") == host_zoom_id:
+        return True, None
+    lecturer = _student_for_zoom_name(participant.get("name"), lecturers)
+    student = _student_for_zoom_name(participant.get("name"), students)
+    if lecturer and student:
+        zoom_key = _name_key(participant.get("name"))
+        lecturer_exact = _name_key(lecturer["full_name"]) == zoom_key
+        student_exact = _name_key(student["full_name"]) == zoom_key
+        if lecturer_exact != student_exact:
+            return lecturer_exact, None if lecturer_exact else student
+    return bool(lecturer), student
+
+
 async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> None:
     context=(await db.execute(text("""SELECT m.*,s.attendance_threshold_percentage FROM lms_online_meetings m
       JOIN lms_zoom_settings s ON s.settings_id=1 WHERE m.meeting_id=:id AND m.provider='zoom'"""),{"id":meeting_id})).mappings().first()
@@ -672,11 +695,20 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
         WHERE s.meeting_id=:meeting_id
       ) eligible JOIN users u ON u.user_id=eligible.student_user_id
       GROUP BY u.user_id,u.full_name,u.is_active"""),{"meeting_id":meeting_id,"class_id":context["class_id"],"ended":actual_end})).mappings().all()
+    lecturers=(await db.execute(text("""SELECT DISTINCT u.user_id,u.full_name,u.email FROM users u
+      WHERE u.user_id=:lecturer_user_id OR u.user_id IN (
+        SELECT cl.lecturer_user_id FROM lms_class_lecturers cl
+        WHERE cl.class_id IN (
+          SELECT class_id FROM lms_meeting_audience_classes WHERE meeting_id=:meeting_id
+          UNION SELECT :class_id
+        )
+      )"""),{"lecturer_user_id":context["lecturer_user_id"],"meeting_id":meeting_id,"class_id":context["class_id"]})).mappings().all()
     buckets={row["user_id"]:[] for row in roster}; unmatched=[]
     for p in participants:
         duration=int(p.get("duration") or 0)
-        student=_student_for_zoom_name(p.get("name"), roster)
-        if student: buckets[student["user_id"]].append(p)
+        staff_match,student=_zoom_staff_identity(p,lecturers,roster,dict(host))
+        if staff_match and not student: continue
+        if student and not staff_match: buckets[student["user_id"]].append(p)
         else: unmatched.append({"display_name":p.get("name") or "Unknown participant","participant_type":"anonymous","attended_seconds":duration})
     session=await db.scalar(text("""INSERT INTO lms_attendance_sessions(meeting_id,class_id,provider_reference,actual_start_time,actual_end_time,threshold_percentage,sync_status,unmatched_participants,synced_by,synced_at)
       VALUES(:m,:c,:ref,:start,:end,:threshold,'synced',CAST(:unmatched AS jsonb),:by,now()) ON CONFLICT(meeting_id) DO UPDATE SET provider_reference=EXCLUDED.provider_reference,
@@ -844,6 +876,26 @@ async def sweep_mismatched_attendance(db: AsyncSession, now: datetime, limit: in
         await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
           VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
           {"key":f"repair:attendance-roster-v2:{row['meeting_id']}","meeting":row["meeting_id"]})
+    await db.commit(); return len(rows)
+
+
+async def sweep_staff_attendance(db: AsyncSession, now: datetime, limit: int=10) -> int:
+    """Re-import older sessions so lecturer and host rows leave unmatched results."""
+    enabled=await db.scalar(text("SELECT attendance_sync_enabled FROM lms_zoom_settings WHERE settings_id=1"))
+    if not enabled: return 0
+    rows=(await db.execute(text("""SELECT m.meeting_id FROM lms_online_meetings m
+      JOIN lms_attendance_sessions s ON s.meeting_id=m.meeting_id
+      WHERE m.provider='zoom' AND m.status='completed' AND s.sync_status='synced'
+        AND m.end_time >= :oldest
+        AND jsonb_array_length(s.unmatched_participants::jsonb)>0
+        AND NOT EXISTS (SELECT 1 FROM lms_zoom_jobs j
+          WHERE j.event_key='repair:attendance-staff-v1:' || m.meeting_id)
+      ORDER BY m.meeting_id LIMIT :limit"""),
+      {"oldest":now-timedelta(days=450),"limit":limit})).mappings().all()
+    for row in rows:
+        await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
+          VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
+          {"key":f"repair:attendance-staff-v1:{row['meeting_id']}","meeting":row["meeting_id"]})
     await db.commit(); return len(rows)
 
 

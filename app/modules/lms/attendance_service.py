@@ -462,7 +462,7 @@ async def get_attendance_report_options(
             AttendanceReportOption(
                 value=item[0], label=f"{item[1]} · {item[2] or item[3]}"
             )
-            for item in rows["lecturers"]
+            for item in (rows["lecturers"] if role != "LECTURER" else [])
         ],
         students=[
             AttendanceReportOption(
