@@ -11,7 +11,7 @@ from app.modules.auth import service as auth_service
 from app.modules.auth.models import AuthenticatorCredential, User
 from app.modules.auth.repository.authenticator import AuthenticatorRepository
 from app.modules.cms import media_service
-from app.modules.cms.models import MediaAsset
+from app.modules.cms.models import MediaAsset, Program
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
 from app.modules.lms import content_service
 from app.modules.lms.models import (
@@ -39,6 +39,8 @@ from app.modules.lms.repository import ContentRepository
 from app.modules.lms.schemas import (
     MyProfileResponse,
     MyProfileUpdate,
+    LecturerDirectoryProfileResponse,
+    LecturerTeachingClass,
     ProfileStatistics,
     ProfileUpcomingItem,
     RecoveryCodesResponse,
@@ -396,6 +398,76 @@ async def get_my_profile(db: AsyncSession, user_id: int, role: str) -> MyProfile
     raise ValidationError("Profiles are available to students and lecturers")
 
 
+async def get_lecturer_directory_profile(
+    db: AsyncSession, lecturer_user_id: int
+) -> LecturerDirectoryProfileResponse:
+    user = await db.get(User, lecturer_user_id)
+    profile = await db.get(LecturerProfile, lecturer_user_id)
+    if user is None or profile is None:
+        raise NotFoundError("Lecturer profile not found")
+
+    student_count = (
+        select(func.count(ClassStudent.student_user_id))
+        .join(
+            CourseEnrollment,
+            and_(
+                CourseEnrollment.course_id == LmsClass.course_id,
+                CourseEnrollment.student_user_id == ClassStudent.student_user_id,
+            ),
+        )
+        .where(
+            ClassStudent.class_id == LmsClass.class_id,
+            CourseEnrollment.status == "enrolled",
+        )
+        .correlate(LmsClass)
+        .scalar_subquery()
+    )
+    rows = (await db.execute(
+        select(LmsClass, LmsCourse, Program.title, student_count)
+        .join(ClassLecturer, ClassLecturer.class_id == LmsClass.class_id)
+        .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
+        .outerjoin(Program, Program.program_id == LmsCourse.program_id)
+        .where(
+            ClassLecturer.lecturer_user_id == lecturer_user_id,
+            LmsClass.status != "cancelled",
+            LmsCourse.status != "archived",
+        )
+        .order_by(LmsClass.start_date.desc(), LmsClass.code)
+    )).all()
+    return LecturerDirectoryProfileResponse(
+        user_id=user.user_id,
+        full_name=user.full_name or user.email,
+        preferred_name=profile.preferred_name,
+        email=user.email,
+        staff_number=profile.staff_number,
+        job_title=profile.job_title,
+        phone=profile.phone,
+        profile_image_url=profile.profile_image_url,
+        expertise=profile.expertise,
+        bio=profile.bio,
+        address=profile.address,
+        city=profile.city,
+        country=profile.country,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        course_count=len({course.course_id for _class, course, _programme, _students in rows}),
+        classes=[LecturerTeachingClass(
+            class_id=class_.class_id,
+            class_code=class_.code,
+            class_name=class_.name,
+            course_id=course.course_id,
+            course_code=course.code,
+            course_title=course.title,
+            programme_title=programme_title,
+            status=class_.status,
+            study_mode=class_.study_mode,
+            start_date=class_.start_date,
+            end_date=class_.end_date,
+            student_count=int(class_student_count or 0),
+        ) for class_, course, programme_title, class_student_count in rows],
+    )
+
+
 def _percent(earned, possible) -> float | None:
     if earned is None or not possible or Decimal(possible) <= 0:
         return None
@@ -640,6 +712,11 @@ async def get_student_academic_profile(
         preferred_name=profile.preferred_name, email=user.email, student_number=profile.student_number,
         profile_image_url=profile.profile_image_url, phone=profile.phone, city=profile.city,
         country=profile.country, bio=profile.bio,
+        address=profile.address if viewer_role in {"ADMIN", "SUPER_ADMIN"} else None,
+        emergency_contact_name=profile.emergency_contact_name if viewer_role in {"ADMIN", "SUPER_ADMIN"} else None,
+        emergency_contact_phone=profile.emergency_contact_phone if viewer_role in {"ADMIN", "SUPER_ADMIN"} else None,
+        notes=profile.notes if viewer_role in {"ADMIN", "SUPER_ADMIN"} else None,
+        is_active=user.is_active, created_at=user.created_at,
         last_activity_at=activities[0].last_activity_at if activities else None,
         course_progress=overall_progress,
         attendance_percentage=round(present * 100 / len(attendance), 1) if attendance else None,

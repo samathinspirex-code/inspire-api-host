@@ -136,6 +136,12 @@ class StudentAcademicProfileResponse(BaseModel):
     city: str | None = None
     country: str | None = None
     bio: str | None = None
+    address: str | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None
+    notes: str | None = None
+    is_active: bool = True
+    created_at: datetime | None = None
     last_activity_at: datetime | None = None
     course_progress: float | None = None
     attendance_percentage: float | None = None
@@ -148,6 +154,41 @@ class StudentAcademicProfileResponse(BaseModel):
     question_papers: list[StudentAcademicAssessment]
     attendance: list[StudentAcademicAttendance]
     recent_activity: list[StudentAcademicActivity]
+
+
+class LecturerTeachingClass(BaseModel):
+    class_id: int
+    class_code: str
+    class_name: str
+    course_id: int
+    course_code: str
+    course_title: str
+    programme_title: str | None = None
+    status: str
+    study_mode: str | None = None
+    start_date: date
+    end_date: date
+    student_count: int
+
+
+class LecturerDirectoryProfileResponse(BaseModel):
+    user_id: int
+    full_name: str
+    preferred_name: str | None = None
+    email: str
+    staff_number: str | None = None
+    job_title: str | None = None
+    phone: str | None = None
+    profile_image_url: str | None = None
+    expertise: str | None = None
+    bio: str | None = None
+    address: str | None = None
+    city: str | None = None
+    country: str | None = None
+    is_active: bool
+    created_at: datetime
+    course_count: int
+    classes: list[LecturerTeachingClass]
 
 
 class RecoveryCodesRegenerateRequest(BaseModel):

@@ -185,6 +185,8 @@ from app.modules.lms.schemas.notification import (
     NotificationReadUpdate,
 )
 from app.modules.lms.schemas.profile import (
+    LecturerDirectoryProfileResponse,
+    LecturerTeachingClass,
     MyProfileResponse,
     MyProfileUpdate,
     ProfileStatistics,
@@ -382,6 +384,8 @@ __all__ = [
     "NotificationReadUpdate",
     "NotificationDispatchSummary",
     "MyProfileResponse",
+    "LecturerDirectoryProfileResponse",
+    "LecturerTeachingClass",
     "MyProfileUpdate",
     "ProfileStatistics",
     "ProfileUpcomingItem",
