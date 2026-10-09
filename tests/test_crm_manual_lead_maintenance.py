@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.core.errors import ForbiddenError, ValidationError
+from app.core.errors import ForbiddenError
 from app.modules.crm import router, service
 from app.modules.crm.schemas import CrmLeadUpdate
 
@@ -73,9 +73,9 @@ def test_leads_from_all_sources_can_be_permanently_deleted():
     asyncio.run(run())
 
 
-def test_counsellor_can_edit_date_and_delete_only_their_own_added_lead():
+def test_counsellor_can_edit_assigned_lead_date_but_delete_only_their_own_added_lead():
     async def run():
-        user = SimpleNamespace(user_id=17, email="counsellor@example.com", access=["COUNSELLOR"])
+        user = SimpleNamespace(user_id=17, email="counsellor@example.com", access=["CMS", "COUNSELLOR"])
         db = SimpleNamespace(scalar=AsyncMock(return_value=17))
         with (
             patch.object(service, "was_manual_lead_created_by", new_callable=AsyncMock, return_value=True),
@@ -90,15 +90,21 @@ def test_counsellor_can_edit_date_and_delete_only_their_own_added_lead():
 
         with (
             patch.object(service, "was_manual_lead_created_by", new_callable=AsyncMock, return_value=False),
+            patch.object(service, "_actor_name", new_callable=AsyncMock, return_value="Counsellor"),
             patch.object(service, "update_lead", new_callable=AsyncMock) as update,
             patch.object(service, "delete_lead", new_callable=AsyncMock) as delete,
         ):
-            with pytest.raises(ForbiddenError):
-                await router.update_lead(52, CrmLeadUpdate(created_at="2025-05-20T09:30"), db=db, current_user=user)
+            await router.update_lead(52, CrmLeadUpdate(created_at="2025-05-20T09:30"), db=db, current_user=user)
             with pytest.raises(ForbiddenError):
                 await router.delete_lead(52, db=db, current_user=user)
-        update.assert_not_awaited()
+        update.assert_awaited_once()
         delete.assert_not_awaited()
+
+        db.scalar.return_value = 18
+        with patch.object(service, "update_lead", new_callable=AsyncMock) as update:
+            with pytest.raises(ForbiddenError):
+                await router.update_lead(52, CrmLeadUpdate(created_at="2025-05-20T09:30"), db=db, current_user=user)
+        update.assert_not_awaited()
 
     asyncio.run(run())
 
