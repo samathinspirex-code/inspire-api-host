@@ -1251,7 +1251,7 @@ async def get_student_course_progress(
         course_id,
         student_user_id,
         current_user.user_id,
-        "LECTURER",
+        service.resolve_role(current_user.access),
     )
 
 
@@ -1261,7 +1261,9 @@ async def get_course_progress_summary(
     current_user: CurrentUser = Depends(lecturer_access),
     db: AsyncSession = Depends(get_db),
 ) -> CourseProgressSummaryResponse:
-    return await progress_service.get_course_progress_summary(db, course_id, current_user.user_id)
+    return await progress_service.get_course_progress_summary(
+        db, course_id, current_user.user_id, service.resolve_role(current_user.access)
+    )
 
 
 @router.get("/my/courses/{course_id}/discussions", response_model=CourseDiscussionListResponse)

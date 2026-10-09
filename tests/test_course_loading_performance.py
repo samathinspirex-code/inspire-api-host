@@ -96,7 +96,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
         return db
 
     async def test_roster_50_students_in_four_reads_matches_detailed_percentage(self):
-        result = await progress_service.get_course_progress_summary(self.db(), 1, 10)
+        result = await progress_service.get_course_progress_summary(self.db(), 1, 10, "LECTURER")
         self.assertEqual(len(self.queries), 8)
         self.assertEqual(len(result.data), 50)
         by_id = {row.student_user_id: row.completion_percent for row in result.data}
@@ -123,7 +123,7 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
             for row in db.query(LmsLearningProgress).filter_by(student_user_id=20):
                 row.completion_percent = 100 if row.learning_item_id == 1 else 0
             db.commit()
-        result = await progress_service.get_course_progress_summary(self.db(), 1, 10)
+        result = await progress_service.get_course_progress_summary(self.db(), 1, 10, "LECTURER")
         by_id = {row.student_user_id: row.completion_percent for row in result.data}
         self.assertEqual(by_id[20], 0)
         detail = await progress_service.get_course_progress(self.db(), 1, 20, 10, "LECTURER")
@@ -150,17 +150,29 @@ class CourseLoadingTests(unittest.IsolatedAsyncioTestCase):
         with Session(self.engine) as db:
             db.get(LmsModule, 14).status = "draft"
             db.commit()
-        result = await progress_service.get_course_progress_summary(self.db(), 2, 11)
+        result = await progress_service.get_course_progress_summary(self.db(), 2, 11, "LECTURER")
         self.assertEqual(result.data[0].completion_percent, 0)
 
     async def test_roster_and_progress_permissions_are_preserved(self):
         for requester in [11, 20]:
             with self.assertRaises(ForbiddenError):
-                await progress_service.get_course_progress_summary(self.db(), 1, requester)
+                await progress_service.get_course_progress_summary(self.db(), 1, requester, "LECTURER")
         with self.assertRaises(NotFoundError):
             await progress_service.get_course_progress(self.db(), 1, 99, 10, "LECTURER")
         with self.assertRaises(ForbiddenError):
             await progress_service.get_course_progress(self.db(), 1, 21, 20, "STUDENT")
+
+    async def test_admins_can_view_progress_without_a_class_assignment(self):
+        for role in ("ADMIN", "SUPER_ADMIN"):
+            with self.subTest(role=role):
+                summary = await progress_service.get_course_progress_summary(self.db(), 1, 11, role)
+                self.assertEqual(len(summary.data), 50)
+                detail = await progress_service.get_course_progress(self.db(), 1, 20, 11, role)
+                self.assertEqual(detail.completion_percent, 50)
+        with self.assertRaises(ForbiddenError):
+            await progress_service.get_course_progress_summary(self.db(), 1, 11, "LECTURER")
+        with self.assertRaises(ForbiddenError):
+            await progress_service.get_course_progress(self.db(), 1, 20, 11, "LECTURER")
 
     async def test_discussions_latest_200_in_three_reads_and_course_scoped_roles(self):
         response = await content_service.list_course_discussions(self.db(), 1, 20, "STUDENT")

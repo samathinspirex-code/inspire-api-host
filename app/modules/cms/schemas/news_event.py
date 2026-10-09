@@ -47,6 +47,14 @@ class NewsEventUpdate(NewsEventCreate):
 class NewsEventItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("image_url")
+    @classmethod
+    def use_bundled_legacy_image(cls, value: str) -> str:
+        legacy_prefix = "https://inspirecollege.lk/wp-content/uploads/"
+        if value.startswith(legacy_prefix):
+            return f"https://inspirecollege.lk/uploads/{value[len(legacy_prefix):]}"
+        return value
+
     news_event_id: int
     slug: str
     title: str

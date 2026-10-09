@@ -25,6 +25,7 @@ class PortalCourseDetailResponse(BaseModel):
 
 
 class PortalClassItem(ClassItem):
+    program_id: int | None = None
     people_count: int
     people_label: str
 

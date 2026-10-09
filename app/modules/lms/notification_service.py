@@ -327,6 +327,10 @@ async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> Notif
     except Exception:
         pass
     try:
+        await zoom_service.sweep_staff_attendance(db, now or utc_now())
+    except Exception:
+        pass
+    try:
         await zoom_service.purge_expired_cloud_recordings(db, now or utc_now())
     except Exception:
         # Retention cleanup retries on the next cycle.

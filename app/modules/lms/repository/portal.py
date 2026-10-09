@@ -170,6 +170,7 @@ class PortalRepository:
                 LmsCourse.title,
                 LmsCourse.cover_image_url,
                 Program.title,
+                LmsCourse.program_id,
                 people_count,
                 LmsCourse.is_orientation,
             )
@@ -177,7 +178,7 @@ class PortalRepository:
             .outerjoin(Program, Program.program_id == LmsCourse.program_id)
             .order_by(LmsClass.start_date.desc(), LmsClass.name)
         )
-        stmt = stmt.where(LmsClass.status != "cancelled")
+        stmt = stmt.where(LmsClass.status != "cancelled", LmsCourse.status != "archived")
         if not is_manager:
             stmt = stmt.join(relation, join_on).where(access_filter)
             if role == "STUDENT":
