@@ -12,7 +12,7 @@ from app.modules.lms.models import (
     AttendanceRecord, AttendanceSession, ClassLecturer, ClassStudent, CourseEnrollment,
     LecturerProfile, LmsClass, LmsCourse, OnlineMeeting, StudentProfile,
 )
-from app.modules.lms import attendance_service, portal_service
+from app.modules.lms import attendance_service, portal_service, profile_service
 from app.modules.lms.repository.attendance import AttendanceRepository
 from app.modules.lms.repository.portal import PortalRepository
 
@@ -23,6 +23,9 @@ class LocalSession:
 
     async def execute(self, statement):
         return self.session.execute(statement)
+
+    async def get(self, model, key):
+        return self.session.get(model, key)
 
 
 class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
@@ -123,6 +126,13 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
         withdrawn = await attendance_service.list_my_attendance(self.db(), 20)
         self.assertEqual(withdrawn.data, [])
         self.assertEqual(withdrawn.total_sessions, 0)
+
+    async def test_lecturer_profile_lists_only_current_teaching_classes(self):
+        profile = await profile_service.get_lecturer_directory_profile(self.db(), 10)
+        self.assertEqual(profile.email, "user10@example.test")
+        self.assertEqual(profile.course_count, 1)
+        self.assertEqual([item.class_id for item in profile.classes], [1])
+        self.assertEqual(profile.classes[0].student_count, 1)
 
 
 if __name__ == "__main__":

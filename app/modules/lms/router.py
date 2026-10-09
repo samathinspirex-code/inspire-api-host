@@ -157,6 +157,7 @@ from app.modules.lms.schemas import (
     NotificationListResponse,
     NotificationReadUpdate,
     MyProfileResponse,
+    LecturerDirectoryProfileResponse,
     MyProfileUpdate,
     StudentAcademicProfileResponse,
     AnalyticsDashboardResponse,
@@ -243,6 +244,15 @@ async def get_student_academic_profile(
     return await profile_service.get_student_academic_profile(
         db, student_user_id, current_user.user_id, service.resolve_role(current_user.access)
     )
+
+
+@router.get("/lecturers/{lecturer_user_id}/profile", response_model=LecturerDirectoryProfileResponse)
+async def get_lecturer_directory_profile(
+    lecturer_user_id: int,
+    _current_user: CurrentUser = Depends(admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> LecturerDirectoryProfileResponse:
+    return await profile_service.get_lecturer_directory_profile(db, lecturer_user_id)
 
 
 @router.get("/analytics/dashboard", response_model=AnalyticsDashboardResponse)
