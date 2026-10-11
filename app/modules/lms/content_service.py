@@ -37,6 +37,7 @@ from app.modules.lms.schemas import (
     ModuleAccessUpdate,
     StudioSectionResponse,
 )
+from app.modules.lms.schemas.content import CourseProgressionSettings
 
 
 async def _discussion_item(
@@ -61,12 +62,12 @@ def _discussion_response(discussion, author_name, author_email, is_lecturer):
     )
 
 
-async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, role: str) -> None:
+async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, role: str) -> LmsCourse:
     course = await CourseRepository(db).get(course_id)
     if course is None:
         raise NotFoundError(f"Course {course_id} not found")
     if role in {"SUPER_ADMIN", "ADMIN"}:
-        return
+        return course
     if role == "LECTURER":
         related_course_ids = {course_id}
         if course.source_master_course_id is not None:
@@ -92,6 +93,7 @@ async def _ensure_course_access(db: AsyncSession, course_id: int, user_id: int, 
             raise ForbiddenError("You are not enrolled in this course")
     else:
         raise ForbiddenError("This LMS role cannot open Course Studio")
+    return course
 
 
 async def _ensure_module_manager(db: AsyncSession, module_id: int, user_id: int):
@@ -200,8 +202,9 @@ def _student_stream_url(item) -> str | None:
 async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id: int):
     """Check current release/prerequisite rules in three reads, without building a studio."""
     target = (await db.execute(
-        select(LmsLearningItem, LmsModule, CourseEnrollment.status)
+        select(LmsLearningItem, LmsModule, CourseEnrollment.status, LmsCourse.sequential_content_enabled)
         .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
+        .join(LmsCourse, LmsCourse.course_id == LmsModule.course_id)
         .outerjoin(CourseEnrollment, and_(
             CourseEnrollment.course_id == LmsModule.course_id,
             CourseEnrollment.student_user_id == student_id,
@@ -210,7 +213,7 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
     )).one_or_none()
     if target is None:
         raise NotFoundError(f"Learning item {item_id} not found")
-    item, module, enrollment_status = target
+    item, module, enrollment_status, sequential_content_enabled = target
     if enrollment_status != "enrolled":
         raise ForbiddenError("You are not enrolled in this course")
     if module.status != "active":
@@ -255,6 +258,9 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
     if not unlocked:
         raise ForbiddenError(reason or "This learning item has not been released to you")
 
+    if not sequential_content_enabled:
+        return item
+
     eligible_videos = select(LmsLectureQuestion.learning_item_id).where(
         LmsLectureQuestion.course_id == module.course_id,
         LmsLectureQuestion.status == "approved",
@@ -277,6 +283,17 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
            for mid in blocker_modules):
         raise ForbiddenError("Complete the previous video knowledge check first")
     return item
+
+
+async def update_course_progression_settings(
+    db: AsyncSession, course_id: int, payload: CourseProgressionSettings,
+) -> CourseProgressionSettings:
+    repo = CourseRepository(db)
+    course = await repo.get(course_id)
+    if course is None:
+        raise NotFoundError(f"Course {course_id} not found")
+    course = await repo.update(course, payload.model_dump())
+    return CourseProgressionSettings(sequential_content_enabled=course.sequential_content_enabled)
 
 
 async def read_learning_item_pdf(db: AsyncSession, item_id: int, user_id: int, role: str) -> bytes:
@@ -327,7 +344,7 @@ def _item_response(
 async def get_course_studio(
     db: AsyncSession, course_id: int, user_id: int, role: str
 ) -> CourseStudioResponse:
-    await _ensure_course_access(db, course_id, user_id, role)
+    course = await _ensure_course_access(db, course_id, user_id, role)
     modules = await ModuleRepository(db).list_by_course(course_id)
     class_ids = await _student_class_ids(db, course_id, user_id) if role == "STUDENT" else set()
     sections = []
@@ -353,7 +370,7 @@ async def get_course_studio(
     )
     quiz_video_ids: set[int] = set()
     submitted_quiz_ids: set[int] = set()
-    if role == "STUDENT":
+    if role == "STUDENT" and course.sequential_content_enabled:
         quiz_video_ids = set((await db.execute(
             select(LmsLectureQuestion.learning_item_id)
             .where(LmsLectureQuestion.course_id == course_id, LmsLectureQuestion.status == "approved")
@@ -369,7 +386,7 @@ async def get_course_studio(
                 LmsLectureQuizAttempt.submitted_at.is_not(None),
             )
         )).scalars().all())
-    blocked_by_video: str | None = None
+    progression_reason: str | None = None
     for module in visible_modules:
         rules = rules_by_module.get(module.module_id, [])
         privileged_viewer = role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
@@ -387,11 +404,8 @@ async def get_course_studio(
             ]
         item_responses = []
         for item in items:
-            accessible = unlocked and (independent_practice or blocked_by_video is None)
-            item_reason = reason if not unlocked else (
-                f"Complete the knowledge check for {blocked_by_video} first."
-                if blocked_by_video else None
-            )
+            accessible = unlocked and (independent_practice or progression_reason is None)
+            item_reason = reason if not unlocked else (None if independent_practice else progression_reason)
             item_responses.append(_item_response(
                 item,
                 accessible or privileged_viewer,
@@ -402,12 +416,13 @@ async def get_course_studio(
             ))
             if (
                 role == "STUDENT"
+                and course.sequential_content_enabled
                 and accessible
                 and item.item_type == "video"
                 and item.learning_item_id in quiz_video_ids
                 and item.learning_item_id not in submitted_quiz_ids
             ):
-                blocked_by_video = item.title
+                progression_reason = f"Complete the knowledge check for {item.title} first."
         sections.append(
             StudioSectionResponse(
                 module_id=module.module_id,
@@ -422,7 +437,10 @@ async def get_course_studio(
                 access_rules=[ModuleAccessResponse.model_validate(rule) for rule in rules] if privileged_viewer else [],
             )
         )
-    return CourseStudioResponse(course_id=course_id, can_manage=role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}, sections=sections)
+    return CourseStudioResponse(
+        course_id=course_id, can_manage=role in {"LECTURER", "SUPER_ADMIN", "ADMIN"},
+        sequential_content_enabled=course.sequential_content_enabled, sections=sections,
+    )
 
 
 async def create_learning_item(db: AsyncSession, module_id: int, payload: LearningItemCreate, user_id: int):

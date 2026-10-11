@@ -18,6 +18,36 @@ For an IPv4-only network with Supabase, configure the **Session pooler** connect
 
 Locked student responses retain item titles but omit `resource_url` and `text_content`.
 
+## Course progression settings
+
+Apply `scripts/apply_course_progression_settings_migration.py` before deploying.
+Courses default to `sequential_content_enabled: true`; new class copies inherit
+their template's value and can subsequently change it independently.
+
+`PATCH /api/v1/lms/studio/courses/{course_id}/progression-settings`
+
+Assigned lecturers, admins, and super admins may update this setting:
+
+```json
+{
+  "sequential_content_enabled": false
+}
+```
+
+The response returns the saved setting. The studio GET response also includes
+`sequential_content_enabled`. When false, all published items in sections
+released to the student are accessible in any order. Enrollment, section
+release, individual overrides, schedules, and publication checks still apply.
+When true, the existing rule for an earlier released video with an unsubmitted
+knowledge check blocks later course content. PDF completion does not add a new
+prerequisite. Practice tests keep their own
+release rules. Both the outline and direct item access enforce the setting.
+
+For students with sequential access enabled, the PDF viewer automatically sends
+the existing progress completion event after all pages render and the document
+bottom is visible. Completion is saved per student and refreshes the outline.
+The manual PDF completion checkbox remains available.
+
 ## Lecturer section management
 
 | Method | Endpoint | Purpose |

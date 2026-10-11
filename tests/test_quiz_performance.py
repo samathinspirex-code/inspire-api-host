@@ -1,20 +1,21 @@
 """Offline SQL/permission regressions. SQLite fixtures never use the configured database."""
 import unittest
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.core.errors import ForbiddenError
-from app.modules.lms import assistant_service, content_service
+from app.modules.lms import assistant_service, content_service, progress_service
 from app.modules.lms.models import (
     ClassStudent, CourseEnrollment, LmsClass, LmsCourse, LmsLearningItem, LmsLearningProgress,
     LmsModule, LmsModuleAccess, LmsLectureQuestion, LmsLectureQuizAttempt, LmsLectureQuizAttemptQuestion,
     LmsCourseworkAssignment, LmsExam,
 )
 from app.modules.lms.repository import ContentRepository
-from app.modules.lms.schemas import LectureQuizAnswerRequest, LectureQuizSubmitRequest
+from app.modules.lms.schemas import LectureQuizAnswerRequest, LectureQuizSubmitRequest, LearningProgressUpdate
+from app.modules.lms.schemas.content import CourseProgressionSettings
 
 
 class LocalSession:
@@ -33,6 +34,9 @@ class LocalSession:
 
     async def commit(self):
         self.session.commit()
+
+    async def refresh(self, row):
+        self.session.refresh(row)
 
     def add(self, row):
         self.session.add(row)
@@ -132,6 +136,7 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(self.queries), 9)
 
     async def test_published_practice_test_is_visible_even_when_container_status_is_stale(self):
+        self.change(LmsLearningItem, 101, item_type="pdf")
         with Session(self.engine) as db:
             db.add(LmsModule(module_id=13, course_id=1, title="Practice Test", position=13, status="active"))
             db.add(LmsLearningItem(
@@ -209,7 +214,7 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.queries.clear()
         first = await assistant_service.get_or_create_quiz_attempt(db, 112, 7)
         self.assertEqual(len(first.questions), 4)
-        bank_reads = [sql for sql in self.queries if "FROM lms_lecture_questions" in sql and "ORDER BY" in sql]
+        bank_reads = [sql for sql in self.queries if sql.lstrip().startswith("SELECT lms_lecture_questions.") and "ORDER BY" in sql]
         self.assertEqual(len(bank_reads), 1)
         resumed = await assistant_service.get_or_create_quiz_attempt(db, 112, 7)
         self.assertEqual(first.attempt_id, resumed.attempt_id)
@@ -247,6 +252,132 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
             db.add(LmsModuleAccess(module_id=12, scope_type="class", scope_id=9, is_unlocked=True))
             db.commit()
         await self.assert_access(False)
+
+    async def test_unfinished_pdfs_preserve_existing_access_with_sequence_on(self):
+        self.change(LmsLearningItem, 101, item_type="pdf")
+        with Session(self.engine) as db:
+            db.add(LmsLearningItem(learning_item_id=113, module_id=1, position=2,
+                                  title="Next PDF", item_type="pdf", status="published"))
+            db.commit()
+        await self.assert_access(True, 101)
+        await self.assert_access(True, 113)
+        await self.assert_access(True, 112)
+        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        items = {item.learning_item_id: item for section in studio.sections for item in section.items}
+        self.assertTrue(studio.sequential_content_enabled)
+        self.assertTrue(all(item.is_accessible for item in items.values()))
+        self.assertFalse(items[101].is_completed)
+        self.assertFalse(items[113].is_completed)
+
+    async def test_pdf_completion_is_saved_for_that_student_only(self):
+        self.change(LmsLearningItem, 101, item_type="pdf")
+        with Session(self.engine) as db:
+            db.add(CourseEnrollment(course_id=1, student_user_id=8, status="enrolled"))
+            db.commit()
+        result = await progress_service.record_progress(
+            self.db(), 101, LearningProgressUpdate(event="complete"), 7,
+        )
+        self.assertTrue(result.is_completed)
+        self.assertEqual(result.completion_percent, 100)
+        student = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        other = await content_service.get_course_studio(self.db(), 1, 8, "STUDENT")
+        self.assertTrue(student.sections[0].items[0].is_completed)
+        self.assertFalse(other.sections[0].items[0].is_completed)
+        self.assertTrue(student.sections[-1].items[0].is_accessible)
+        self.assertTrue(other.sections[-1].items[0].is_accessible)
+
+    async def test_off_opens_released_pdf_and_video_without_previous_completion(self):
+        self.change(LmsLearningItem, 101, item_type="video")
+        self.bank(101)
+        self.change(LmsLearningItem, 102, item_type="pdf", resource_url="https://example.test/lesson.pdf")
+        await self.assert_access(False, 102)
+        self.change(LmsCourse, 1, sequential_content_enabled=False)
+        await self.assert_access(True, 102)
+        await self.assert_access(True, 112)
+        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        self.assertFalse(studio.sequential_content_enabled)
+        self.assertTrue(all(item.is_accessible for section in studio.sections for item in section.items))
+        self.assertEqual(studio.sections[1].items[0].resource_url, "https://example.test/lesson.pdf")
+        self.assertFalse(studio.sections[1].items[0].is_completed)
+        with patch.object(assistant_service, "_download_pdf", new_callable=AsyncMock, return_value=b"%PDF-test") as download:
+            self.assertEqual(await content_service.read_learning_item_pdf(self.db(), 102, 7, "STUDENT"), b"%PDF-test")
+            download.assert_awaited_once_with("https://example.test/lesson.pdf")
+
+    async def test_class_and_template_settings_remain_independent(self):
+        with Session(self.engine) as db:
+            for cid in (2, 3):
+                db.add(LmsCourse(course_id=cid, program_id=1, code=f"CLASS-{cid}",
+                                 title=f"Class {cid}", is_class_copy=True,
+                                 source_master_course_id=1))
+            db.commit()
+        # A class update affects neither its template nor another class from it.
+        setting = await content_service.update_course_progression_settings(
+            self.db(), 2, CourseProgressionSettings(sequential_content_enabled=False),
+        )
+        self.assertFalse(setting.sequential_content_enabled)
+        with Session(self.engine) as db:
+            self.assertTrue(db.get(LmsCourse, 1).sequential_content_enabled)
+            self.assertFalse(db.get(LmsCourse, 2).sequential_content_enabled)
+            self.assertTrue(db.get(LmsCourse, 3).sequential_content_enabled)
+        # Editing the template later does not overwrite either existing class.
+        await content_service.update_course_progression_settings(
+            self.db(), 1, CourseProgressionSettings(sequential_content_enabled=False),
+        )
+        await content_service.update_course_progression_settings(
+            self.db(), 1, CourseProgressionSettings(sequential_content_enabled=True),
+        )
+        with Session(self.engine) as db:
+            self.assertTrue(db.get(LmsCourse, 1).sequential_content_enabled)
+            self.assertFalse(db.get(LmsCourse, 2).sequential_content_enabled)
+            self.assertTrue(db.get(LmsCourse, 3).sequential_content_enabled)
+
+    async def test_off_still_enforces_release_schedules_publication_and_enrollment(self):
+        self.change(LmsCourse, 1, sequential_content_enabled=False)
+        self.change(LmsModuleAccess, 12, is_unlocked=False)
+        await self.assert_access(False)
+        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        self.assertFalse(studio.sections[-1].items[0].is_accessible)
+        self.change(LmsModuleAccess, 12, is_unlocked=True,
+                    available_from=datetime.now(timezone.utc) + timedelta(days=1))
+        await self.assert_access(False)
+        self.change(LmsModuleAccess, 12, available_from=None)
+        await self.assert_access(True)
+        self.change(LmsLearningItem, 112, status="draft")
+        await self.assert_access(False)
+        self.change(LmsLearningItem, 112, status="published")
+        self.change(LmsModule, 12, status="draft")
+        await self.assert_access(False)
+        self.change(LmsModule, 12, status="active")
+        self.change(CourseEnrollment, (1, 7), status="withdrawn")
+        await self.assert_access(False)
+        await self.assert_access(False, student_id=8)
+
+    async def test_reenabling_sequence_restores_video_rules_and_preserves_pdf_progress(self):
+        self.change(LmsLearningItem, 101, item_type="video")
+        self.bank(101)
+        self.change(LmsLearningItem, 102, item_type="pdf")
+        self.change(LmsCourse, 1, sequential_content_enabled=False)
+        await progress_service.record_progress(self.db(), 102, LearningProgressUpdate(event="complete"), 7)
+        await self.assert_access(True)
+        self.change(LmsCourse, 1, sequential_content_enabled=True)
+        await self.assert_access(False, 102)
+        await self.assert_access(False)
+        with Session(self.engine) as db:
+            db.add(LmsLectureQuizAttempt(learning_item_id=101, student_user_id=7,
+                                        total_questions=4, score=1,
+                                        submitted_at=datetime.now(timezone.utc)))
+            db.commit()
+        await self.assert_access(True)
+        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
+        self.assertTrue(studio.sections[1].items[0].is_completed)
+
+    async def test_locked_or_draft_pdf_does_not_block_released_content(self):
+        self.change(LmsLearningItem, 101, item_type="pdf")
+        self.change(LmsModuleAccess, 1, is_unlocked=False)
+        await self.assert_access(True)
+        self.change(LmsModuleAccess, 1, is_unlocked=True)
+        self.change(LmsLearningItem, 101, status="draft")
+        await self.assert_access(True)
 
 
 if __name__ == "__main__":

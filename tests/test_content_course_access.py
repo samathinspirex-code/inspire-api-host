@@ -4,9 +4,30 @@ from unittest.mock import AsyncMock, patch
 
 from app.core.errors import ForbiddenError
 from app.modules.lms import content_service, router
+from app.modules.lms.schemas.content import CourseProgressionSettings
 
 
 class LecturerCourseAccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_progression_settings_checks_course_manager_before_saving(self):
+        db = object()
+        payload = CourseProgressionSettings(sequential_content_enabled=False)
+        for role in ("ADMIN", "SUPER_ADMIN", "LECTURER"):
+            user = SimpleNamespace(user_id=17, access=["LMS", role])
+            with patch.object(content_service, "ensure_course_manager", new_callable=AsyncMock) as authorize, \
+                 patch.object(content_service, "update_course_progression_settings", new_callable=AsyncMock) as save:
+                await router.update_course_progression_settings(8, payload, user, db)
+                authorize.assert_awaited_once_with(db, 8, 17)
+                save.assert_awaited_once_with(db, 8, payload)
+        with patch.object(content_service, "ensure_course_manager", side_effect=ForbiddenError("Not assigned")), \
+             patch.object(content_service, "update_course_progression_settings", new_callable=AsyncMock) as save:
+            with self.assertRaises(ForbiddenError):
+                await router.update_course_progression_settings(8, payload, user, db)
+            save.assert_not_awaited()
+
+    async def test_student_role_cannot_change_progression_settings(self):
+        with self.assertRaises(ForbiddenError):
+            await router.lecturer_access(SimpleNamespace(user_id=23, access=["LMS", "STUDENT"]))
+
     async def test_progress_routes_pass_the_requesters_actual_role(self):
         db = object()
         for role in ("ADMIN", "SUPER_ADMIN", "LECTURER"):

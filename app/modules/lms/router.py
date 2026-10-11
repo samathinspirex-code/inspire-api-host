@@ -41,6 +41,7 @@ from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, Medi
 from app.modules.lms.dependencies import require_lms_roles
 from app.modules.lms.models import LmsModule
 from app.modules.lms.schemas.progress import CourseProgressSummaryResponse
+from app.modules.lms.schemas.content import CourseProgressionSettings
 from app.modules.lms.schemas.calendar_event import CalendarEventItem, CalendarEventListResponse, CalendarEventWrite
 from app.modules.lms.schemas import (
     CourseCreate,
@@ -1000,6 +1001,17 @@ async def get_my_course_studio(
 ) -> CourseStudioResponse:
     role = service.resolve_role(current_user.access)
     return await content_service.get_course_studio(db, course_id, current_user.user_id, role)
+
+
+@router.patch("/studio/courses/{course_id}/progression-settings", response_model=CourseProgressionSettings)
+async def update_course_progression_settings(
+    course_id: int,
+    payload: CourseProgressionSettings,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseProgressionSettings:
+    await content_service.ensure_course_manager(db, course_id, current_user.user_id)
+    return await content_service.update_course_progression_settings(db, course_id, payload)
 
 
 @router.get("/my/classes/{class_id}/recordings")

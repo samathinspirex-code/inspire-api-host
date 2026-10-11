@@ -28,6 +28,9 @@ class LmsCourse(Base):
     cover_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     vimeo_folder_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_class_copy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sequential_content_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     source_master_course_id: Mapped[int | None] = mapped_column(
         ForeignKey("lms_courses.course_id", ondelete="RESTRICT"), nullable=True
     )
