@@ -134,6 +134,21 @@ For existing Course Studio installations, apply student learning progress with:
 .\.venv\Scripts\python.exe scripts\apply_learning_progress_migration.py
 ```
 
+Before deploying the course content progression switch, apply:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\apply_course_progression_settings_migration.py
+```
+
+The migration defaults existing courses to sequential access. Lecturers and
+admins can toggle **Require content completion in order** at the top of Course
+Contents. Turning it off permits access to all published content released to
+the student, while class, student, and scheduled release rules still apply.
+With it on, the existing video knowledge check rules block later content.
+Reaching the bottom of a fully rendered PDF saves completion for that student;
+the manual completion checkbox also remains available. New class courses copy
+the template's setting, and each class can then change its own setting.
+
 Enable the course knowledge assistant tables before configuring chatbots in the CMS:
 
 ```powershell

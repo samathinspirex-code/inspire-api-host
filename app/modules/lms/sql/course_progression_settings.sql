@@ -1,0 +1,2 @@
+ALTER TABLE lms_courses
+ADD COLUMN IF NOT EXISTS sequential_content_enabled BOOLEAN NOT NULL DEFAULT TRUE;

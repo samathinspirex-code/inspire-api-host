@@ -96,7 +96,11 @@ class StudioSectionResponse(BaseModel):
     access_rules: list[ModuleAccessResponse] = Field(default_factory=list)
 
 
-class CourseStudioResponse(BaseModel):
+class CourseProgressionSettings(BaseModel):
+    sequential_content_enabled: bool
+
+
+class CourseStudioResponse(CourseProgressionSettings):
     course_id: int
     can_manage: bool
     sections: list[StudioSectionResponse]

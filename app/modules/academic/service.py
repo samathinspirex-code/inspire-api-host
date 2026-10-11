@@ -1133,9 +1133,11 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
     copied_course_id = await db.scalar(text("""
         INSERT INTO lms_courses
           (program_id, code, title, description, takeaways, cover_image_url, status,
-           created_by, is_class_copy, source_master_course_id, catalogue_course_id, is_orientation)
+           created_by, is_class_copy, source_master_course_id, catalogue_course_id, is_orientation,
+           sequential_content_enabled)
         VALUES (:program_id, :code, :title, :description, :takeaways, :cover, :status,
-                :user_id, TRUE, :source_id, :catalogue_course_id, :is_orientation)
+                :user_id, TRUE, :source_id, :catalogue_course_id, :is_orientation,
+                :sequential_content_enabled)
         RETURNING course_id
     """), {
         "program_id": master["program_id"], "code": copy_code, "title": master["title"],
@@ -1143,6 +1145,7 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
         "cover": master.get("cover_image_url"), "status": master["status"],
         "user_id": user_id, "source_id": payload.source_course_id, "catalogue_course_id": target_course_id,
         "is_orientation": orientation,
+        "sequential_content_enabled": master["sequential_content_enabled"],
     })
     class_id = await db.scalar(text("""
         INSERT INTO lms_classes
