@@ -1,0 +1,12 @@
+{
+  "source_sha256": "08d135ac6df88d29d265b29412060d6396d36f9eaa8c0cde509bd655deba6c4b",
+  "correct_2006_to_2026": true,
+  "create_yazeed_account": true,
+  "duplicate_row_18": "new",
+  "amount_handling": "down_payment",
+  "programme_targets": {
+    "HND in AI": "HND in Computing & Artificial Intelligence",
+    "Digital Marketing": "hold",
+    "digital marketing mastery": "hold"
+  }
+}
