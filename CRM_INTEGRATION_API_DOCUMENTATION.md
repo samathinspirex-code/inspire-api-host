@@ -1,6 +1,6 @@
 # CRM API for external systems
 
-This is a server-to-server, read-only API for fetching leads from the Inspire CRM. It uses one non-expiring token instead of a staff login token. Keep it on the receiving system's backend; never put it in browser JavaScript, a mobile app, or a public repository.
+This is a server-to-server API for reading and managing leads in the Inspire CRM. It uses one non-expiring token instead of a staff login token. Keep it on the receiving system's backend; never put it in browser JavaScript, a mobile app, or a public repository. The token permits creating, editing, and permanently deleting leads, so restrict access to it.
 
 ## Hosted URL and availability
 
@@ -98,6 +98,57 @@ curl -i 'https://api.inspirecollege.lk/api/v1/integrations/crm/leads/123' \
 
 An unknown lead returns `404` with `NOT_FOUND`. Malformed IDs and invalid query values return `400` with `VALIDATION_ERROR`. The response fields and activity item fields are described in [CRM_LEAD_READ_API_DOCUMENTATION.md](CRM_LEAD_READ_API_DOCUMENTATION.md).
 
+## Create a lead
+
+`POST /leads` returns `201 Created` and the full lead object. Only `full_name` is required. Other accepted fields are defined by `CrmLeadCreate` in the generated OpenAPI reference. If `source` is omitted, it defaults to `api_integration`. The CRM may automatically assign the lead to a counsellor according to its assignment settings.
+
+In Postman, choose **Body → raw → JSON**, and send `Content-Type: application/json` with the token header:
+
+```json
+{
+  "full_name": "Example Student",
+  "email": "student@example.com",
+  "phone": "0771234567",
+  "interested_course": "Business Management",
+  "source": "partner_system"
+}
+```
+
+```bash
+curl -i -X POST 'https://api.inspirecollege.lk/api/v1/integrations/crm/leads' \
+  -H "X-CRM-API-Key: $INSPIRE_CRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"full_name":"Example Student","email":"student@example.com","source":"partner_system"}'
+```
+
+Save the returned `lead_id` for later requests. Creating an `enrolled` lead must meet the CRM's enrollment requirements.
+
+## Edit a lead
+
+`PUT /leads/{lead_id}` returns `200 OK` and the full updated lead. Send only fields you want to change; omitted fields stay as they are. The body uses `CrmLeadUpdate`. The CRM records tracked changes in the lead's activity history. Setting `stage` to `enrolled` may send an enrollment email.
+
+```json
+{"city":"Kandy","priority":"high","notes":"Updated by partner system"}
+```
+
+```bash
+curl -i -X PUT 'https://api.inspirecollege.lk/api/v1/integrations/crm/leads/123' \
+  -H "X-CRM-API-Key: $INSPIRE_CRM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"city":"Kandy","priority":"high"}'
+```
+
+## Delete a lead
+
+`DELETE /leads/{lead_id}` returns `204 No Content`. This permanently deletes the lead and its activity history. It is not an archive action. An unknown ID returns `404`.
+
+```bash
+curl -i -X DELETE 'https://api.inspirecollege.lk/api/v1/integrations/crm/leads/123' \
+  -H "X-CRM-API-Key: $INSPIRE_CRM_API_KEY"
+```
+
+For a reversible removal from normal list views, use `PUT /leads/{lead_id}` with `{"is_archived":true}` instead.
+
 ## Generated reference and limitations
 
-After deployment, interactive API docs are at `https://api.inspirecollege.lk/docs` and the OpenAPI JSON is at `https://api.inspirecollege.lk/openapi.json`. Search for the `crm-integrations` tag. Only the two `GET` routes above accept the integration key; CRM writes still require an authorized staff session. This API is intended for a backend client over HTTPS. Its key is not a user identity and does not restrict results to one counsellor.
+After deployment, interactive API docs are at `https://api.inspirecollege.lk/docs` and the OpenAPI JSON is at `https://api.inspirecollege.lk/openapi.json`. Search for the `crm-integrations` tag. The integration key works on the five lead routes in this guide. This API is intended for a backend client over HTTPS. Its key is not a user identity and does not restrict results to one counsellor.

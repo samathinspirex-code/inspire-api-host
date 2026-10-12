@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import UnauthorizedError
 from app.modules.crm import service
-from app.modules.crm.schemas import CrmLeadListResponse, CrmLeadOut
+from app.modules.crm.schemas import CrmLeadCreate, CrmLeadListResponse, CrmLeadOut, CrmLeadUpdate
 
 
 crm_api_key_header = APIKeyHeader(name="X-CRM-API-Key", auto_error=False)
@@ -56,9 +56,36 @@ async def list_integration_leads(
     )
 
 
+@router.post("/leads", response_model=CrmLeadOut, status_code=201)
+async def create_integration_lead(
+    payload: CrmLeadCreate,
+    db: AsyncSession = Depends(get_db),
+) -> CrmLeadOut:
+    if "source" not in payload.model_fields_set:
+        payload = payload.model_copy(update={"source": "api_integration"})
+    return await service.create_lead(db, payload, counsellor_name="CRM integration API")
+
+
 @router.get("/leads/{lead_id}", response_model=CrmLeadOut)
 async def get_integration_lead(
     lead_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> CrmLeadOut:
     return await service.get_lead(db, lead_id)
+
+
+@router.put("/leads/{lead_id}", response_model=CrmLeadOut)
+async def update_integration_lead(
+    lead_id: int,
+    payload: CrmLeadUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> CrmLeadOut:
+    return await service.update_lead(db, lead_id, payload, actor_name="CRM integration API")
+
+
+@router.delete("/leads/{lead_id}", status_code=204)
+async def delete_integration_lead(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await service.delete_lead(db, lead_id)
