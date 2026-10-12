@@ -3,6 +3,8 @@ backend for cms and LMS
 
 For CRM lead list and detail endpoints, authentication, examples, and response fields, see [CRM_LEAD_READ_API_DOCUMENTATION.md](CRM_LEAD_READ_API_DOCUMENTATION.md).
 
+For external systems using a separate, revocable API key, see [CRM_INTEGRATION_API_DOCUMENTATION.md](CRM_INTEGRATION_API_DOCUMENTATION.md).
+
 ## News & Events
 
 Before using the CMS News & Events section, create its table and import the existing website news records:
