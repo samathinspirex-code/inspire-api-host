@@ -1,5 +1,7 @@
 import unittest
+import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.modules.lms import zoom_service
@@ -49,10 +51,161 @@ class _Database:
 
 
 class ZoomAttendanceRosterTests(unittest.IsolatedAsyncioTestCase):
+    def test_close_name_requires_unique_student_and_no_similar_lecturer(self):
+        roster = [{"user_id": 7, "full_name": "Misbah Fathima Mohsin"},
+                  {"user_id": 8, "full_name": "Aamina Shakir"}]
+        self.assertEqual(zoom_service._safe_name_candidates("Misbahh", roster, []), roster[:1])
+        self.assertEqual(zoom_service._safe_name_candidates(
+            "Misbahh", roster, [{"full_name": "Misbah Fathima"}]), [])
+        self.assertEqual(zoom_service._safe_name_candidates(
+            "Misbahh", roster + [{"user_id": 9, "full_name": "Misbah Hassan"}], []), [])
+        self.assertEqual(zoom_service._safe_name_candidates(
+            "samath", [{"user_id": 9, "full_name": "samath"}],
+            [{"user_id": 99, "full_name": "Samath"}]), [])
+
+    def test_small_lecturer_typo_is_excluded_only_without_student_collision(self):
+        lecturer = [{"user_id": 99, "full_name": "Nishadi Charitha"}]
+        self.assertTrue(zoom_service._close_staff_name("Nishadhi", lecturer, []))
+        self.assertFalse(zoom_service._close_staff_name(
+            "Nishadhi", lecturer, [{"user_id": 7, "full_name": "Nishadhi Perera"}]))
+
+    async def test_openai_match_requires_valid_roster_id_and_fails_closed(self):
+        roster = [{"user_id": 7, "full_name": "Misbah Fathima Mohsin"}]
+        def response(student_id):
+            return SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"output": [{"type": "message", "content": [{
+                    "type": "output_text", "text": json.dumps({"matches": [
+                        {"zoom_name": "Misbahh", "student_user_id": student_id}
+                    ]})
+                }]}]},
+            )
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        with patch.object(zoom_service.settings, "OPENAI_API_KEY", "test-key"), \
+             patch.object(zoom_service.httpx, "AsyncClient", return_value=client):
+            client.post.return_value = response(999)
+            self.assertEqual(await zoom_service._openai_name_matches(
+                ["Misbahh"], roster, []), {})
+            client.post.return_value = response(7)
+            self.assertEqual((await zoom_service._openai_name_matches(
+                ["Misbahh"], roster, []))["Misbahh"]["user_id"], 7)
+            payload = client.post.call_args.kwargs["json"]
+            self.assertFalse(payload["store"])
+            self.assertNotIn("email", payload["input"])
+
+    async def test_confirmed_typo_counts_rejoins_toward_saved_threshold(self):
+        start = datetime(2026, 10, 10, 9, tzinfo=timezone.utc)
+        end = start + timedelta(hours=1)
+        student = {"user_id": 7, "full_name": "Misbah Fathima Mohsin",
+                   "is_active": True, "assigned_at": start - timedelta(days=1)}
+        db = _Database(
+            {"meeting_id": 3, "class_id": 10, "zoom_host_connection_id": 1,
+             "lecturer_user_id": 99, "start_time": start, "end_time": end,
+             "provider_meeting_uuid": "uuid", "attendance_threshold_percentage": 75},
+            [student],
+        )
+        participants = [
+            {"name": "Misbahh", "join_time": start.isoformat(),
+             "leave_time": (start + timedelta(minutes=20)).isoformat(), "duration": 1200},
+            {"name": "Misbahh", "join_time": (start + timedelta(minutes=25)).isoformat(),
+             "leave_time": end.isoformat(), "duration": 2100},
+        ]
+        with patch.object(zoom_service, "_access_token", new=AsyncMock(return_value="token")), \
+             patch.object(zoom_service, "_past_participants", new=AsyncMock(return_value=participants)), \
+             patch.object(zoom_service, "_openai_name_matches",
+                          new=AsyncMock(return_value={"Misbahh": student})):
+            await zoom_service.sync_attendance(db, 3, 99)
+        record = next(params for sql, params in db.statements
+                      if "INSERT INTO lms_attendance_records" in sql)
+        self.assertEqual(record["seconds"], 55 * 60)
+        self.assertEqual(record["status"], "present")
+        session = next(params for sql, params in db.statements
+                       if "INSERT INTO lms_attendance_sessions" in sql)
+        self.assertEqual(session["unmatched"], "[]")
+
+    async def test_invalidated_occurrence_rows_are_cleared_after_fresh_report(self):
+        start = datetime(2026, 11, 11, 6, 30, tzinfo=timezone.utc)
+        end = start + timedelta(hours=1)
+        db = _Database(
+            {"meeting_id": 99, "class_id": 10, "zoom_host_connection_id": 1,
+             "lecturer_user_id": 99, "start_time": start, "end_time": end,
+             "provider_meeting_uuid": "uuid", "attendance_threshold_percentage": 75,
+             "previous_attendance_sync_error": "stale_zoom_occurrence"},
+            [{"user_id": 7, "full_name": "Aamina Shakir", "is_active": True,
+              "assigned_at": start - timedelta(days=1)}],
+        )
+        participants = [{"name": "Aamina Shakir", "join_time": start.isoformat(),
+                         "leave_time": end.isoformat(), "duration": 3600}]
+        with patch.object(zoom_service, "_access_token", new=AsyncMock(return_value="token")), \
+             patch.object(zoom_service, "_past_participants", new=AsyncMock(return_value=participants)):
+            await zoom_service.sync_attendance(db, 99, 99)
+        self.assertTrue(any("DELETE FROM lms_attendance_records" in sql
+                            for sql, _ in db.statements))
+
     def test_unique_short_zoom_name_matches_enrolled_student(self):
         roster = [{"user_id": 1, "full_name": "Chinthaka Nuwan"},
                   {"user_id": 2, "full_name": "Another Student"}]
         self.assertEqual(zoom_service._student_for_zoom_name("Nuwan", roster)["user_id"], 1)
+
+    def test_old_occurrence_is_not_accepted_for_a_later_class(self):
+        start = datetime(2026, 10, 9, 9, tzinfo=timezone.utc)
+        context = {"start_time": start, "end_time": start + timedelta(hours=1)}
+        old = [{"join_time": (start - timedelta(days=2)).isoformat()}]
+        current = [{"join_time": (start + timedelta(minutes=5)).isoformat()}]
+        self.assertFalse(zoom_service._participants_near_class(old, context))
+        self.assertTrue(zoom_service._participants_near_class(current, context))
+        self.assertFalse(zoom_service._participants_near_class(old + current, context))
+
+    async def test_stale_instance_report_is_rejected_even_with_recording_reference(self):
+        start = datetime(2026, 10, 11, 9, tzinfo=timezone.utc)
+        context = {"start_time": start, "end_time": start + timedelta(hours=1),
+                   "provider_meeting_uuid": "old", "provider_meeting_id": "123",
+                   "attendance_instance_refs": ["recording-uuid"]}
+        async def page(_client, _path, _token, _page):
+            return SimpleNamespace(is_error=False, json=lambda: {
+                "participants": [{"name": "Old guest",
+                                  "join_time": (start - timedelta(days=15)).isoformat()}]
+            })
+        with patch.object(zoom_service, "_fetch_participant_page", side_effect=page), \
+             patch.object(zoom_service.httpx, "AsyncClient", return_value=AsyncMock()):
+            with self.assertRaises(zoom_service.ValidationError):
+                await zoom_service._past_participants(context, "token")
+
+    async def test_fetches_each_actual_zoom_occurrence(self):
+        start = datetime(2026, 10, 9, 9, tzinfo=timezone.utc)
+        context = {"start_time": start, "end_time": start + timedelta(hours=1),
+                   "provider_meeting_uuid": "old", "provider_meeting_id": "123",
+                   "attendance_instance_refs": ["first", "second"]}
+        requested = []
+
+        async def page(_client, path, _token, _page):
+            requested.append(path)
+            name = "First" if "/first/" in path else "Second"
+            return SimpleNamespace(is_error=False, json=lambda: {
+                "participants": [{"name": name, "join_time": start.isoformat()}]
+            })
+
+        with patch.object(zoom_service, "_fetch_participant_page", side_effect=page), \
+             patch.object(zoom_service.httpx, "AsyncClient", return_value=AsyncMock()):
+            participants = await zoom_service._past_participants(context, "token")
+        self.assertEqual([item["name"] for item in participants], ["First", "Second"])
+        self.assertEqual(len(requested), 2)
+
+    async def test_missing_occurrence_report_does_not_mark_students_absent(self):
+        start = datetime(2026, 10, 9, 9, tzinfo=timezone.utc)
+        context = {"start_time": start, "end_time": start + timedelta(hours=1),
+                   "provider_meeting_uuid": "old", "provider_meeting_id": "123",
+                   "attendance_instance_refs": ["first", "second"]}
+
+        async def page(_client, path, _token, _page):
+            rows = [{"name": "Student", "join_time": start.isoformat()}] if "/first/" in path else []
+            return SimpleNamespace(is_error=False, json=lambda: {"participants": rows})
+
+        with patch.object(zoom_service, "_fetch_participant_page", side_effect=page), \
+             patch.object(zoom_service.httpx, "AsyncClient", return_value=AsyncMock()):
+            with self.assertRaises(zoom_service.ValidationError):
+                await zoom_service._past_participants(context, "token")
 
     def test_staff_email_identifies_renamed_lecturer(self):
         staff, student = zoom_service._zoom_staff_identity(
@@ -103,6 +256,8 @@ class ZoomAttendanceRosterTests(unittest.IsolatedAsyncioTestCase):
              patch.object(zoom_service, "_past_participants", new=AsyncMock(return_value=participants)):
             await zoom_service.sync_attendance(db, 3, 99)
 
+        context_sql = next(sql for sql, _ in db.statements if "FROM lms_online_meetings m" in sql)
+        self.assertIn("COALESCE(a.threshold_percentage,s.attendance_threshold_percentage)", context_sql)
         roster_sql = next(sql for sql, _ in db.statements if "FROM lms_class_students cs" in sql)
         self.assertIn("lms_meeting_audience_classes", roster_sql)
         self.assertIn("lms_attendance_records", roster_sql)
@@ -114,6 +269,28 @@ class ZoomAttendanceRosterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(records[0]["student"], 7)
         self.assertEqual(records[0]["seconds"], 3600)
         self.assertEqual(records[0]["status"], "present")
+
+    async def test_reconnected_student_name_is_stored_once(self):
+        start = datetime(2026, 10, 10, 9, tzinfo=timezone.utc)
+        end = start + timedelta(hours=1)
+        db = _Database(
+            {"meeting_id": 3, "class_id": 10, "zoom_host_connection_id": 1,
+             "lecturer_user_id": 99, "start_time": start, "end_time": end,
+             "provider_meeting_uuid": "uuid", "attendance_threshold_percentage": 40},
+            [{"user_id": 7, "full_name": "Aamina Shakir", "is_active": True,
+              "assigned_at": start - timedelta(days=1)}],
+        )
+        participants = [
+            {"name": "Aamina Shakir", "join_time": (start + timedelta(minutes=i)).isoformat(),
+             "leave_time": (start + timedelta(minutes=i+5)).isoformat(), "duration": 300}
+            for i in range(0, 60, 5)
+        ]
+        with patch.object(zoom_service, "_access_token", new=AsyncMock(return_value="token")), \
+             patch.object(zoom_service, "_past_participants", new=AsyncMock(return_value=participants)):
+            await zoom_service.sync_attendance(db, 3, 99)
+        record = next(params for sql, params in db.statements if "INSERT INTO lms_attendance_records" in sql)
+        self.assertEqual(record["seconds"], 3600)
+        self.assertEqual(record["name"], "Aamina Shakir")
 
     async def test_lecturer_rejoins_are_excluded_and_student_rejoins_add_up(self):
         start = datetime(2026, 9, 1, 9, tzinfo=timezone.utc)

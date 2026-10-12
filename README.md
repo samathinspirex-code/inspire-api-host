@@ -239,7 +239,8 @@ Configure `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_REDIRECT_URI`,
 a Fernet key and must remain stable after host accounts are connected. Configure
 the Zoom event subscription endpoint as
 `https://<api-host>/api/v1/lms/integrations/zoom/webhook` and subscribe to
-`meeting.ended` and `recording.completed`.
+`meeting.started`, `meeting.ended`, and `recording.completed`. The start event
+keeps attendance tied to the actual Zoom occurrence when a meeting is restarted.
 
 In LMS Settings, enable Zoom and connect up to two licensed host accounts. Each
 host can be limited to one or two concurrent meetings. The existing notification
@@ -247,6 +248,13 @@ worker also processes the durable Zoom attendance and recording jobs. Completed
 cloud recordings are downloaded server-side, uploaded to Vimeo, and published in
 the class-copy Course under `Recordings · <class code>` with AI question creation
 disabled.
+
+Zoom attendance uses the saved threshold for each meeting and merges a student's
+rejoins before calculating duration. When `OPENAI_API_KEY` is configured, a
+close spelling difference in a Zoom name can be confirmed against one uniquely
+matching enrolled student. Staff-like and ambiguous names remain unmatched for
+review. Only the display name, proposed registered name, and internal user ID
+are sent for this check; OpenAI response storage is disabled.
 
 ## CRM rebuild cutover
 
