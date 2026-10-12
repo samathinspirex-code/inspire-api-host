@@ -149,6 +149,20 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(database.statements[1][1]["kind"], "attendance")
         self.assertEqual(database.commits, 1)
 
+    async def test_meeting_started_updates_only_the_scheduled_occurrence(self):
+        database = _WebhookDatabase()
+
+        await receive_webhook(database, {
+            "event": "meeting.started",
+            "payload": {"object": {"id": "123456", "uuid": "actual-uuid",
+                                   "start_time": "2026-10-10T09:00:00Z"}},
+        })
+
+        self.assertEqual(len(database.statements), 1)
+        self.assertIn("provider_meeting_uuid=:uuid", database.statements[0][0])
+        self.assertIn("BETWEEN start_time-interval '2 hours'", database.statements[0][0])
+        self.assertEqual(database.statements[0][1]["uuid"], "actual-uuid")
+
     async def test_recording_completed_does_not_mark_live_meeting_complete(self):
         database = _WebhookDatabase()
 

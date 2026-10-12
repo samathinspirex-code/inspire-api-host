@@ -143,7 +143,10 @@ class AttendanceRepository:
             .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
             .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .where(AttendanceSession.meeting_id == meeting_id)
+            .where(
+                AttendanceSession.meeting_id == meeting_id,
+                AttendanceSession.sync_status == "synced",
+            )
         )
         return (await self.db.execute(stmt)).one_or_none()
 
@@ -259,10 +262,11 @@ class AttendanceRepository:
             conditions.append(AttendanceRecord.student_user_id == student_user_id)
         if lecturer_user_id is not None:
             conditions.append(OnlineMeeting.lecturer_user_id == lecturer_user_id)
+        local_meeting_date = cast(func.timezone(LmsClass.timezone, OnlineMeeting.start_time), Date)
         if date_from is not None:
-            conditions.append(cast(OnlineMeeting.start_time, Date) >= date_from)
+            conditions.append(local_meeting_date >= date_from)
         if date_to is not None:
-            conditions.append(cast(OnlineMeeting.start_time, Date) <= date_to)
+            conditions.append(local_meeting_date <= date_to)
         if status is not None:
             conditions.append(AttendanceRecord.status == status)
         if search and search.strip():
@@ -362,7 +366,9 @@ class AttendanceRepository:
         students = func.count(func.distinct(AttendanceRecord.student_user_id))
         meetings = func.count(func.distinct(AttendanceSession.meeting_id))
         average = func.coalesce(func.avg(AttendanceRecord.attendance_percentage), 0)
-        month = func.to_char(OnlineMeeting.start_time, literal("YYYY-MM"))
+        month = func.to_char(
+            func.timezone(LmsClass.timezone, OnlineMeeting.start_time), literal("YYYY-MM")
+        )
 
         async def grouped(stmt):
             return list((await self.db.execute(stmt)).all())
