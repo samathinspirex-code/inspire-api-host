@@ -16,6 +16,7 @@ from app.modules.cms.public_router import router as public_cms_router
 from app.modules.cms.public_news_router import router as public_news_router
 from app.modules.cms.testimonials import cms_router as testimonials_cms_router, public_router as testimonials_public_router
 from app.modules.crm.router import router as crm_router
+from app.modules.crm.integration_router import router as crm_integration_router
 from app.modules.crm.public_router import router as crm_public_router
 from app.modules.lms.router import router as lms_router
 from app.modules.site_assistant.router import router as site_assistant_router
@@ -57,5 +58,6 @@ app.include_router(lms_router)
 app.include_router(crm_router, prefix="/api/v1")
 app.include_router(crm_router, prefix="/api/v1/cms")
 app.include_router(crm_public_router)
+app.include_router(crm_integration_router)
 app.include_router(site_assistant_router)
 

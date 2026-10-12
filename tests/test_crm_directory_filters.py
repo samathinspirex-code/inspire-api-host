@@ -30,3 +30,14 @@ def test_directory_priority_filter_and_sort_are_applied_before_pagination():
     assert "LIMIT 25" in sql
     assert total == 1
     assert leads[0].full_name == "Example Lead"
+
+
+def test_directory_campaign_filter_is_applied():
+    session = _Session()
+    asyncio.run(CrmLeadRepository(session).list_with_total(
+        None, None, None, None, False, 1, 25,
+        extra={"campaign": "October Intake"},
+    ))
+
+    sql = str(session.statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "lower(crm_leads.campaign) LIKE lower('October Intake')" in sql

@@ -77,7 +77,7 @@ class CrmLeadRepository:
         extra = extra or {}
         if extra.get("priority") in ("high", "medium", "low"):
             filters.append(CrmLead.priority == extra["priority"])
-        for field in ("city", "country", "intake"):
+        for field in ("city", "country", "campaign", "intake"):
             if extra.get(field):
                 filters.append(getattr(CrmLead, field).ilike(str(extra[field])))
         for field in ("updated_at", "last_contacted_at", "followup_date"):
