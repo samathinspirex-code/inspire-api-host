@@ -1,0 +1,86 @@
+{
+  "info": {
+    "name": "Inspire CRM Integration API",
+    "description": "Hosted lead list, create, detail, edit, and delete API. Set the crmToken variable to the server-to-server token before sending requests. POST, PUT, and DELETE change live CRM data.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "https://api.inspirecollege.lk/api/v1/integrations/crm"},
+    {"key": "crmToken", "value": ""},
+    {"key": "leadId", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "List leads",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "X-CRM-API-Key", "value": "{{crmToken}}"}],
+        "url": "{{baseUrl}}/leads?page=1&size=20",
+        "description": "Optional filters: stage, source, search, modified_from, modified_to, include_archived."
+      }
+    },
+    {
+      "name": "Create lead",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "X-CRM-API-Key", "value": "{{crmToken}}"},
+          {"key": "Content-Type", "value": "application/json"}
+        ],
+        "url": "{{baseUrl}}/leads",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"full_name\": \"Example Student\",\n  \"email\": \"student@example.com\",\n  \"phone\": \"0771234567\",\n  \"source\": \"partner_system\"\n}",
+          "options": {"raw": {"language": "json"}}
+        },
+        "description": "Creates a live CRM lead. Replace the example data before sending. A successful response saves the lead ID to the collection variable."
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "if (pm.response.code === 201) {",
+            "  pm.collectionVariables.set('leadId', pm.response.json().lead_id);",
+            "}"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Get lead details",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "X-CRM-API-Key", "value": "{{crmToken}}"}],
+        "url": "{{baseUrl}}/leads/{{leadId}}",
+        "description": "Returns the full lead and its activities. Set leadId from a list response or use Create lead first."
+      }
+    },
+    {
+      "name": "Edit lead",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {"key": "X-CRM-API-Key", "value": "{{crmToken}}"},
+          {"key": "Content-Type", "value": "application/json"}
+        ],
+        "url": "{{baseUrl}}/leads/{{leadId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"city\": \"Kandy\",\n  \"priority\": \"high\"\n}",
+          "options": {"raw": {"language": "json"}}
+        },
+        "description": "Updates only the fields sent in the JSON body. Changes live CRM data."
+      }
+    },
+    {
+      "name": "Delete lead permanently",
+      "request": {
+        "method": "DELETE",
+        "header": [{"key": "X-CRM-API-Key", "value": "{{crmToken}}"}],
+        "url": "{{baseUrl}}/leads/{{leadId}}",
+        "description": "Permanently deletes this lead and its activity history. This cannot be undone."
+      }
+    }
+  ]
+}

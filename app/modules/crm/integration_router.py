@@ -1,4 +1,4 @@
-"""Read-only CRM endpoints for server-to-server integrations."""
+"""CRM lead endpoints for server-to-server integrations."""
 
 from datetime import date, datetime, time, timedelta
 from secrets import compare_digest
