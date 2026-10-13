@@ -1,0 +1,8 @@
+{
+  "source_sha256": "476c5818befee2f2e28b07ed3fb77506443884601c3e27f07537bd8b28759664",
+  "duplicate_rows_43_45": "same_import_45",
+  "shenoli_identity": "existing_user_22",
+  "approved_separate_phone_matches": [48, 49, 56],
+  "blank_phone_row": 59,
+  "amount_handling": "down_payment"
+}

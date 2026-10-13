@@ -1,7 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class MyProfileUpdate(BaseModel):
@@ -12,9 +13,20 @@ class MyProfileUpdate(BaseModel):
     address: str | None = Field(None, max_length=1000)
     city: str | None = Field(None, max_length=120)
     country: str | None = Field(None, max_length=120)
+    time_zone: str | None = Field(None, max_length=100)
     expertise: str | None = Field(None, max_length=5000)
     emergency_contact_name: str | None = Field(None, max_length=150)
     emergency_contact_phone: str | None = Field(None, max_length=50)
+
+    @field_validator("time_zone")
+    @classmethod
+    def valid_time_zone(cls, value: str | None) -> str | None:
+        if value:
+            try:
+                ZoneInfo(value)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("Choose a valid time zone") from exc
+        return value
 
 
 class ProfileStatistics(BaseModel):
@@ -53,6 +65,7 @@ class MyProfileResponse(BaseModel):
     address: str | None = None
     city: str | None = None
     country: str | None = None
+    time_zone: str | None = None
     expertise: str | None = None
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None

@@ -1,6 +1,8 @@
 # inspire-api
 backend for cms and LMS
 
+For student profile country and time zone selection, run `python scripts/apply_student_time_zone_migration.py` before deploying the matching LMS and API changes. Existing student accounts default to Sri Lanka (`Asia/Colombo`).
+
 For CRM lead list and detail endpoints, authentication, examples, and response fields, see [CRM_LEAD_READ_API_DOCUMENTATION.md](CRM_LEAD_READ_API_DOCUMENTATION.md).
 
 For external systems using a separate, revocable API key, see [CRM_INTEGRATION_API_DOCUMENTATION.md](CRM_INTEGRATION_API_DOCUMENTATION.md).
