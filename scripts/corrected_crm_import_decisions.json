@@ -1,0 +1,8 @@
+{
+  "source_sha256": "db0898d2ee0ad715f0ca323e521f83f443fec7a306350c0d3ad95cd9a84833e3",
+  "existing_phone_matches": "skip_unchanged",
+  "same_phone_same_counsellor": "merge_one_lead",
+  "same_phone_different_counsellors": "hold",
+  "generic_programmes": "unselected_with_original_in_notes",
+  "date_range_8_15_16": "august_15"
+}

@@ -21,6 +21,12 @@ class NotificationTests(unittest.TestCase):
         value = datetime(2026, 8, 30, 10, 0, tzinfo=timezone.utc)
         self.assertIn("03:30 PM", local_time(value))
 
+    def test_student_timezone_handles_date_rollover_and_daylight_saving(self):
+        winter = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
+        summer = datetime(2026, 7, 1, 0, 30, tzinfo=timezone.utc)
+        self.assertIn("31 December 2025 at 07:30 PM", local_time(winter, "America/New_York"))
+        self.assertIn("30 June 2026 at 08:30 PM", local_time(summer, "America/New_York"))
+
     def test_mailjet_payload_escapes_notification_content(self):
         payload = build_notification_payload(
             "student@example.com", "<Student>", "Class <updated>",

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -9,7 +10,7 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.lms.models import (
     ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LmsAnnouncement, LmsClass,
-    LmsCourse, LmsCourseworkAssignment, LmsExam, LmsNotification, OnlineMeeting,
+    LmsCourse, LmsCourseworkAssignment, LmsExam, LmsNotification, OnlineMeeting, StudentProfile,
 )
 from app.modules.lms.notification_email import send_notification_email
 from app.modules.lms.schemas import AnnouncementItem, AnnouncementListResponse, NotificationDispatchSummary, NotificationItem, NotificationListResponse
@@ -24,9 +25,14 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def local_time(value: datetime) -> str:
+def local_time(value: datetime, time_zone: str = "Asia/Colombo") -> str:
     current = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    return current.astimezone(COLOMBO).strftime("%d %B %Y at %I:%M %p")
+    try:
+        zone = ZoneInfo(time_zone)
+    except ZoneInfoNotFoundError:
+        zone = COLOMBO
+        time_zone = "Asia/Colombo"
+    return f"{current.astimezone(zone):%d %B %Y at %I:%M %p} ({time_zone})"
 
 
 def reminder_due(event_time: datetime, offset_minutes: int, now: datetime, grace_minutes: int = 10) -> bool:
@@ -93,10 +99,13 @@ async def _can_manage_audience(db: AsyncSession, role: str, user_id: int, audien
     raise ForbiddenError("You can announce only to courses or classes assigned to you")
 
 
-async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notification_type: str, title: str, message: str, action_url: str | None, importance: str, scheduled_for: datetime, email_enabled: bool) -> int:
+async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notification_type: str, title: str, message: str, action_url: str | None, importance: str, scheduled_for: datetime, email_enabled: bool, event_at: datetime | None = None) -> int:
     if not user_ids: return 0
+    zones = dict((await db.execute(select(StudentProfile.user_id, StudentProfile.time_zone).where(StudentProfile.user_id.in_(user_ids)))).all()) if event_at else {}
+    default_time = local_time(event_at) if event_at else ""
     values = [{"user_id": user_id, "event_key": event_key, "notification_type": notification_type,
-        "title": title, "message": message, "action_url": action_url, "importance": importance,
+        "title": title, "message": message.replace(default_time, local_time(event_at, zones.get(user_id) or "Asia/Colombo")) if event_at else message,
+        "action_url": action_url, "importance": importance,
         "scheduled_for": scheduled_for, "email_enabled": email_enabled,
         "email_status": "pending" if email_enabled else "disabled"} for user_id in user_ids]
     result = await db.execute(insert(LmsNotification).values(values).on_conflict_do_nothing(index_elements=["user_id", "event_key"]).returning(LmsNotification.notification_id))
@@ -185,7 +194,7 @@ async def notify_meeting_change(db: AsyncSession, meeting: OnlineMeeting, class_
     else: message += " Open the LMS for the latest class details."
     created = await _enqueue(db, list(users), f"meeting:{meeting.meeting_id}:{event}:{meeting.updated_at.isoformat() if meeting.updated_at else meeting.start_time.isoformat()}",
         "class_schedule", title, message, f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings",
-        "urgent" if event == "cancelled" else "important", utc_now(), True)
+        "urgent" if event == "cancelled" else "important", utc_now(), True, event_at=meeting.start_time)
     await db.commit(); return created
 
 
@@ -206,7 +215,7 @@ async def notify_assessment_published(db: AsyncSession, assignment: LmsCoursewor
     created = await _enqueue(db, users, f"{kind}:{assignment.assignment_id}:published", f"{kind}_published",
         f"New {kind}: {assignment.title}", f"A new {kind} has been published for your course.{deadline}",
         f"{settings.LMS_UI_URL.rstrip('/')}?view={'exams' if kind == 'exam' else 'assignments'}",
-        "important", utc_now(), True)
+        "important", utc_now(), True, event_at=assignment.due_at)
     await db.commit(); return created
 
 
@@ -248,7 +257,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
             if reminder_due(assignment.due_at, offset, now):
                 label = "24 hours" if offset == 1440 else "1 hour"
                 key = f"assignment:{assignment.assignment_id}:due:{assignment.due_at.isoformat()}:{offset}"
-                created += await _enqueue(db, users, key, "assignment_deadline", f"Assignment due in {label}: {assignment.title}", f"{course.code} assignment is due on {local_time(assignment.due_at)}.", f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments", "important" if offset == 60 else "normal", now, True)
+                created += await _enqueue(db, users, key, "assignment_deadline", f"Assignment due in {label}: {assignment.title}", f"{course.code} assignment is due on {local_time(assignment.due_at)}.", f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments", "important" if offset == 60 else "normal", now, True, event_at=assignment.due_at)
 
     exam_rows = (await db.execute(select(LmsExam, LmsCourse).join(LmsCourse, LmsCourse.course_id == LmsExam.course_id).where(LmsExam.status == "published", LmsExam.due_at.is_not(None), LmsExam.due_at > now, LmsExam.due_at <= now + timedelta(minutes=max(ASSIGNMENT_REMINDERS) + 10)))).all()
     for exam, course in exam_rows:
@@ -257,7 +266,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
             if reminder_due(exam.due_at, offset, now):
                 label = "24 hours" if offset == 1440 else "1 hour"
                 key = f"exam:{exam.exam_id}:due:{exam.due_at.isoformat()}:{offset}"
-                created += await _enqueue(db, users, key, "exam_deadline", f"Exam deadline in {label}: {exam.title}", f"{course.code} exam must be started before {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view=exams", "important" if offset == 60 else "normal", now, True)
+                created += await _enqueue(db, users, key, "exam_deadline", f"Exam deadline in {label}: {exam.title}", f"{course.code} exam must be started before {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view=exams", "important" if offset == 60 else "normal", now, True, event_at=exam.due_at)
 
     meeting_rows = (await db.execute(select(OnlineMeeting, LmsClass, LmsCourse).join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id).join(LmsCourse, LmsCourse.course_id == LmsClass.course_id).where(OnlineMeeting.status == "scheduled", OnlineMeeting.start_time >= now - timedelta(minutes=10), OnlineMeeting.start_time <= now + timedelta(minutes=max(MEETING_REMINDERS) + 10)))).all()
     for meeting, class_, course in meeting_rows:
@@ -271,7 +280,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
                 title = f"Join online class now: {meeting.title}" if offset == 0 else f"Online class in {label}: {meeting.title}"
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
                 audience = getattr(meeting, "audience_label", None) or f"{course.code} · {class_.name}"
-                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{audience} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True)
+                created += await _enqueue(db, list(users), key, "class_reminder", title, f"{audience} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True, event_at=meeting.start_time)
     await db.commit(); return created, published
 
 

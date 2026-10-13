@@ -4,6 +4,7 @@ sqlalchemy[asyncio]>=2.0
 asyncpg
 pydantic-settings
 pydantic[email]
+tzdata>=2026.1
 pyjwt[crypto]
 httpx
 pypdf>=5.0

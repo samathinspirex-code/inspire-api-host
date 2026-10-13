@@ -364,7 +364,8 @@ async def get_my_profile(db: AsyncSession, user_id: int, role: str) -> MyProfile
             reference_number=profile.student_number, reference_label="Student number",
             preferred_name=profile.preferred_name, phone=profile.phone,
             profile_image_url=profile.profile_image_url, bio=profile.bio, address=profile.address,
-            city=profile.city, country=profile.country,
+            city=profile.city, country=profile.country or "Sri Lanka",
+            time_zone=profile.time_zone or ("Asia/Colombo" if not profile.country or profile.country == "Sri Lanka" else None),
             emergency_contact_name=profile.emergency_contact_name,
             emergency_contact_phone=profile.emergency_contact_phone,
             profile_completeness=calculate_profile_completeness(editable_values),
@@ -753,7 +754,7 @@ async def update_my_profile(
             profile = StudentProfile(user_id=user_id)
             db.add(profile)
         for field in (
-            "preferred_name", "phone", "bio", "address", "city", "country",
+            "preferred_name", "phone", "bio", "address", "city", "country", "time_zone",
             "emergency_contact_name", "emergency_contact_phone",
         ):
             setattr(profile, field, _clean(getattr(payload, field)))
