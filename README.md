@@ -150,7 +150,9 @@ The migration defaults existing courses to sequential access. Lecturers and
 admins can toggle **Require content completion in order** at the top of Course
 Contents. Turning it off permits access to all published content released to
 the student, while class, student, and scheduled release rules still apply.
-With it on, the existing video knowledge check rules block later content.
+With it on, students finish each released video before opening later content.
+Video knowledge checks remain available after watching, but are optional for
+progression.
 Reaching the bottom of a fully rendered PDF saves completion for that student;
 the manual completion checkbox also remains available. New class courses copy
 the template's setting, and each class can then change its own setting.
