@@ -115,6 +115,14 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
         response = await portal_service.list_my_classes(self.db(), 10, "LECTURER")
         self.assertEqual(response.data[0].program_id, 1)
 
+    async def test_student_class_filters_use_enrolled_active_classes(self):
+        response = await portal_service.list_my_classes(self.db(), 20, "STUDENT")
+        self.assertEqual([item.class_id for item in response.data], [1])
+        class_item = response.data[0]
+        self.assertEqual(class_item.awarding_body, "Test")
+        self.assertEqual(class_item.school_name, "Test")
+        self.assertEqual(class_item.programme_name, "L5")
+
     async def test_student_history_uses_current_class_and_course_enrolments(self):
         response = await attendance_service.list_my_attendance(self.db(), 20)
         self.assertEqual([item.attendance_record_id for item in response.data], [1])

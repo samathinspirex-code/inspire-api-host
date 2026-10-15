@@ -26,6 +26,9 @@ class PortalCourseDetailResponse(BaseModel):
 
 class PortalClassItem(ClassItem):
     program_id: int | None = None
+    awarding_body: str | None = None
+    school_name: str | None = None
+    programme_name: str | None = None
     people_count: int
     people_label: str
 

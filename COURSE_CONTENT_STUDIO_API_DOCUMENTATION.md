@@ -38,10 +38,11 @@ The response returns the saved setting. The studio GET response also includes
 `sequential_content_enabled`. When false, all published items in sections
 released to the student are accessible in any order. Enrollment, section
 release, individual overrides, schedules, and publication checks still apply.
-When true, the existing rule for an earlier released video with an unsubmitted
-knowledge check blocks later course content. PDF completion does not add a new
-prerequisite. Practice tests keep their own
-release rules. Both the outline and direct item access enforce the setting.
+When true, an earlier released video blocks later content until the student's
+video progress is complete. Completion happens at the end of the video.
+Submitting a video knowledge check is optional. PDF completion does not add a
+new prerequisite. Practice tests keep their own release rules. Both the
+outline and direct item access enforce the setting.
 
 For students with sequential access enabled, the PDF viewer automatically sends
 the existing progress completion event after all pages render and the document

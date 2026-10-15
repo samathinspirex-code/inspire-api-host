@@ -1,0 +1,9 @@
+{
+  "source_sha256": "45a07a7aac135af5f6c1479700db0e2f22322d537bcd426c948a57308d295a84",
+  "blank_created_by": "pipeline_owner",
+  "free_foundation_hnd": "unselected",
+  "no_phone_rows": "hold",
+  "selected_shared_phone_rows": [13, 61, 117, 181],
+  "expected_ready_leads": 4,
+  "expected_existing_phone_rows": 221
+}

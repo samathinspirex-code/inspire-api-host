@@ -18,9 +18,9 @@ from app.modules.lms.schemas import (
     StudentCourseProgressResponse,
 )
 
-VIDEO_COMPLETION_PERCENT = 85
-MAX_HEARTBEAT_SECONDS = 60
-FIRST_HEARTBEAT_ALLOWANCE_SECONDS = 60
+VIDEO_COMPLETION_PERCENT = 100
+MAX_HEARTBEAT_SECONDS = 30
+FIRST_HEARTBEAT_ALLOWANCE_SECONDS = 15
 
 
 def completion_percent(watched_seconds: int, duration_seconds: int | None) -> float:
@@ -57,7 +57,7 @@ def allowed_watch_delta(
     if previous_activity_at.tzinfo is None:
         previous_activity_at = previous_activity_at.replace(tzinfo=timezone.utc)
     elapsed = max(0, int((now - previous_activity_at).total_seconds()))
-    return min(requested_delta, elapsed + 5, MAX_HEARTBEAT_SECONDS)
+    return min(requested_delta, elapsed + 2, MAX_HEARTBEAT_SECONDS)
 
 
 def continuous_watched_seconds(
