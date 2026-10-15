@@ -42,7 +42,7 @@ def _course_item(row, role: str) -> PortalCourseItem:
 
 
 def _class_item(row, role: str) -> PortalClassItem:
-    class_, course_code, course_title, cover_image_url, program_title, program_id, people_count, is_orientation = row
+    class_, course_code, course_title, cover_image_url, program_title, program_id, awarding_body, school_name, programme_name, people_count, is_orientation = row
     return PortalClassItem(
         class_id=class_.class_id,
         course_id=class_.course_id,
@@ -52,6 +52,9 @@ def _class_item(row, role: str) -> PortalClassItem:
         is_orientation=bool(is_orientation),
         program_title=program_title or ("Orientation" if is_orientation else ""),
         program_id=program_id,
+        awarding_body=awarding_body,
+        school_name=school_name,
+        programme_name=programme_name,
         code=class_.code,
         name=class_.name,
         description=class_.description,

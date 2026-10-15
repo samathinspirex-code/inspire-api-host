@@ -171,6 +171,9 @@ class PortalRepository:
                 LmsCourse.cover_image_url,
                 Program.title,
                 LmsCourse.program_id,
+                Program.awarding_body,
+                Program.school,
+                Program.level,
                 people_count,
                 LmsCourse.is_orientation,
             )
