@@ -478,6 +478,37 @@ async def join_config(db: AsyncSession, meeting_id: int, user_id: int, role: str
     return result
 
 
+async def lecturer_start_url(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> dict:
+    """Issue a fresh, short-lived Zoom desktop host link to an assigned lecturer."""
+    if role != "LECTURER":
+        raise ForbiddenError("Only lecturers can open the Zoom host app from this action")
+    meeting = (await db.execute(text("""SELECT meeting_id, class_id, lecturer_user_id,
+        provider_meeting_id, zoom_host_connection_id FROM lms_online_meetings
+        WHERE meeting_id=:id AND provider='zoom' AND status='scheduled'"""), {"id": meeting_id})).mappings().first()
+    if not meeting:
+        raise NotFoundError("Scheduled Zoom meeting not found")
+    if not await _lecturer_can_host(
+        db, meeting_id, meeting["class_id"], meeting["lecturer_user_id"], user_id
+    ):
+        raise ForbiddenError("You are not assigned to host this class")
+    host = (await db.execute(text("""SELECT * FROM lms_zoom_host_connections
+        WHERE connection_id=:id AND enabled=TRUE"""), {"id": meeting["zoom_host_connection_id"]})).mappings().first()
+    if not host:
+        raise ValidationError("The Zoom host is disconnected. Reconnect it in LMS Settings.")
+    token = await _access_token(db, dict(host))
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            f"{ZOOM_API}/meetings/{meeting['provider_meeting_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if response.is_error:
+        raise ValidationError(f"Zoom could not open the host link ({_zoom_error(response)}). Check the connected host's meeting read permission.")
+    start_url = response.json().get("start_url")
+    if not start_url:
+        raise ValidationError("Zoom did not provide a host link for this meeting.")
+    return {"start_url": start_url}
+
+
 async def mark_end_requested(db: AsyncSession, meeting_id: int, user_id: int, role: str) -> dict:
     meeting=(await db.execute(text("SELECT * FROM lms_online_meetings WHERE meeting_id=:id AND provider='zoom' AND status='scheduled'"),{"id":meeting_id})).mappings().first()
     if not meeting: raise NotFoundError("Scheduled Zoom meeting not found")
@@ -548,19 +579,20 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
             AND :started BETWEEN start_time-interval '2 hours' AND end_time+interval '2 hours'"""),
           {"uuid":obj["uuid"],"id":local,"started":instance_started})
     if name=="meeting.ended":
-        # Zoom also emits meeting.ended when a lone host chooses Leave Meeting.
-        # The webhook has no field that distinguishes that from End for All, so
-        # accept it only after the LMS host explicitly signalled that action.
-        confirmed_end=await db.scalar(text("""SELECT 1 FROM lms_online_meetings
-          WHERE meeting_id=:id AND status='scheduled'
-            AND processing_status='end_requested'
-            AND updated_at >= now()-interval '2 minutes'"""),{"id":local})
-        if confirmed_end:
-            # The meeting lifecycle must not wait for Zoom's participant report.
-            # That report can take several minutes and its retry job is independent.
-            await db.execute(text("""UPDATE lms_online_meetings
-              SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
-              WHERE meeting_id=:id AND status='scheduled'"""),{"id":local})
+        # Desktop Zoom hosts cannot signal their End for All click to the LMS.
+        # Accept Zoom's signed end event for this scheduled occurrence; the
+        # participant report is imported separately once Zoom publishes it.
+        started=_dt(obj.get("start_time"))
+        finished=_dt(obj.get("end_time"))
+        completed=await db.scalar(text("""UPDATE lms_online_meetings
+          SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
+          WHERE meeting_id=:id AND status='scheduled' AND (
+            (CAST(:started AS TIMESTAMPTZ) IS NOT NULL AND CAST(:finished AS TIMESTAMPTZ) IS NOT NULL
+              AND CAST(:started AS TIMESTAMPTZ) BETWEEN start_time-interval '2 hours' AND end_time+interval '2 hours'
+              AND CAST(:finished AS TIMESTAMPTZ) >= CAST(:started AS TIMESTAMPTZ))
+            OR (processing_status='end_requested' AND updated_at >= now()-interval '2 minutes')
+          ) RETURNING meeting_id"""),{"id":local,"started":started,"finished":finished})
+        if completed:
             kinds.append("attendance")
     if name=="recording.completed":
         # A host can leave while participants continue the meeting. Zoom may
@@ -918,7 +950,7 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
         percentage=min(100,round(seconds*100/window,2))
         status=_attendance_status(seconds,window,context["attendance_threshold_percentage"])
         await db.execute(text("""INSERT INTO lms_attendance_records(attendance_session_id,student_user_id,status,attended_seconds,attendance_percentage,first_join_time,last_leave_time,google_participant_name,source)
-          VALUES(:session,:student,:status,:seconds,:percentage,:first,:last,:name,'zoom') ON CONFLICT(attendance_session_id,student_user_id) DO UPDATE SET status=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.status ELSE EXCLUDED.status END,
+          VALUES(:session,:student,:status,:seconds,:percentage,:first,:last,LEFT(CAST(:name AS TEXT),255),'zoom') ON CONFLICT(attendance_session_id,student_user_id) DO UPDATE SET status=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.status ELSE EXCLUDED.status END,
           attended_seconds=EXCLUDED.attended_seconds,attendance_percentage=EXCLUDED.attendance_percentage,first_join_time=EXCLUDED.first_join_time,last_leave_time=EXCLUDED.last_leave_time,google_participant_name=EXCLUDED.google_participant_name,source=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.source ELSE 'zoom' END"""),
           {"session":session,"student":student["user_id"],"status":status,"seconds":seconds,"percentage":percentage,"first":first_join,"last":last_leave,"name":", ".join(dict.fromkeys(str(p.get("name") or "") for p in entries))[:255] or None})
     await db.execute(text("UPDATE lms_online_meetings SET processing_status='attendance_ready',processing_error=NULL WHERE meeting_id=:id"),{"id":meeting_id}); await db.commit()
@@ -1035,6 +1067,68 @@ async def sweep_missing_attendance(db: AsyncSession, now: datetime, limit: int=1
           VALUES(:key,:meeting,'attendance','{}'::jsonb,now()) ON CONFLICT(event_key) DO NOTHING"""),
           {"key":f"sweep:{row['meeting_id']}:attendance","meeting":row["meeting_id"]})
     await db.commit(); return len(rows)
+
+
+async def sweep_finished_meetings(db: AsyncSession, now: datetime, limit: int=10,
+                                  meeting_id: int | None=None, grace_minutes: int=5) -> int:
+    """Recover desktop-hosted meetings when Zoom's end webhook is missed.
+
+    A past-meeting participant report exists only after Zoom has ended an
+    occurrence. Its join times must match this class before changing status.
+    """
+    rows=(await db.execute(text("""SELECT m.* FROM lms_online_meetings m
+      WHERE m.provider='zoom' AND m.status='scheduled'
+        AND m.start_time BETWEEN :oldest AND :cutoff
+        AND (CAST(:meeting_id AS BIGINT) IS NULL OR m.meeting_id=CAST(:meeting_id AS BIGINT))
+      ORDER BY m.start_time DESC LIMIT :limit"""),
+      {"oldest":now-timedelta(days=2),"cutoff":now-timedelta(minutes=grace_minutes),
+       "meeting_id":meeting_id,"limit":limit})).mappings().all()
+    completed=0
+    for meeting in rows:
+        try:
+            host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),
+              {"id":meeting["zoom_host_connection_id"]})).mappings().first()
+            if not host:
+                continue
+            token=await _access_token(db,dict(host))
+            participants=await _past_participants(dict(meeting),token)
+            if not _participants_near_class(participants,dict(meeting)):
+                continue
+            changed=await db.scalar(text("""UPDATE lms_online_meetings
+              SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
+              WHERE meeting_id=:id AND status='scheduled' RETURNING meeting_id"""),
+              {"id":meeting["meeting_id"]})
+            if changed:
+                await db.execute(text("""INSERT INTO lms_zoom_jobs(event_key,meeting_id,job_type,payload,available_at)
+                  VALUES(:key,:id,'attendance','{}'::jsonb,now()+interval '2 minutes')
+                  ON CONFLICT(event_key) DO NOTHING"""),
+                  {"key":f"sweep:finished:{meeting['meeting_id']}","id":meeting["meeting_id"]})
+                await db.commit()
+                completed+=1
+        except (ValidationError, httpx.HTTPError):
+            await db.rollback()
+    return completed
+
+
+async def reconcile_lecturer_meeting(db: AsyncSession, meeting_id: int,
+                                     user_id: int, role: str) -> dict:
+    """Refresh one desktop-hosted class when its lecturer returns to the LMS."""
+    if role != "LECTURER":
+        raise ForbiddenError("Only lecturers can refresh their Zoom meeting")
+    meeting=(await db.execute(text("""SELECT meeting_id,class_id,lecturer_user_id,status
+      FROM lms_online_meetings WHERE meeting_id=:id AND provider='zoom'
+        AND status IN ('scheduled','completed')"""),{"id":meeting_id})).mappings().first()
+    if not meeting:
+        raise NotFoundError("Zoom meeting not found")
+    if not await _lecturer_can_host(db,meeting_id,meeting["class_id"],
+                                    meeting["lecturer_user_id"],user_id):
+        raise ForbiddenError("You are not assigned to host this class")
+    if meeting["status"]=="scheduled":
+        await sweep_finished_meetings(db,datetime.now(timezone.utc),limit=1,
+                                      meeting_id=meeting_id,grace_minutes=0)
+    status=await db.scalar(text("SELECT status FROM lms_online_meetings WHERE meeting_id=:id"),
+                           {"id":meeting_id})
+    return {"meeting_id":meeting_id,"status":status}
 
 
 async def sweep_mismatched_attendance(db: AsyncSession, now: datetime, limit: int=10) -> int:

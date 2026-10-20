@@ -553,6 +553,28 @@ async def list_courses(
     return _rows(result)
 
 
+async def list_filter_pathways(db: AsyncSession):
+    rows = (await db.execute(text("""
+        SELECT DISTINCT c.awarding_body, s.name AS school_name,
+          p.name AS programme_name, o.study_mode
+        FROM academic_courses c
+        JOIN academic_programmes p ON p.programme_id = c.programme_id
+        JOIN academic_schools s ON s.school_id = c.school_id
+        LEFT JOIN academic_course_study_options o
+          ON o.course_id = c.course_id AND o.is_enabled = TRUE
+        ORDER BY c.awarding_body, s.name, p.name, o.study_mode
+    """))).mappings().all()
+    return [
+        {
+            "awarding_body": row["awarding_body"],
+            "school_name": row["school_name"],
+            "programme_name": row["programme_name"],
+            "study_options": [{"study_mode": row["study_mode"], "is_enabled": True}] if row["study_mode"] else [],
+        }
+        for row in rows
+    ]
+
+
 async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int | None = None):
     values = payload.model_dump(exclude={"study_options", "topics", "outcomes", "popularity"}) | {"course_id": course_id}
     values["slug"] = payload.slug.strip()
@@ -957,7 +979,13 @@ async def list_academic_classes(db: AsyncSession):
           (SELECT count(*) FROM lms_class_students cs WHERE cs.class_id=cl.class_id) AS student_count
         FROM lms_classes cl
         JOIN lms_courses lc ON lc.course_id=cl.course_id
-        LEFT JOIN academic_courses c ON c.course_id=cl.academic_course_id
+        -- Older class copies can have a stale academic_course_id while their
+        -- LMS course still points to the correct legacy programme. New copies
+        -- store their explicit catalogue choice on the LMS course itself.
+        LEFT JOIN academic_courses source_c ON source_c.legacy_program_id=lc.program_id
+        LEFT JOIN academic_courses c ON c.course_id=COALESCE(
+          lc.catalogue_course_id, source_c.course_id, cl.academic_course_id
+        )
         LEFT JOIN academic_programmes p ON p.programme_id=c.programme_id
         LEFT JOIN academic_schools s ON s.school_id=c.school_id
         WHERE cl.status <> 'cancelled'

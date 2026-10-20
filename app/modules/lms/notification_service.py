@@ -324,6 +324,11 @@ async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> Notif
     except Exception:
         # Zoom reports and recordings can remain pending until the next worker cycle.
         pass
+    try:
+        await zoom_service.sweep_finished_meetings(db, now or utc_now())
+    except Exception:
+        # The next cycle retries meetings whose end webhook was missed.
+        pass
     # Attendance is normally imported from the meeting.ended webhook. This sweep
     # is the safety net for a webhook that never arrived, so a finished class is
     # still collected without anyone clicking sync.

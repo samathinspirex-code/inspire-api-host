@@ -18,9 +18,10 @@ from app.modules.lms.models import (
     LmsCourseworkAssignment,
     LmsExam,
     LmsLearningItem,
-    LmsLearningProgress,
     LmsModule,
     LmsModuleAccess,
+    LmsLectureQuestion,
+    LmsLectureQuizAttempt,
 )
 from app.modules.lms.repository import ContentRepository, CourseRepository, ModuleRepository, ProgressRepository
 from app.modules.lms.schemas import (
@@ -260,24 +261,27 @@ async def get_accessible_student_item(db: AsyncSession, item_id: int, student_id
     if not sequential_content_enabled:
         return item
 
-    completed = select(LmsLearningProgress.progress_id).where(
-        LmsLearningProgress.learning_item_id == LmsLearningItem.learning_item_id,
-        LmsLearningProgress.student_user_id == student_id,
-        LmsLearningProgress.is_completed.is_(True),
+    eligible_videos = select(LmsLectureQuestion.learning_item_id).where(
+        LmsLectureQuestion.course_id == module.course_id,
+        LmsLectureQuestion.status == "approved",
+    ).group_by(LmsLectureQuestion.learning_item_id).having(func.count() >= 4)
+    submitted = select(LmsLectureQuizAttempt.attempt_id).where(
+        LmsLectureQuizAttempt.learning_item_id == LmsLearningItem.learning_item_id,
+        LmsLectureQuizAttempt.student_user_id == student_id,
+        LmsLectureQuizAttempt.submitted_at.is_not(None),
     ).exists()
     blocker_modules = (await db.execute(select(LmsLearningItem.module_id).join(
         LmsModule, LmsModule.module_id == LmsLearningItem.module_id,
     ).where(
         LmsModule.course_id == module.course_id, LmsModule.status == "active",
         LmsLearningItem.status == "published", LmsLearningItem.item_type == "video",
-        func.lower(func.trim(LmsModule.title)) != "practice test",
         or_(LmsModule.position < module.position,
             and_(LmsModule.module_id == module.module_id, LmsLearningItem.position < item.position)),
-        ~completed,
+        LmsLearningItem.learning_item_id.in_(eligible_videos), ~submitted,
     ).distinct())).scalars().all()
     if any(_student_access(rules_by_module[mid], module.course_id, student_id, class_ids)[0]
            for mid in blocker_modules):
-        raise ForbiddenError("Finish watching the previous video first")
+        raise ForbiddenError("Complete the previous video knowledge check first")
     return item
 
 
@@ -364,6 +368,24 @@ async def get_course_studio(
         await ProgressRepository(db).list_course_progress(course_id, user_id)
         if role == "STUDENT" else {}
     )
+    quiz_video_ids: set[int] = set()
+    submitted_quiz_ids: set[int] = set()
+    if role == "STUDENT" and course.sequential_content_enabled:
+        quiz_video_ids = set((await db.execute(
+            select(LmsLectureQuestion.learning_item_id)
+            .where(LmsLectureQuestion.course_id == course_id, LmsLectureQuestion.status == "approved")
+            .group_by(LmsLectureQuestion.learning_item_id)
+            .having(func.count(LmsLectureQuestion.question_id) >= 4)
+        )).scalars().all())
+        submitted_quiz_ids = set((await db.execute(
+            select(LmsLectureQuizAttempt.learning_item_id)
+            .join(LmsLearningItem, LmsLearningItem.learning_item_id == LmsLectureQuizAttempt.learning_item_id)
+            .where(
+                LmsLearningItem.module_id.in_(module_ids),
+                LmsLectureQuizAttempt.student_user_id == user_id,
+                LmsLectureQuizAttempt.submitted_at.is_not(None),
+            )
+        )).scalars().all())
     progression_reason: str | None = None
     for module in visible_modules:
         rules = rules_by_module.get(module.module_id, [])
@@ -396,14 +418,11 @@ async def get_course_studio(
                 role == "STUDENT"
                 and course.sequential_content_enabled
                 and accessible
-                and not independent_practice
                 and item.item_type == "video"
-                and not (
-                    progress_by_item.get(item.learning_item_id)
-                    and progress_by_item[item.learning_item_id].is_completed
-                )
+                and item.learning_item_id in quiz_video_ids
+                and item.learning_item_id not in submitted_quiz_ids
             ):
-                progression_reason = f"Finish watching {item.title} first."
+                progression_reason = f"Complete the knowledge check for {item.title} first."
         sections.append(
             StudioSectionResponse(
                 module_id=module.module_id,

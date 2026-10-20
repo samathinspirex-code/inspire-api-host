@@ -102,6 +102,7 @@ class StudentAcademicClass(BaseModel):
 class StudentAcademicAssessment(BaseModel):
     assessment_id: int
     kind: str
+    submission_type: str | None = None
     title: str
     course_code: str
     course_title: str
@@ -110,6 +111,7 @@ class StudentAcademicAssessment(BaseModel):
     marks_awarded: Decimal | None = None
     max_marks: Decimal
     percentage: float | None = None
+    grade_band: str | None = None
     feedback: str | None = None
     submitted_at: datetime | None = None
     due_at: datetime | None = None

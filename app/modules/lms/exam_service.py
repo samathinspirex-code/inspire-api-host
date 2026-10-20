@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
-from app.modules.lms.coursework_service import as_utc, remaining_seconds, utc_now, _ensure_lecturer_course, _ensure_student_target
+from app.modules.lms.coursework_service import as_utc, grade_band_for_score, remaining_seconds, utc_now, _ensure_lecturer_course, _ensure_student_target
 from app.modules.lms.gradebook_service import percentage
 from app.modules.lms.models import (
     CourseEnrollment,
@@ -117,6 +117,8 @@ async def _exam_item(db: AsyncSession, context, attempt: LmsExamAttempt | None =
         expires_at=attempt.expires_at if attempt else None, submitted_at=attempt.submitted_at if attempt else None,
         remaining_seconds=remaining_seconds(attempt.expires_at) if attempt and attempt.status == "in_progress" else None,
         total_marks=attempt.total_marks if attempt and show_grade else None,
+        grade_band=(attempt.grade_band or grade_band_for_score(attempt.total_marks, marks))
+        if exam.assessment_kind != "graded_mcq" and attempt and attempt.total_marks is not None and show_grade else None,
         feedback=attempt.feedback if attempt and show_grade else None,
     )
 
@@ -234,8 +236,6 @@ async def _ensure_editable(db: AsyncSession, exam: LmsExam) -> None:
 
 
 async def _sync_max_marks(db: AsyncSession, exam: LmsExam) -> None:
-    if exam.assessment_kind == "graded_mcq":
-        return
     total = await db.scalar(select(func.coalesce(func.sum(LmsExamQuestion.marks), 0)).where(LmsExamQuestion.exam_id == exam.exam_id))
     assignment = await db.get(LmsCourseworkAssignment, exam.assignment_id)
     assignment.max_marks = Decimal(total) if Decimal(total) > 0 else Decimal("1")
@@ -379,6 +379,8 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
     await _ensure_lecturer_course(db, exam.course_id, user_id)
     questions = await _question_rows(db, exam_id)
     if status == "published" and not questions: raise ValidationError("Add at least one question before publishing")
+    if status == "published" and exam.assessment_kind == "graded_mcq":
+        await _sync_max_marks(db, exam)
     exam.status = status; assignment.status = status
     if assignment.learning_item_id:
         learning_item = await db.get(LmsLearningItem, assignment.learning_item_id)
@@ -542,6 +544,23 @@ async def get_practice_test_for_item(
 async def update_grade_release(db: AsyncSession, exam_id: int, released: bool, user_id: int) -> ExamEditorResponse:
     context = await _exam_context(db, exam_id); exam, assignment = context[:2]
     await _ensure_lecturer_course(db, exam.course_id, user_id)
+    if exam.assessment_kind == "graded_mcq":
+        from app.modules.lms import gradebook_service
+        await gradebook_service.set_grade_release(db, assignment.assignment_id, released, user_id)
+        return await get_editor(db, exam_id, user_id)
+    if released:
+        attempts = (await db.execute(select(LmsExamAttempt).where(LmsExamAttempt.exam_id == exam_id))).scalars().all()
+        for attempt in attempts:
+            if attempt.total_marks is None:
+                continue
+            band = attempt.grade_band or grade_band_for_score(attempt.total_marks, assignment.max_marks)
+            attempt.grade_band = band
+            mirror = await db.scalar(select(LmsCourseworkSubmission).where(
+                LmsCourseworkSubmission.assignment_id == assignment.assignment_id,
+                LmsCourseworkSubmission.student_user_id == attempt.student_user_id,
+            ))
+            if mirror is not None:
+                mirror.grade_band = band
     exam.grades_released = released; assignment.grades_released = released
     await db.commit()
     if released:
@@ -579,8 +598,19 @@ async def start_exam(db: AsyncSession, exam_id: int, user_id: int) -> ExamAttemp
         attempt = LmsExamAttempt(exam_id=exam_id, student_user_id=user_id, status="in_progress", started_at=now,
             expires_at=fixed_exam_expiry(now, exam.duration_minutes, exam.due_at), question_order=order, option_orders=option_orders)
         db.add(attempt); await db.flush()
-        db.add(LmsCourseworkSubmission(assignment_id=assignment.assignment_id, student_user_id=user_id,
-            status="in_progress", started_at=now, expires_at=attempt.expires_at, answer_text="Exam attempt"))
+        mirror = (await db.execute(select(LmsCourseworkSubmission).where(
+            LmsCourseworkSubmission.assignment_id == assignment.assignment_id,
+            LmsCourseworkSubmission.student_user_id == user_id,
+        ))).scalar_one_or_none()
+        if mirror is None:
+            mirror = LmsCourseworkSubmission(assignment_id=assignment.assignment_id, student_user_id=user_id)
+            db.add(mirror)
+        elif mirror.status != "in_progress":
+            raise ValidationError("This assignment attempt is already finished")
+        mirror.status = "in_progress"
+        mirror.started_at = now
+        mirror.expires_at = attempt.expires_at
+        mirror.answer_text = "Exam attempt"
         await db.commit(); await db.refresh(attempt)
     if attempt.status == "in_progress" and remaining_seconds(attempt.expires_at) == 0:
         await _finalize_attempt(db, exam, assignment, attempt, expired=True)
@@ -662,22 +692,45 @@ async def _finalize_attempt(db: AsyncSession, exam: LmsExam, assignment: LmsCour
     mirror = (await db.execute(select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id, LmsCourseworkSubmission.student_user_id == attempt.student_user_id))).scalar_one()
     mirror.submitted_at = attempt.submitted_at
     if exam.assessment_kind == "graded_mcq":
-        attempt.status = "submitted"
-        attempt.total_marks = None
-        attempt.manual_marks = None
-        mirror.status = "submitted"
-        mirror.marks_awarded = None
+        attempt.status = "reviewed"
+        attempt.total_marks = auto
+        attempt.grade_band = None
+        attempt.manual_marks = Decimal("0")
+        attempt.marked_at = attempt.submitted_at
+        mirror.status = "reviewed"
+        mirror.marks_awarded = auto
+        mirror.grade_band = None
+        mirror.marked_at = attempt.marked_at
         await db.commit()
         return
     attempt.status = "expired" if expired and has_written else ("submitted" if has_written else "reviewed")
-    if not has_written: attempt.manual_marks = Decimal("0"); attempt.total_marks = auto; attempt.marked_at = utc_now()
+    if not has_written:
+        attempt.manual_marks = Decimal("0")
+        attempt.total_marks = auto
+        attempt.grade_band = grade_band_for_score(auto, assignment.max_marks)
+        attempt.marked_at = utc_now()
     mirror.status = "submitted" if has_written else "reviewed"
-    if not has_written: mirror.marks_awarded = auto; mirror.marked_at = attempt.marked_at
+    if not has_written:
+        mirror.marks_awarded = auto
+        mirror.grade_band = attempt.grade_band
+        mirror.marked_at = attempt.marked_at
     await db.commit()
 
 
 async def submit_exam(db: AsyncSession, attempt_id: int, payload, user_id: int) -> ExamAttemptResponse:
-    await save_answers(db, attempt_id, payload, user_id)
+    try:
+        await save_answers(db, attempt_id, payload, user_id)
+    except ValidationError as exc:
+        if exc.message not in {
+            "The exam timer has expired and your answers were submitted",
+            "This exam attempt is already finished",
+        }:
+            raise
+        attempt = await db.get(LmsExamAttempt, attempt_id)
+        if attempt is None or attempt.student_user_id != user_id or attempt.status == "in_progress":
+            raise
+        exam = await db.get(LmsExam, attempt.exam_id)
+        return await _attempt_response(db, exam, attempt)
     attempt = await db.get(LmsExamAttempt, attempt_id, with_for_update=True); exam = await db.get(LmsExam, attempt.exam_id)
     assignment = await db.get(LmsCourseworkAssignment, exam.assignment_id)
     await _finalize_attempt(db, exam, assignment, attempt)
@@ -698,14 +751,18 @@ async def list_attempts(db: AsyncSession, exam_id: int, user_id: int) -> ExamAtt
             question = questions[int(question_id)]; answer = answer_map.get(question.question_id)
             answers.append(ExamReviewAnswerItem(question_id=question.question_id, question_type=question.question_type,
                 prompt=question.prompt, marks=question.marks, options=question.options, correct_option_index=question.correct_option_index,
+                correct_option_indices=question.correct_option_indices,
                 selected_option_index=answer.selected_option_index if answer else None, answer_text=answer.answer_text if answer else None,
                 is_correct=answer.is_correct if answer else None, auto_marks=answer.auto_marks if answer else Decimal("0"),
                 manual_marks=answer.manual_marks if answer else None, feedback=answer.feedback if answer else None))
         data.append(ExamAttemptReviewItem(attempt_id=attempt.attempt_id, exam_id=exam_id, student_user_id=user.user_id,
-            student_name=user.full_name or user.email, student_email=user.email, student_number=profile.student_number,
+            student_name=user.full_name or user.email, student_email=user.email, student_number=profile.student_number or "",
             status=attempt.status, started_at=attempt.started_at, expires_at=attempt.expires_at, submitted_at=attempt.submitted_at,
             auto_marks=attempt.auto_marks, manual_marks=attempt.manual_marks, total_marks=attempt.total_marks,
-            max_marks=assignment.max_marks, feedback=attempt.feedback, answers=answers))
+            max_marks=assignment.max_marks,
+            grade_band=(attempt.grade_band or grade_band_for_score(attempt.total_marks, assignment.max_marks))
+            if exam.assessment_kind != "graded_mcq" and attempt.total_marks is not None else None,
+            feedback=attempt.feedback, answers=answers))
     return ExamAttemptReviewListResponse(data=data)
 
 
@@ -714,6 +771,8 @@ async def mark_attempt(db: AsyncSession, attempt_id: int, payload, user_id: int)
     if attempt is None: raise NotFoundError("Exam attempt not found")
     exam = await db.get(LmsExam, attempt.exam_id); assignment = await db.get(LmsCourseworkAssignment, exam.assignment_id)
     await _ensure_lecturer_course(db, exam.course_id, user_id)
+    if exam.assessment_kind == "graded_mcq":
+        raise ValidationError("Quiz marks are calculated automatically from the answers")
     if attempt.status == "in_progress": raise ValidationError("The student has not finished this exam")
     questions = {item.question_id: item for item in await _question_rows(db, exam.exam_id)}
     answer_map = {item.question_id: item for item in (await db.execute(select(LmsExamAnswer).where(LmsExamAnswer.attempt_id == attempt_id))).scalars().all()}
@@ -728,9 +787,10 @@ async def mark_attempt(db: AsyncSession, attempt_id: int, payload, user_id: int)
         if answer is None: answer = LmsExamAnswer(attempt_id=attempt_id, question_id=question.question_id); db.add(answer)
         answer.manual_marks = awarded; answer.feedback = mark.feedback if mark else None; manual += awarded
     attempt.manual_marks = manual; attempt.total_marks = Decimal(attempt.auto_marks) + manual; attempt.feedback = payload.feedback
+    attempt.grade_band = grade_band_for_score(attempt.total_marks, assignment.max_marks)
     attempt.status = "reviewed"; attempt.marked_by = user_id; attempt.marked_at = utc_now()
     mirror = (await db.execute(select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id, LmsCourseworkSubmission.student_user_id == attempt.student_user_id))).scalar_one()
-    mirror.status = "reviewed"; mirror.marks_awarded = attempt.total_marks; mirror.feedback = payload.feedback; mirror.marked_by = user_id; mirror.marked_at = attempt.marked_at
+    mirror.status = "reviewed"; mirror.marks_awarded = attempt.total_marks; mirror.grade_band = attempt.grade_band; mirror.feedback = payload.feedback; mirror.marked_by = user_id; mirror.marked_at = attempt.marked_at
     await db.commit()
     return await list_attempts(db, exam.exam_id, user_id)
 
@@ -775,6 +835,8 @@ async def get_result(db: AsyncSession, exam_id: int, user_id: int) -> ExamResult
             question_type=question.question_type, marks=question.marks, marks_awarded=awarded,
             feedback=answer.feedback if answer else None, is_correct=answer.is_correct if answer else None,
             your_answer=your_answer, correct_answer=correct_answer))
-    return ExamResultResponse(exam_id=exam_id, title=exam.title, course_code=course.code, max_marks=assignment.max_marks,
+    return ExamResultResponse(exam_id=exam_id, assessment_kind=exam.assessment_kind, title=exam.title, course_code=course.code, max_marks=assignment.max_marks,
         total_marks=attempt.total_marks, percentage=percentage(attempt.total_marks, assignment.max_marks),
-        feedback=attempt.feedback, grade_band=attempt.grade_band, answers=result_answers)
+        feedback=attempt.feedback,
+        grade_band=(attempt.grade_band or grade_band_for_score(attempt.total_marks, assignment.max_marks))
+        if exam.assessment_kind != "graded_mcq" else None, answers=result_answers)

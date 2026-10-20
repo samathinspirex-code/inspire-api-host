@@ -20,7 +20,7 @@ class CourseworkAssignmentCreate(BaseModel):
     duration_minutes: int | None = Field(None, ge=1, le=1440)
     max_marks: Decimal = Field(Decimal("100"), gt=0, le=100_000)
     allow_late: bool = False
-    status: Literal["draft", "published"] = "draft"
+    status: Literal["draft", "published", "closed"] = "draft"
 
     @model_validator(mode="after")
     def validate_timing(self):
@@ -121,13 +121,13 @@ class CourseworkSubmissionListResponse(BaseModel):
 
 class CourseworkMarkUpdate(BaseModel):
     marks_awarded: Decimal | None = Field(None, ge=0, le=100_000)
-    grade_band: Literal["pass", "merit", "distinction"] | None = None
+    grade_band: Literal["fail", "pass", "merit", "distinction"] | None = None
     feedback: str | None = Field(None, max_length=20_000)
 
     @model_validator(mode="after")
     def require_a_grade(self):
         if self.grade_band is None and self.marks_awarded is None:
-            raise ValueError("Enter marks or choose Pass, Merit, or Distinction")
+            raise ValueError("Choose a grade or enter marks")
         return self
 
 
@@ -138,16 +138,19 @@ class GradeReleaseUpdate(BaseModel):
 class GradebookResultItem(BaseModel):
     assignment_id: int
     title: str
+    submission_type: str = "written"
     status: str
     max_marks: Decimal
     marks_awarded: Decimal | None
     percentage: float | None
+    grade_band: str | None = None
     graded: bool
 
 
 class GradebookAssignmentSummary(BaseModel):
     assignment_id: int
     title: str
+    submission_type: str = "written"
     target_label: str
     max_marks: Decimal
     due_at: datetime | None
@@ -192,12 +195,14 @@ class LecturerGradebookResponse(BaseModel):
 class StudentGradeItem(BaseModel):
     assignment_id: int
     title: str
+    submission_type: str = "written"
     course_id: int
     course_code: str
     course_title: str
     max_marks: Decimal
     marks_awarded: Decimal
     percentage: float
+    grade_band: str | None = None
     feedback: str | None
     marked_at: datetime | None
 

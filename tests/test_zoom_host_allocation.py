@@ -2,6 +2,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 import inspect
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from app.core.errors import ValidationError
 
 from app.modules.lms.zoom_service import (
     _claim_host,
@@ -11,6 +14,7 @@ from app.modules.lms.zoom_service import (
     _zak_token_url,
     delete_class_recording,
     receive_webhook,
+    sweep_finished_meetings,
     sweep_missing_attendance,
 )
 
@@ -36,15 +40,18 @@ class _Database:
 
 
 class _WebhookDatabase:
-    def __init__(self, confirmed_end=True):
+    def __init__(self, completed=7):
         self.statements = []
         self.commits = 0
-        self.confirmed_end = confirmed_end
+        self.completed = completed
         self.scalar_calls = 0
 
     async def scalar(self, statement, parameters):
         self.scalar_calls += 1
-        return 7 if self.scalar_calls == 1 else self.confirmed_end
+        if self.scalar_calls == 1:
+            return 7
+        self.statements.append((str(statement), parameters))
+        return self.completed
 
     async def execute(self, statement, parameters):
         self.statements.append((str(statement), parameters))
@@ -76,6 +83,41 @@ class _SweepDatabase:
         return _SweepResult()
 
     async def commit(self):
+        pass
+
+
+class _FinishedMeetingDatabase:
+    def __init__(self, meeting):
+        self.meeting = meeting
+        self.statements = []
+        self.commits = 0
+
+    async def execute(self, statement, parameters):
+        sql = str(statement)
+        self.statements.append(sql)
+        if "SELECT m.* FROM lms_online_meetings" in sql:
+            rows = [self.meeting]
+        elif "SELECT * FROM lms_zoom_host_connections" in sql:
+            rows = [{"connection_id": 1}]
+        else:
+            rows = []
+        class Result:
+            def mappings(self):
+                return self
+            def all(self):
+                return rows
+            def first(self):
+                return rows[0] if rows else None
+        return Result()
+
+    async def scalar(self, statement, parameters):
+        self.statements.append(str(statement))
+        return self.meeting["meeting_id"]
+
+    async def commit(self):
+        self.commits += 1
+
+    async def rollback(self):
         pass
 
 
@@ -140,7 +182,9 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
 
         await receive_webhook(database, {
             "event": "meeting.ended",
-            "payload": {"object": {"id": "123456", "uuid": "meeting-uuid"}},
+            "payload": {"object": {"id": "123456", "uuid": "meeting-uuid",
+                                   "start_time": "2026-10-10T09:00:00Z",
+                                   "end_time": "2026-10-10T09:45:00Z"}},
         })
 
         self.assertIn("SET status='completed'", database.statements[0][0])
@@ -177,15 +221,16 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(database.statements[0][1]["kind"], "recording")
         self.assertEqual(database.commits, 1)
 
-    async def test_meeting_ended_without_explicit_end_for_all_stays_scheduled(self):
-        database = _WebhookDatabase(confirmed_end=False)
+    async def test_unmatched_meeting_end_does_not_queue_attendance(self):
+        database = _WebhookDatabase(completed=None)
 
         await receive_webhook(database, {
             "event": "meeting.ended",
             "payload": {"object": {"id": "123456", "uuid": "meeting-uuid"}},
         })
 
-        self.assertEqual(database.statements, [])
+        self.assertEqual(len(database.statements), 1)
+        self.assertIn("BETWEEN start_time-interval '2 hours'", database.statements[0][0])
         self.assertEqual(database.commits, 1)
 
     async def test_attendance_sweep_only_targets_confirmed_completed_meetings(self):
@@ -194,6 +239,33 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
         await sweep_missing_attendance(database, datetime.now(timezone.utc))
 
         self.assertIn("m.status='completed'", database.statements[0][0])
+
+    async def test_finished_meeting_sweep_completes_and_queues_attendance(self):
+        start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+        database = _FinishedMeetingDatabase({
+            "meeting_id": 259, "zoom_host_connection_id": 1,
+            "start_time": start, "end_time": start + timedelta(minutes=30),
+        })
+        participants = [{"join_time": "2026-10-16T08:02:00Z", "leave_time": "2026-10-16T08:12:00Z"}]
+        with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")), \
+             patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)):
+            completed = await sweep_finished_meetings(database, start + timedelta(hours=1))
+        self.assertEqual(completed, 1)
+        self.assertTrue(any("SET status='completed'" in sql for sql in database.statements))
+        self.assertTrue(any("INSERT INTO lms_zoom_jobs" in sql for sql in database.statements))
+        self.assertEqual(database.commits, 1)
+
+    async def test_finished_meeting_sweep_waits_for_zoom_report(self):
+        start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+        database = _FinishedMeetingDatabase({
+            "meeting_id": 261, "zoom_host_connection_id": 1,
+            "start_time": start, "end_time": start + timedelta(minutes=30),
+        })
+        with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")), \
+             patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(side_effect=ValidationError("not ready"))):
+            completed = await sweep_finished_meetings(database, start + timedelta(hours=1))
+        self.assertEqual(completed, 0)
+        self.assertFalse(any("SET status='completed'" in sql for sql in database.statements))
 
 
 if __name__ == "__main__":

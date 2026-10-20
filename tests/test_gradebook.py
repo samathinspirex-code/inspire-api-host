@@ -43,6 +43,11 @@ class GradebookTests(unittest.TestCase):
                 submitted_count=1,
                 graded_count=1,
                 average_percentage=80,
+            ), GradebookAssignmentSummary(
+                assignment_id=4, title="Quiz 1", submission_type="mcq",
+                target_label="Entire course", max_marks=Decimal("10"), due_at=None,
+                grades_released=True, eligible_students=1, submitted_count=1,
+                graded_count=1, average_percentage=70,
             )],
             students=[GradebookStudentItem(
                 student_user_id=3,
@@ -60,18 +65,25 @@ class GradebookTests(unittest.TestCase):
                     max_marks=Decimal("50"),
                     marks_awarded=Decimal("40"),
                     percentage=80,
+                    grade_band="merit",
                     graded=True,
+                ), GradebookResultItem(
+                    assignment_id=4, title="Quiz 1", submission_type="mcq",
+                    status="reviewed", max_marks=Decimal("10"),
+                    marks_awarded=Decimal("7"), percentage=70,
+                    grade_band=None, graded=True,
                 )],
             )],
         )
 
         rows = list(csv.reader(StringIO(build_gradebook_csv(report))))
 
-        self.assertEqual(len(rows[0]), 11)
-        self.assertEqual(len(rows[1]), 11)
+        self.assertEqual(len(rows[0]), 9)
+        self.assertEqual(len(rows[1]), 9)
         self.assertEqual(rows[1][2], "'=FORMULA")
-        self.assertEqual(rows[1][7:10], ["40", "50", "80.0"])
-        self.assertEqual(rows[1][10], "True")
+        self.assertEqual(rows[1][7], "merit")
+        self.assertEqual(rows[1][8], "True")
+        self.assertEqual(rows[2][7], "7 / 10")
 
 
 if __name__ == "__main__":
