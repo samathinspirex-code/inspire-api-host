@@ -2,13 +2,16 @@ from typing import Callable
 
 import jwt
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.core.errors import ForbiddenError, UnauthorizedError
+from app.modules.auth.repository import UserRepository
 from app.modules.auth.schemas import CurrentUser
 from app.modules.auth.security import decode_access_token
 
 
-async def get_current_user(request: Request) -> CurrentUser:
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> CurrentUser:
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise UnauthorizedError("Missing or invalid Authorization header")
@@ -19,7 +22,11 @@ async def get_current_user(request: Request) -> CurrentUser:
     except jwt.InvalidTokenError:
         raise UnauthorizedError("Invalid or expired token")
 
-    access = list(claims.get("access", []))
+    # Resolve grants from the account so existing tokens cannot retain removed roles.
+    user = await UserRepository(db).get(int(claims["sub"]))
+    if user is None or not user.is_active:
+        raise UnauthorizedError("Account is no longer available")
+    access = [grant.access_level.access_key for grant in user.access_levels if grant.access_level.is_active]
     selected_role = request.headers.get("X-LMS-Active-Role", "").strip().upper()
     lms_roles = {"SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"}
     if selected_role:
@@ -28,7 +35,7 @@ async def get_current_user(request: Request) -> CurrentUser:
         # Treat the chosen portal as the active role for this request. Other
         # assigned roles remain in the token and can be selected again later.
         access = [value for value in access if value not in lms_roles or value == selected_role]
-    return CurrentUser(user_id=int(claims["sub"]), email=claims["email"], access=access)
+    return CurrentUser(user_id=user.user_id, email=user.email, access=access)
 
 
 def require_access(access_key: str) -> Callable:
