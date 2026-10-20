@@ -162,6 +162,7 @@ class ExamItem(BaseModel):
     submitted_at: datetime | None = None
     remaining_seconds: int | None = None
     total_marks: Decimal | None = None
+    grade_band: str | None = None
     feedback: str | None = None
 
 
@@ -233,6 +234,7 @@ class ExamReviewAnswerItem(BaseModel):
     marks: Decimal
     options: list[str] | None
     correct_option_index: int | None
+    correct_option_indices: list[int] | None = None
     selected_option_index: int | None
     answer_text: str | None
     is_correct: bool | None
@@ -256,6 +258,7 @@ class ExamAttemptReviewItem(BaseModel):
     manual_marks: Decimal | None
     total_marks: Decimal | None
     max_marks: Decimal
+    grade_band: str | None = None
     feedback: str | None
     answers: list[ExamReviewAnswerItem]
 
@@ -289,6 +292,7 @@ class ExamResultAnswer(BaseModel):
 
 class ExamResultResponse(BaseModel):
     exam_id: int
+    assessment_kind: str = "exam"
     title: str
     course_code: str
     max_marks: Decimal

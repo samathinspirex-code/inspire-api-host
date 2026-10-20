@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
 from app.modules.auth.models import User
-from app.modules.lms.coursework_service import _assignment_item, _ensure_lecturer_course
+from app.modules.lms.coursework_service import _assignment_item, _ensure_lecturer_course, grade_band_for_score
 from app.modules.lms.models import (
     ClassStudent,
     CourseEnrollment,
@@ -17,6 +17,7 @@ from app.modules.lms.models import (
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
     LmsExam,
+    LmsExamAttempt,
     StudentProfile,
 )
 from app.modules.lms.repository import CourseworkRepository
@@ -143,10 +144,13 @@ async def lecturer_gradebook(
             results.append(GradebookResultItem(
                 assignment_id=assignment.assignment_id,
                 title=assignment.title,
+                submission_type=assignment.submission_type,
                 status=submission.status if submission else "not_started",
                 max_marks=assignment.max_marks,
                 marks_awarded=marks,
                 percentage=percentage(marks, assignment.max_marks) if graded else None,
+                grade_band=(submission.grade_band or grade_band_for_score(marks, assignment.max_marks))
+                if graded and assignment.submission_type != "mcq" else None,
                 graded=graded,
             ))
         students.append(GradebookStudentItem(
@@ -174,6 +178,7 @@ async def lecturer_gradebook(
         assignment_summaries.append(GradebookAssignmentSummary(
             assignment_id=assignment.assignment_id,
             title=assignment.title,
+            submission_type=assignment.submission_type,
             target_label=target_class.name if target_class else "Entire course",
             max_marks=assignment.max_marks,
             due_at=assignment.due_at,
@@ -223,12 +228,15 @@ async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesRespons
         group["grades"].append(StudentGradeItem(
             assignment_id=assignment.assignment_id,
             title=assignment.title,
+            submission_type=assignment.submission_type,
             course_id=course.course_id,
             course_code=course.code,
             course_title=course.title,
             max_marks=assignment.max_marks,
             marks_awarded=submission.marks_awarded,
             percentage=percentage(submission.marks_awarded, assignment.max_marks),
+            grade_band=(submission.grade_band or grade_band_for_score(submission.marks_awarded, assignment.max_marks))
+            if assignment.submission_type != "mcq" else None,
             feedback=submission.feedback,
             marked_at=submission.marked_at,
         ))
@@ -264,8 +272,32 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
             raise ValidationError("There are no submissions to release yet")
         if any(item.status == "in_progress" for item in submissions):
             raise ValidationError("Wait until every started attempt is finished before releasing grades")
-        if any(item.grade_band not in {"pass", "merit", "distinction"} for item in submissions):
-            raise ValidationError("Give every student Pass, Merit, or Distinction before releasing grades")
+        attempts = {item.student_user_id: item for item in (await db.execute(
+            select(LmsExamAttempt).join(LmsExam, LmsExam.exam_id == LmsExamAttempt.exam_id).where(
+                LmsExam.assignment_id == assignment_id, LmsExam.assessment_kind == "graded_mcq"
+            )
+        )).scalars().all()}
+        for submission in submissions:
+            attempt = attempts.get(submission.student_user_id)
+            if submission.marks_awarded is None and attempt is not None and attempt.status != "in_progress" and attempt.auto_marks is not None:
+                submission.marks_awarded = attempt.auto_marks
+                submission.marked_at = attempt.submitted_at
+                submission.status = "reviewed"
+                attempt.total_marks = attempt.auto_marks
+                attempt.manual_marks = Decimal("0")
+                attempt.marked_at = attempt.submitted_at
+                attempt.status = "reviewed"
+            if submission.marks_awarded is None or attempt is None or attempt.total_marks is None:
+                raise ValidationError("Wait until every multiple-choice attempt has been marked before releasing results")
+            submission.grade_band = None
+            attempt.grade_band = None
+    elif released:
+        submissions = (await db.execute(
+            select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment_id)
+        )).scalars().all()
+        for submission in submissions:
+            if submission.marks_awarded is not None and submission.grade_band is None:
+                submission.grade_band = grade_band_for_score(submission.marks_awarded, assignment.max_marks)
     assignment.grades_released = released
     linked_exam = (await db.execute(
         select(LmsExam).where(LmsExam.assignment_id == assignment_id)
@@ -287,10 +319,15 @@ def _csv_safe(value) -> str:
 def build_gradebook_csv(report: LecturerGradebookResponse) -> str:
     output = StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(["course_code", "class", "student_number", "student_name", "student_email", "assignment", "status", "marks_awarded", "maximum_marks", "percentage", "grades_released"])
+    writer.writerow(["course_code", "class", "student_number", "student_name", "student_email", "assignment", "status", "result", "grades_released"])
     assignment_map = {item.assignment_id: item for item in report.assignments}
     for student in report.students:
         for result in student.results:
             assignment = assignment_map[result.assignment_id]
-            writer.writerow([_csv_safe(report.course_code), _csv_safe(report.class_label), _csv_safe(student.student_number), _csv_safe(student.student_name), _csv_safe(student.student_email), _csv_safe(result.title), _csv_safe(result.status), _csv_safe(result.marks_awarded), _csv_safe(result.max_marks), _csv_safe(result.percentage), _csv_safe(assignment.grades_released)])
+            result_value = (
+                f"{result.marks_awarded} / {result.max_marks}"
+                if result.submission_type == "mcq" and result.marks_awarded is not None else
+                result.grade_band or (grade_band_for_score(result.marks_awarded, result.max_marks) if result.marks_awarded is not None else None)
+            )
+            writer.writerow([_csv_safe(report.course_code), _csv_safe(report.class_label), _csv_safe(student.student_number), _csv_safe(student.student_name), _csv_safe(student.student_email), _csv_safe(result.title), _csv_safe(result.status), _csv_safe(result_value), _csv_safe(assignment.grades_released)])
     return output.getvalue()

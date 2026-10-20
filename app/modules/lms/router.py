@@ -1572,6 +1572,26 @@ async def get_zoom_join_config(
     return await zoom_service.join_config(db, meeting_id, current_user.user_id, role)
 
 
+@router.post("/meetings/{meeting_id}/zoom/start")
+async def get_zoom_lecturer_start_url(
+    meeting_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    role = service.resolve_role(current_user.access)
+    return await zoom_service.lecturer_start_url(db, meeting_id, current_user.user_id, role)
+
+
+@router.post("/meetings/{meeting_id}/zoom/reconcile")
+async def reconcile_zoom_lecturer_meeting(
+    meeting_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    role = service.resolve_role(current_user.access)
+    return await zoom_service.reconcile_lecturer_meeting(db, meeting_id, current_user.user_id, role)
+
+
 @router.post("/meetings/{meeting_id}/zoom/end-intent")
 async def mark_zoom_meeting_end_intent(
     meeting_id: int,

@@ -14,6 +14,7 @@ from app.modules.cms import media_service
 from app.modules.cms.models import MediaAsset, Program
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
 from app.modules.lms import content_service
+from app.modules.lms.coursework_service import grade_band_for_score
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -648,12 +649,14 @@ async def get_student_academic_profile(
         visible = show_private_marks or assignment.grades_released
         marks = submission.marks_awarded if submission and visible else None
         assignments.append(StudentAcademicAssessment(
-            assessment_id=assignment.assignment_id, kind="assignment", title=assignment.title,
+            assessment_id=assignment.assignment_id, kind="assignment", submission_type=assignment.submission_type, title=assignment.title,
             course_code=course_map[assignment.course_id].code,
             course_title=course_map[assignment.course_id].title,
             class_name=class_map.get(assignment.target_id).name if assignment.target_type == "class" and assignment.target_id in class_map else None,
             status=submission.status if submission else "not_started", marks_awarded=marks,
             max_marks=assignment.max_marks, percentage=_percent(marks, assignment.max_marks),
+            grade_band=(submission.grade_band or grade_band_for_score(marks, assignment.max_marks))
+            if assignment.submission_type != "mcq" and submission and marks is not None else None,
             feedback=submission.feedback if submission and visible else None,
             submitted_at=submission.submitted_at if submission else None, due_at=assignment.due_at,
             grades_released=assignment.grades_released,
@@ -679,7 +682,9 @@ async def get_student_academic_profile(
             course_code=course_map[exam.course_id].code, course_title=course_map[exam.course_id].title,
             class_name=class_map.get(exam.target_id).name if exam.target_type == "class" and exam.target_id in class_map else None,
             status=attempt.status if attempt else "not_started", marks_awarded=marks, max_marks=maximum,
-            percentage=_percent(marks, maximum), feedback=attempt.feedback if attempt and visible else None,
+            percentage=_percent(marks, maximum),
+            grade_band=(attempt.grade_band or grade_band_for_score(marks, maximum)) if attempt and marks is not None and maximum > 0 else None,
+            feedback=attempt.feedback if attempt and visible else None,
             submitted_at=attempt.submitted_at if attempt else None, due_at=exam.due_at,
             grades_released=exam.grades_released,
         ))

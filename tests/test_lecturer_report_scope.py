@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.modules.auth.models import User
+from app.modules.academic import service as academic_service
 from app.modules.cms.models import Program
 from app.modules.lms.models import (
     AttendanceRecord, AttendanceSession, ClassLecturer, ClassStudent, CourseEnrollment,
@@ -21,8 +22,8 @@ class LocalSession:
     def __init__(self, engine):
         self.session = Session(engine)
 
-    async def execute(self, statement):
-        return self.session.execute(statement)
+    async def execute(self, statement, params=None):
+        return self.session.execute(statement, params or {})
 
     async def get(self, model, key):
         return self.session.get(model, key)
@@ -39,6 +40,19 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
             AttendanceRecord,
         ):
             model.__table__.create(self.engine)
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE academic_schools (school_id INTEGER PRIMARY KEY, name TEXT)")
+            connection.exec_driver_sql("CREATE TABLE academic_programmes (programme_id INTEGER PRIMARY KEY, name TEXT)")
+            connection.exec_driver_sql("CREATE TABLE academic_courses (course_id INTEGER PRIMARY KEY, awarding_body TEXT, school_id INTEGER, programme_id INTEGER, legacy_program_id INTEGER)")
+            connection.exec_driver_sql("CREATE TABLE academic_course_study_options (course_id INTEGER, study_mode TEXT, is_enabled BOOLEAN)")
+            connection.exec_driver_sql("INSERT INTO academic_schools VALUES (1, 'School of Computing')")
+            connection.exec_driver_sql("INSERT INTO academic_schools VALUES (2, 'School of CPD')")
+            connection.exec_driver_sql("INSERT INTO academic_programmes VALUES (1, 'Foundation')")
+            connection.exec_driver_sql("INSERT INTO academic_programmes VALUES (2, 'Short Course')")
+            connection.exec_driver_sql("INSERT INTO academic_courses VALUES (101, 'ATHE', 1, 1, NULL)")
+            connection.exec_driver_sql("INSERT INTO academic_courses VALUES (102, 'ATHE', 2, 2, NULL)")
+            connection.exec_driver_sql("INSERT INTO academic_course_study_options VALUES (101, 'full_time', 1)")
+            connection.exec_driver_sql("INSERT INTO academic_course_study_options VALUES (102, 'part_time', 1)")
 
         now = datetime(2026, 10, 1, tzinfo=timezone.utc)
         with Session(self.engine) as db:
@@ -61,6 +75,7 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
                     class_id=course_id, course_id=course_id, code=f"B{course_id}",
                     name=f"Batch {course_id}", start_date=now.date(),
                     end_date=(now + timedelta(days=30)).date(),
+                    academic_course_id=101 if course_id == 1 else None,
                     status="cancelled" if course_id == 4 else "active",
                 ))
                 db.add(ClassLecturer(
@@ -114,14 +129,23 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0][5], 1)
         response = await portal_service.list_my_classes(self.db(), 10, "LECTURER")
         self.assertEqual(response.data[0].program_id, 1)
+        self.assertEqual(response.data[0].school_name, "School of Computing")
 
     async def test_student_class_filters_use_enrolled_active_classes(self):
         response = await portal_service.list_my_classes(self.db(), 20, "STUDENT")
         self.assertEqual([item.class_id for item in response.data], [1])
         class_item = response.data[0]
-        self.assertEqual(class_item.awarding_body, "Test")
-        self.assertEqual(class_item.school_name, "Test")
-        self.assertEqual(class_item.programme_name, "L5")
+        self.assertEqual(class_item.awarding_body, "ATHE")
+        self.assertEqual(class_item.school_name, "School of Computing")
+        self.assertEqual(class_item.programme_name, "Foundation")
+
+    async def test_filter_pathways_include_catalogue_schools_without_enrolment(self):
+        pathways = await academic_service.list_filter_pathways(self.db())
+        self.assertIn({
+            "awarding_body": "ATHE", "school_name": "School of CPD",
+            "programme_name": "Short Course",
+            "study_options": [{"study_mode": "part_time", "is_enabled": True}],
+        }, pathways)
 
     async def test_student_history_uses_current_class_and_course_enrolments(self):
         response = await attendance_service.list_my_attendance(self.db(), 20)

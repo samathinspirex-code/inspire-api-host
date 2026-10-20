@@ -1,4 +1,4 @@
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
@@ -41,8 +41,12 @@ def _course_item(row, role: str) -> PortalCourseItem:
     )
 
 
-def _class_item(row, role: str) -> PortalClassItem:
+def _class_item(row, role: str, academic_pathway=None) -> PortalClassItem:
     class_, course_code, course_title, cover_image_url, program_title, program_id, awarding_body, school_name, programme_name, people_count, is_orientation = row
+    if academic_pathway:
+        awarding_body = academic_pathway["awarding_body"]
+        school_name = academic_pathway["school_name"]
+        programme_name = academic_pathway["programme_name"]
     return PortalClassItem(
         class_id=class_.class_id,
         course_id=class_.course_id,
@@ -70,6 +74,26 @@ def _class_item(row, role: str) -> PortalClassItem:
         people_count=people_count,
         people_label="Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers",
     )
+
+
+async def _academic_class_pathways(db: AsyncSession, rows) -> dict[int, dict]:
+    class_ids = sorted({row[0].class_id for row in rows})
+    if not class_ids:
+        return {}
+    statement = text("""
+        SELECT cl.class_id, c.awarding_body, s.name AS school_name, p.name AS programme_name
+        FROM lms_classes cl
+        JOIN lms_courses lc ON lc.course_id = cl.course_id
+        LEFT JOIN academic_courses source_c ON source_c.legacy_program_id = lc.program_id
+        LEFT JOIN academic_courses c ON c.course_id = COALESCE(
+            lc.catalogue_course_id, source_c.course_id, cl.academic_course_id
+        )
+        LEFT JOIN academic_schools s ON s.school_id = c.school_id
+        LEFT JOIN academic_programmes p ON p.programme_id = c.programme_id
+        WHERE cl.class_id IN :class_ids
+    """).bindparams(bindparam("class_ids", expanding=True))
+    result = await db.execute(statement, {"class_ids": class_ids})
+    return {row["class_id"]: dict(row) for row in result.mappings() if row["awarding_body"]}
 
 
 async def list_my_courses(db: AsyncSession, user_id: int, role: str) -> PortalCourseListResponse:
@@ -142,7 +166,8 @@ async def update_my_course_presentation(
 
 async def list_my_classes(db: AsyncSession, user_id: int, role: str) -> PortalClassListResponse:
     rows = await PortalRepository(db).list_classes(user_id, role)
-    return PortalClassListResponse(data=[_class_item(row, role) for row in rows])
+    pathways = await _academic_class_pathways(db, rows)
+    return PortalClassListResponse(data=[_class_item(row, role, pathways.get(row[0].class_id)) for row in rows])
 
 
 async def get_my_class(
@@ -151,6 +176,7 @@ async def get_my_class(
     row = await PortalRepository(db).get_class(class_id, user_id, role)
     if row is None:
         raise NotFoundError("This class is not assigned to your LMS profile")
+    pathways = await _academic_class_pathways(db, [row])
     assignments = (
         await AssignmentRepository(db).list_class_students(class_id)
         if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"}
@@ -158,7 +184,7 @@ async def get_my_class(
     )
     people_label = "Students" if role in {"LECTURER", "SUPER_ADMIN", "ADMIN"} else "Lecturers"
     return PortalClassDetailResponse(
-        class_=_class_item(row, role),
+        class_=_class_item(row, role, pathways.get(row[0].class_id)),
         people=[
             (
                 _student_item(user, profile, relation, "assigned")

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
@@ -16,6 +16,7 @@ from app.modules.lms.models import (
     LmsExam,
     LmsExamAttempt,
     LmsExamQuestion,
+    LmsNotification,
 )
 from app.modules.lms.repository import CourseworkRepository
 from app.modules.lms.schemas import (
@@ -30,7 +31,19 @@ from app.modules.lms.schemas import (
 from app.modules.lms import notification_service
 
 
-GRADE_BAND_PERCENT = {"pass": Decimal("50"), "merit": Decimal("65"), "distinction": Decimal("85")}
+GRADE_BAND_PERCENT = {"fail": Decimal("0"), "pass": Decimal("50"), "merit": Decimal("65"), "distinction": Decimal("85")}
+
+
+def grade_band_for_score(marks, max_marks) -> str:
+    """Assign a grade band from an assessment score without changing its marks."""
+    maximum = Decimal(max_marks)
+    if maximum <= 0:
+        raise ValueError("Maximum marks must be positive")
+    score_percent = Decimal(marks) * Decimal("100") / maximum
+    for band in ("distinction", "merit", "pass"):
+        if score_percent >= GRADE_BAND_PERCENT[band]:
+            return band
+    return "fail"
 
 
 def band_marks(max_marks, band: str) -> Decimal:
@@ -73,6 +86,7 @@ def _expire_with_zero(submission: LmsCourseworkSubmission, closed_at: datetime |
     submission.status = "expired"
     submission.submitted_at = as_utc(closed_at) or utc_now()
     submission.marks_awarded = Decimal("0")
+    submission.grade_band = "fail"
     submission.feedback = "Automatically graded zero because the submission deadline passed."
     submission.marked_at = utc_now()
 
@@ -133,7 +147,8 @@ def _assignment_item(
         expires_at=submission.expires_at if submission else None,
         submitted_at=submission.submitted_at if submission else None,
         marks_awarded=submission.marks_awarded if submission and (assignment.grades_released or expose_grade) else None,
-        grade_band=submission.grade_band if submission and (assignment.grades_released or expose_grade) else None,
+        grade_band=(submission.grade_band or grade_band_for_score(submission.marks_awarded, assignment.max_marks))
+        if assignment.submission_type != "mcq" and submission and submission.marks_awarded is not None and (assignment.grades_released or expose_grade) else None,
         feedback=submission.feedback if submission and (assignment.grades_released or expose_grade) else None,
         answer_text=submission.answer_text if submission else None,
         attachment_asset_id=submission.attachment_asset_id if submission else None,
@@ -148,11 +163,15 @@ async def _assignment_material(db: AsyncSession, assignment: LmsCourseworkAssign
     return await db.get(MediaAsset, assignment.material_asset_id) if assignment.material_asset_id else None
 
 
-async def _validate_general_material(db: AsyncSession, asset_id: int | None, user_id: int) -> MediaAsset | None:
+async def _validate_general_material(
+    db: AsyncSession, asset_id: int | None, user_id: int, existing_asset_id: int | None = None,
+) -> MediaAsset | None:
     if asset_id is None:
         return None
     asset = await db.get(MediaAsset, asset_id)
-    if asset is None or asset.status != "ready" or asset.created_by != user_id or asset.folder != "assignment-materials":
+    if asset is None or asset.status != "ready" or asset.folder != "assignment-materials" or (
+        asset.created_by != user_id and asset_id != existing_asset_id
+    ):
         raise ValidationError("Choose a completed assignment material uploaded by your account")
     return asset
 
@@ -206,18 +225,38 @@ async def update_assignment(
             LmsCourseworkSubmission.assignment_id == assignment_id
         )
     ) or 0)
-    protected_fields = ("course_id", "target_type", "target_id", "assignment_type", "submission_type", "duration_minutes")
+    protected_fields = ("course_id", "target_type", "target_id", "assignment_type", "submission_type")
     if submission_count and any(getattr(assignment, field) != getattr(payload, field) for field in protected_fields):
-        raise ValidationError("Course, audience, and timing cannot be changed after students have started")
+        raise ValidationError("Course, audience, and assignment type cannot be changed after students have started")
     if payload.target_type == "class":
         target = await db.get(LmsClass, payload.target_id)
         if target is None or target.course_id != payload.course_id:
             raise ValidationError("The selected class does not belong to this course")
-    question_paper = await _validate_assignment_material(db, payload.question_paper_asset_id, user_id)
-    material = await _validate_general_material(db, payload.material_asset_id, user_id)
+    question_paper = await _validate_assignment_material(
+        db, payload.question_paper_asset_id, user_id, assignment.question_paper_asset_id,
+    )
+    material = await _validate_general_material(
+        db, payload.material_asset_id, user_id, assignment.material_asset_id,
+    )
     was_published = assignment.status == "published"
     for field, value in payload.model_dump().items():
         setattr(assignment, field, value)
+    if assignment.submission_type == "mcq":
+        exam = await db.scalar(select(LmsExam).where(
+            LmsExam.assignment_id == assignment_id,
+            LmsExam.assessment_kind == "graded_mcq",
+        ))
+        if exam is None:
+            raise ValidationError("This multiple-choice assignment has no linked quiz")
+        if assignment.status == "published" and exam.status != "published":
+            question_count = int(await db.scalar(select(func.count()).select_from(LmsExamQuestion).where(
+                LmsExamQuestion.exam_id == exam.exam_id,
+            )) or 0)
+            if question_count < 1:
+                raise ValidationError("Add at least one multiple-choice question before making this assignment active")
+        for field in ("course_id", "target_type", "target_id", "title", "instructions",
+                      "available_from", "due_at", "duration_minutes", "status"):
+            setattr(exam, field, getattr(assignment, field))
     await db.commit()
     await db.refresh(assignment)
     if not was_published and assignment.status == "published":
@@ -232,13 +271,21 @@ async def delete_assignment(db: AsyncSession, assignment_id: int, user_id: int) 
         raise NotFoundError("Assignment not found")
     assignment = context[0]
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
-    submission_count = int(await db.scalar(
-        select(func.count()).select_from(LmsCourseworkSubmission).where(
-            LmsCourseworkSubmission.assignment_id == assignment_id
-        )
-    ) or 0)
-    if submission_count:
-        raise ValidationError("This assignment has student attempts and cannot be deleted")
+    exam_id = await db.scalar(select(LmsExam.exam_id).where(LmsExam.assignment_id == assignment_id))
+    notification_keys = [
+        LmsNotification.event_key.in_((
+            f"assignment:{assignment_id}:published",
+            f"exam:{assignment_id}:published",
+            f"grade:assignment:{assignment_id}:released",
+            f"grade:exam:{assignment_id}:released",
+        )),
+        LmsNotification.event_key.like(f"assignment:{assignment_id}:due:%"),
+    ]
+    if exam_id is not None:
+        notification_keys.append(LmsNotification.event_key.like(f"exam:{exam_id}:due:%"))
+    await db.execute(delete(LmsNotification).where(or_(*notification_keys)))
+    # The database cascades this deletion to submissions, the linked quiz,
+    # its questions, attempts, answers, and their stored grades.
     await db.delete(assignment)
     await db.commit()
 
@@ -294,7 +341,7 @@ async def list_assignments(
     for assignment, course, target_class, submission in student_rows:
         now = utc_now()
         if assignment.submission_type == "mcq":
-            if not assignment_is_available(assignment.available_from, now):
+            if not assignment_is_available(assignment.available_from, now) and not (submission and submission.status == "in_progress"):
                 continue
             if submission and submission.status == "in_progress" and remaining_seconds(submission.expires_at) == 0:
                 await _finalize_graded_attempt(db, assignment, submission.student_user_id, expired=True)
@@ -303,7 +350,7 @@ async def list_assignments(
             material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
             data.append(_assignment_item((assignment, course, target_class), submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment), exam_id=exam_ids.get(assignment.assignment_id)))
             continue
-        if not assignment_is_available(assignment.available_from, now):
+        if not assignment_is_available(assignment.available_from, now) and not (submission and submission.status == "in_progress"):
             continue
         timer_finished = submission and submission.expires_at and remaining_seconds(submission.expires_at) == 0
         deadline_finished = bool(
@@ -344,6 +391,8 @@ async def _student_context(db: AsyncSession, assignment_id: int, user_id: int):
 async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
     context = await _student_context(db, assignment_id, user_id)
     assignment = context[0]
+    if assignment.submission_type == "mcq":
+        raise ValidationError("Open the multiple-choice questions from the assignment card")
     repo = CourseworkRepository(db)
     submission = await repo.get_submission(assignment_id, user_id, for_update=True)
     if submission is None:
@@ -388,6 +437,8 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
 async def _active_submission(db: AsyncSession, assignment_id: int, user_id: int):
     context = await _student_context(db, assignment_id, user_id)
     assignment = context[0]
+    if assignment.submission_type == "mcq":
+        raise ValidationError("Multiple-choice answers must be saved in the quiz")
     submission = await CourseworkRepository(db).get_submission(assignment_id, user_id, for_update=True)
     if submission is None:
         raise ValidationError("Start the assignment before saving or submitting")
@@ -420,14 +471,14 @@ async def _validate_attachment(db: AsyncSession, asset_id: int | None, user_id: 
 
 
 async def _validate_assignment_material(
-    db: AsyncSession, asset_id: int | None, user_id: int
+    db: AsyncSession, asset_id: int | None, user_id: int, existing_asset_id: int | None = None,
 ) -> MediaAsset | None:
     if asset_id is None:
         return None
     asset = await db.get(MediaAsset, asset_id)
     if asset is None or asset.status != "ready":
         raise ValidationError("The question paper is not ready")
-    if asset.created_by != user_id or asset.folder != "assignment-materials":
+    if asset.folder != "assignment-materials" or (asset.created_by != user_id and asset_id != existing_asset_id):
         raise ForbiddenError("This question paper does not belong to your assignment")
     if asset.content_type != "application/pdf":
         raise ValidationError("Question papers must be PDF files")
@@ -499,13 +550,16 @@ async def list_submissions(db: AsyncSession, assignment_id: int, user_id: int):
             await _finalize_graded_attempt(db, assignment, submission.student_user_id, expired=True)
             await db.refresh(submission)
             await db.refresh(attempt)
+        awarded = submission.marks_awarded
+        if awarded is None and attempt is not None and attempt.status != "in_progress":
+            awarded = attempt.auto_marks
         items.append(CourseworkSubmissionItem(
             submission_id=submission.submission_id,
             assignment_id=submission.assignment_id,
             student_user_id=submission.student_user_id,
             student_name=user.full_name or user.email,
             student_email=user.email,
-            student_number=profile.student_number,
+            student_number=profile.student_number or "",
             status=submission.status,
             started_at=submission.started_at,
             expires_at=submission.expires_at,
@@ -514,8 +568,9 @@ async def list_submissions(db: AsyncSession, assignment_id: int, user_id: int):
             attachment_asset_id=submission.attachment_asset_id,
             attachment_url=_asset_url(asset),
             attachment_name=asset.original_filename if asset else None,
-            marks_awarded=submission.marks_awarded,
-            grade_band=submission.grade_band,
+            marks_awarded=awarded,
+            grade_band=(submission.grade_band or grade_band_for_score(awarded, assignment.max_marks))
+            if assignment.submission_type != "mcq" and awarded is not None else None,
             auto_marks=attempt.auto_marks if attempt is not None and attempt.status != "in_progress" else None,
             feedback=submission.feedback,
             marked_at=submission.marked_at,
@@ -532,27 +587,17 @@ async def mark_submission(db: AsyncSession, submission_id: int, payload: Coursew
     if submission.status not in {"submitted", "expired", "reviewed", "returned"}:
         raise ValidationError("The student has not finished this attempt")
     if assignment.submission_type == "mcq":
-        if payload.grade_band is None:
-            raise ValidationError("Choose Pass, Merit, or Distinction")
+        raise ValidationError("Quiz marks are calculated automatically from the answers")
+    if payload.grade_band is not None:
         awarded = band_marks(assignment.max_marks, payload.grade_band)
-        submission.grade_band = payload.grade_band
-        submission.marks_awarded = awarded
-        exam = await db.scalar(select(LmsExam).where(LmsExam.assignment_id == assignment.assignment_id, LmsExam.assessment_kind == "graded_mcq"))
-        attempt = await db.scalar(select(LmsExamAttempt).where(LmsExamAttempt.exam_id == exam.exam_id, LmsExamAttempt.student_user_id == submission.student_user_id)) if exam else None
-        if attempt is not None:
-            attempt.grade_band = payload.grade_band
-            attempt.total_marks = awarded
-            attempt.feedback = payload.feedback
-            attempt.status = "reviewed"
-            attempt.marked_by = user_id
-            attempt.marked_at = utc_now()
-    else:
-        if payload.marks_awarded is None:
-            raise ValidationError("Enter the marks")
-        if Decimal(payload.marks_awarded) > Decimal(assignment.max_marks):
+    elif payload.marks_awarded is not None:
+        awarded = Decimal(payload.marks_awarded)
+        if awarded > Decimal(assignment.max_marks):
             raise ValidationError(f"Marks cannot exceed {assignment.max_marks}")
-        submission.marks_awarded = payload.marks_awarded
-        submission.grade_band = None
+    else:
+        raise ValidationError("Choose a grade")
+    submission.marks_awarded = awarded
+    submission.grade_band = payload.grade_band or grade_band_for_score(awarded, assignment.max_marks)
     submission.feedback = payload.feedback
     submission.marked_by = user_id
     submission.marked_at = utc_now()

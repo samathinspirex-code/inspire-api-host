@@ -187,54 +187,26 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.change(LmsModuleAccess, rule_id, available_from=datetime.now(timezone.utc)+timedelta(days=1))
         await self.assert_access(False)
 
-    async def test_video_completion_unlocks_next_content_without_submitting_quiz(self):
+    async def test_prerequisite_completion_publication_and_release_are_preserved(self):
         self.change(LmsLearningItem, 101, item_type="video")
-        await self.assert_access(False)
-        first = await progress_service.record_progress(
-            self.db(), 101, LearningProgressUpdate(event="heartbeat", duration_seconds=20,
-                                                    position_seconds=17, watched_seconds_delta=17), 7,
-        )
-        self.assertEqual(first.completion_percent, 75)
-        self.change(LmsLearningProgress, first.progress_id,
-                    last_activity_at=datetime.now(timezone.utc) - timedelta(seconds=15))
-        partial = await progress_service.record_progress(
-            self.db(), 101, LearningProgressUpdate(event="heartbeat", duration_seconds=20,
-                                                    position_seconds=17, watched_seconds_delta=2), 7,
-        )
-        self.assertEqual(partial.completion_percent, 85)
-        self.assertFalse(partial.is_completed)
-        await self.assert_access(False)
-        self.bank(101)
-        await self.assert_access(False)
-        with Session(self.engine) as db:
-            db.add(LmsLectureQuizAttempt(learning_item_id=101, student_user_id=7,
-                                         total_questions=4, score=4,
-                                         submitted_at=datetime.now(timezone.utc)))
-            db.commit()
-        await self.assert_access(False)
-        result = await progress_service.record_progress(
-            self.db(), 101, LearningProgressUpdate(event="ended", duration_seconds=20,
-                                                    position_seconds=20), 7,
-        )
-        self.assertTrue(result.is_completed)
+        self.bank(101, count=3)
         await self.assert_access(True)
-        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
-        self.assertTrue(studio.sections[1].items[0].is_accessible)
-        self.assertIsNone(studio.sections[1].items[0].item_locked_reason)
-
-    async def test_unfinished_video_blocks_even_with_no_quiz_and_respects_release(self):
-        self.change(LmsLearningItem, 101, item_type="video")
+        self.bank(101, count=1)
         await self.assert_access(False)
-        studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
-        self.assertFalse(studio.sections[1].items[0].is_accessible)
-        self.assertIn("Finish watching", studio.sections[1].items[0].item_locked_reason)
         self.change(LmsModule, 1, status="draft")
         await self.assert_access(True)
         self.change(LmsModule, 1, status="active")
         self.change(LmsModuleAccess, 1, is_unlocked=False)
         await self.assert_access(True)
         self.change(LmsModuleAccess, 1, is_unlocked=True)
+        with Session(self.engine) as db:
+            db.add(LmsLectureQuizAttempt(learning_item_id=101, student_user_id=8, total_questions=4, score=4, submitted_at=datetime.now(timezone.utc)))
+            db.commit()
         await self.assert_access(False)
+        with Session(self.engine) as db:
+            db.add(LmsLectureQuizAttempt(learning_item_id=101, student_user_id=7, total_questions=4, score=1, submitted_at=datetime.now(timezone.utc)))
+            db.commit()
+        await self.assert_access(True)
 
     async def test_completed_quiz_stays_completed_until_explicit_reattempt(self):
         self.bank(112, count=6)
@@ -390,10 +362,11 @@ class QuizPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.change(LmsCourse, 1, sequential_content_enabled=True)
         await self.assert_access(False, 102)
         await self.assert_access(False)
-        await progress_service.record_progress(
-            self.db(), 101, LearningProgressUpdate(event="ended", duration_seconds=100,
-                                                    position_seconds=100), 7,
-        )
+        with Session(self.engine) as db:
+            db.add(LmsLectureQuizAttempt(learning_item_id=101, student_user_id=7,
+                                        total_questions=4, score=1,
+                                        submitted_at=datetime.now(timezone.utc)))
+            db.commit()
         await self.assert_access(True)
         studio = await content_service.get_course_studio(self.db(), 1, 7, "STUDENT")
         self.assertTrue(studio.sections[1].items[0].is_completed)

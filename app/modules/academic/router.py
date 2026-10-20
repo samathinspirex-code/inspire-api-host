@@ -192,6 +192,11 @@ async def my_enrolments(user: CurrentUser = Depends(get_current_user), db: Async
     return {"data": await service.list_my_enrolments(db, user.user_id)}
 
 
+@lms_router.get("/filter-pathways", response_model=AcademicResponse)
+async def academic_filter_pathways(db: AsyncSession = Depends(get_db)):
+    return {"data": await service.list_filter_pathways(db)}
+
+
 @lms_router.get("/courses", response_model=AcademicResponse)
 async def academic_courses(user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
     courses = await service.list_courses(db)
