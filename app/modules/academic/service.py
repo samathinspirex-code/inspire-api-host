@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import APIError, ConflictError, NotFoundError, ValidationError
-from app.core.public_form_email import form_email_html, send_public_form_email
+from app.core.public_form_email import confirmation_email_content, form_email_html, send_public_form_email
 from app.modules.academic.schemas import (
     AcademicLevelCreate,
     AdmissionApplicationCreate,
@@ -73,6 +73,25 @@ async def _store_admission_document(payload, submission_id: str) -> str:
     except Exception as exc:
         raise ValidationError("The result document could not be stored securely. Continue without it or try again.") from exc
     return key
+
+
+async def _send_visitor_confirmation(name: str, email: str, *, admission: bool, reference: str):
+    subject, text_body, html_body = confirmation_email_content(name, admission=admission)
+    try:
+        result = await send_public_form_email(
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            to_email=email,
+            to_name=name,
+            custom_id=f"confirmation-{reference}",
+            reply_to=settings.PUBLIC_FORM_FROM_EMAIL,
+        )
+        if not result.sent:
+            logger.warning("Visitor confirmation %s failed: %s", reference, result.error)
+    except Exception:
+        # A saved submission must not become a failed form or duplicate lead.
+        logger.exception("Visitor confirmation %s failed unexpectedly", reference)
 
 
 async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationCreate):
@@ -216,6 +235,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     )
     if not email_result.sent:
         logger.warning("Admission lead %s was saved but its notification email failed: %s", lead_id, email_result.error)
+    await _send_visitor_confirmation(payload.full_name.strip(), str(payload.email), admission=True, reference=f"admission-{submission_id}")
     return {"lead_id": lead_id, "status": "new_lead", "message": "Your application was received. An advisor will contact you within one business day."}
 
 
@@ -274,7 +294,8 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
         logger.warning("Contact form notification failed: %s", result.error)
         # The CRM lead is the durable source of truth. Do not tell a visitor to
         # resubmit and create a duplicate merely because the alert email failed.
-    return {"sent": True, "message": "Your message was sent successfully."}
+    await _send_visitor_confirmation(payload.full_name.strip(), str(payload.email), admission=False, reference=f"contact-{lead_row['lead_id']}")
+    return {"sent": True, "message": "Your message was received. A counsellor will contact you shortly."}
 
 
 async def list_admission_leads(db: AsyncSession, status: str | None = None):

@@ -95,3 +95,27 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
             smtp_result.sent,
             None if smtp_result.sent else "The email provider is temporarily unavailable",
         )
+
+
+def confirmation_email_content(name: str, *, admission: bool) -> tuple[str, str, str]:
+    title = "Your application is received" if admission else "Thank you for getting in touch"
+    received = "We have received your admission application." if admission else "We have received your message."
+    next_step = "A counsellor will contact you shortly to discuss your interests, answer your questions and guide you through the next steps."
+    text = f"Hi {name},\n\n{received}\n\n{next_step}\n\nWe look forward to helping you take your next step with Inspire College.\n\nWarm regards,\nThe Inspire College Admissions Team"
+    markup = (
+        '<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f5f3f8;font-family:Arial,sans-serif;color:#1a0840">'
+        '<table role="presentation" style="width:100%;max-width:600px;margin:auto;border-spacing:0;background:#fff;border:1px solid #e8dff0;border-radius:16px;overflow:hidden">'
+        '<tr><td style="padding:30px 28px;background:#3f007c;color:#fff">'
+        '<div style="font-size:24px;font-weight:bold">inspire<span style="font-weight:normal"> college</span></div>'
+        '<div style="margin-top:10px;font-size:12px;letter-spacing:2px">YOUR NEXT CHAPTER STARTS HERE</div></td></tr>'
+        '<tr><td style="padding:32px 28px;line-height:1.7">'
+        f'<h1 style="margin:0 0 24px;font-size:26px;line-height:1.3">{title}</h1>'
+        f'<p>Hi {html.escape(name)},</p><p>{received}</p>'
+        f'<div style="padding:20px;margin:24px 0;border-left:4px solid #7b3ec8;background:#f6f0fb"><strong>What happens next?</strong><p style="margin:8px 0 0">{next_step}</p></div>'
+        '<p>We look forward to helping you take your next step with Inspire College.</p>'
+        '<p style="margin-bottom:0">Warm regards,<br><strong>The Inspire College Admissions Team</strong></p></td></tr>'
+        '<tr><td style="padding:20px 28px;border-top:1px solid #e8dff0;font-size:12px;color:#766d7d;line-height:1.6">'
+        'This is an automatic confirmation of your website submission. Our team will be in touch shortly.</td></tr>'
+        '</table></body></html>'
+    )
+    return f"{title} | Inspire College", text, markup
