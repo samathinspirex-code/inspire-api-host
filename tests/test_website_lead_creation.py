@@ -35,13 +35,15 @@ async def _contact_submission_keeps_crm_lead_when_alert_email_fails():
     )
 
     with (
-        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))),
+        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))) as sender,
         patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
         patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
     ):
         response = await service.send_contact_inquiry(db, payload)
 
     assert response["sent"] is True
+    assert sender.await_count == 2
+    assert sender.await_args.kwargs["to_email"] == "visitor@example.com"
     db.commit.assert_awaited_once()
     db.rollback.assert_not_awaited()
     assert db.execute.await_args_list[0].args[1]["phone"] == "+94 77 123 4567"
@@ -107,13 +109,15 @@ async def _admission_and_main_crm_leads_commit_together():
     )
 
     with (
-        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))),
+        patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))) as sender,
         patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
         patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
     ):
         response = await service.create_admission_lead(db, payload)
 
     assert response["lead_id"] == 101
+    assert sender.await_count == 2
+    assert sender.await_args.kwargs["to_email"] == "student@example.com"
     db.commit.assert_awaited_once()
     db.rollback.assert_not_awaited()
     statements = [str(call.args[0]) for call in db.execute.await_args_list]
