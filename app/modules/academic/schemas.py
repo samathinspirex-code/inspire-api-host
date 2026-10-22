@@ -79,6 +79,17 @@ class AdmissionResultDocument(BaseModel):
     data_base64: str = Field(..., min_length=4, max_length=14_100_000)
 
 
+class AdmissionDraftCreate(BaseModel):
+    submission_id: UUID
+    full_name: str = Field(..., min_length=2, max_length=255)
+    email: EmailStr
+    phone: str = Field(..., min_length=5, max_length=50)
+    highest_qualification: str = Field(..., min_length=2, max_length=120)
+    programme_id: int | None = Field(None, gt=0)
+    preferred_course_id: int | None = Field(None, gt=0)
+    preferred_study_mode: StudyMode | None = None
+
+
 class AdmissionApplicationCreate(BaseModel):
     submission_id: UUID
     full_name: str = Field(..., min_length=2, max_length=255)

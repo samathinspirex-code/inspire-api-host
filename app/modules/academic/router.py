@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.academic import service
+from app.modules.academic.schemas import AdmissionDraftCreate
+from app.modules.academic.wtc_event import WtcRegistrationCreate, WtcRegistrationResponse, register_wtc_visitor
 from app.modules.academic.schemas import (
     AcademicLevelCreate, AcademicResponse, AdmissionApplicationCreate, AdmissionApplicationResponse, ClassDetailsUpdate, ClassFromCourseRequest, ClassStatusUpdate, ContactInquiryCreate, ContactInquiryResponse, CourseCreate,
     NamedNodeCreate, PathwayConfirmRequest, ProgrammeEnrolmentCreate,
@@ -16,6 +18,11 @@ from app.core.errors import ForbiddenError
 public_router = APIRouter(prefix="/api/v1/public", tags=["public-academic"])
 cms_router = APIRouter(prefix="/api/v1/cms/academic", tags=["cms-academic"], dependencies=[Depends(require_access("CMS"))])
 lms_router = APIRouter(prefix="/api/v1/lms/academic", tags=["lms-academic"], dependencies=[Depends(require_access("LMS"))])
+
+
+@public_router.post("/wtc-registrations", response_model=WtcRegistrationResponse, status_code=201)
+async def wtc_registration(payload: WtcRegistrationCreate, db: AsyncSession = Depends(get_db)):
+    return await register_wtc_visitor(db, payload)
 
 
 def require_academic_staff(user: CurrentUser = Depends(get_current_user)):
@@ -62,6 +69,11 @@ async def programme_enrolment(payload: ProgrammeEnrolmentCreate, db: AsyncSessio
 @public_router.post("/admission-applications", response_model=AdmissionApplicationResponse, status_code=201)
 async def admission_application(payload: AdmissionApplicationCreate, db: AsyncSession = Depends(get_db)):
     return await service.create_admission_lead(db, payload)
+
+
+@public_router.post("/admission-drafts", response_model=AdmissionApplicationResponse)
+async def admission_draft(payload: AdmissionDraftCreate, db: AsyncSession = Depends(get_db)):
+    return await service.save_admission_draft(db, payload)
 
 
 @public_router.post("/contact-inquiries", response_model=ContactInquiryResponse, status_code=201)

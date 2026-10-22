@@ -47,7 +47,7 @@ def form_email_html(title: str, intro: str, rows: list[tuple[str, str | None]], 
     )
 
 
-async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form", attachments: list[dict[str, str]] | None = None, to_email: str | None = None, to_name: str = "Inspire Admissions") -> FormEmailResult:
+async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form", attachments: list[dict[str, str]] | None = None, to_email: str | None = None, to_name: str = "Inspire Admissions", cc_email: str | None = None) -> FormEmailResult:
     if not settings.MAILJET_API_KEY.strip() or not settings.MAILJET_SECRET_KEY.strip() or not settings.PUBLIC_FORM_FROM_EMAIL.strip():
         return FormEmailResult(False, "Mailjet is not configured")
     recipient = (to_email or settings.PUBLIC_FORM_RECIPIENT_EMAIL).strip()
@@ -68,6 +68,8 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
     }
     if reply_to:
         message["ReplyTo"] = {"Email": reply_to}
+    if cc_email:
+        message["Cc"] = [{"Email": cc_email, "Name": "Inspire College Enrolments"}]
     if attachments:
         message["Attachments"] = attachments
     try:

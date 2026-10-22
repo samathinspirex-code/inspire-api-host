@@ -92,7 +92,7 @@ async def _admission_and_main_crm_leads_commit_together():
     })
     crm_lead = _mapping_result(one={"lead_id": 202})
     db = SimpleNamespace(
-        execute=AsyncMock(side_effect=[existing, pathway, MagicMock(), crm_lead, MagicMock(), MagicMock()]),
+        execute=AsyncMock(side_effect=[MagicMock(), existing, pathway, MagicMock(), crm_lead, MagicMock(), MagicMock()]),
         scalar=AsyncMock(side_effect=[True, True, 101]),
         commit=AsyncMock(),
         rollback=AsyncMock(),
@@ -140,7 +140,7 @@ async def _admission_rolls_back_if_main_crm_lead_cannot_save():
         "duration": "18 months",
     })
     db = SimpleNamespace(
-        execute=AsyncMock(side_effect=[existing, pathway, RuntimeError("crm unavailable")]),
+        execute=AsyncMock(side_effect=[MagicMock(), existing, pathway, RuntimeError("crm unavailable")]),
         scalar=AsyncMock(side_effect=[True, True, 101]),
         commit=AsyncMock(),
         rollback=AsyncMock(),

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.errors import ForbiddenError
 from app.modules.auth.dependencies import get_current_user, require_access
 from app.modules.auth.schemas import AuthenticatorInvitationResponse, CurrentUser
 from app.modules.user_management import service
@@ -47,5 +48,11 @@ async def update_user(user_id: int, payload: UserUpdate, db: AsyncSession = Depe
 
 
 @router.delete("/users/{user_id}", status_code=204)
-async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)) -> None:
+async def delete_user(
+    user_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if current_user.user_id == user_id:
+        raise ForbiddenError("You cannot delete your own account")
     await service.delete_user(db, user_id)

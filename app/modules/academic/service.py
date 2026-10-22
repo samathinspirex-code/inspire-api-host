@@ -75,6 +75,83 @@ async def _store_admission_document(payload, submission_id: str) -> str:
     return key
 
 
+ADMISSION_CRM_SAVE_SQL = """
+            WITH updated AS (
+              UPDATE crm_leads SET
+                full_name=:full_name, email=:email, phone=:phone,
+                highest_qualification=:highest_qualification, interested_programme=:interested_programme,
+                interested_course=:interested_course, awarding_body=:awarding_body,
+                academic_course_id=:academic_course_id, programme_fee=:programme_fee,
+                programme_duration=:programme_duration, notes=:notes
+              WHERE source='website_admission' AND strpos(notes, :draft_marker)>0
+                AND notes LIKE 'Saved via Website Admission Form%'
+              RETURNING lead_id
+            ), inserted AS (
+            INSERT INTO crm_leads
+              (full_name, email, phone, highest_qualification, interested_programme, interested_course,
+               awarding_body, academic_course_id, programme_fee, programme_duration,
+               source, stage, priority, notes, is_archived)
+            SELECT
+              :full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course,
+               :awarding_body, :academic_course_id, :programme_fee, :programme_duration,
+               'website_admission', 'new_lead', 'high', :notes, FALSE
+            WHERE NOT EXISTS (SELECT 1 FROM updated)
+            RETURNING lead_id
+            ) SELECT lead_id FROM updated UNION ALL SELECT lead_id FROM inserted
+"""
+
+
+async def save_admission_draft(db: AsyncSession, payload):
+    from app.modules.crm.service import _ensure_counsellor_status_table, apply_auto_assignment
+
+    marker = f"Submission ID: {payload.submission_id}."
+    try:
+        await _ensure_counsellor_status_table(db)
+        # Serialize repeated Save & exit requests for the same browser draft.
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:marker))"), {"marker": marker})
+        existing = (await db.execute(text("SELECT lead_id, notes FROM crm_leads WHERE source='website_admission' AND strpos(notes, :marker)>0 LIMIT 1"), {"marker": marker})).mappings().first()
+        if existing and not existing["notes"].startswith("Saved via Website Admission Form"):
+            await db.commit()
+            return {"lead_id": existing["lead_id"], "status": "new_lead", "message": "Your application is already saved."}
+        pathway = None
+        if payload.programme_id:
+            pathway = (await db.execute(text("""
+                SELECT p.name AS programme_name, c.title AS course_name, c.awarding_body, o.price, o.duration
+                FROM academic_programmes p
+                LEFT JOIN academic_courses c ON c.course_id=:course_id AND c.programme_id=p.programme_id AND c.status='active'
+                LEFT JOIN academic_course_study_options o ON o.course_id=c.course_id AND o.study_mode=:study_mode AND o.is_enabled=true
+                WHERE p.programme_id=:programme_id AND p.status='active'
+            """), {"programme_id": payload.programme_id, "course_id": payload.preferred_course_id, "study_mode": payload.preferred_study_mode})).mappings().first()
+            if not pathway or (payload.preferred_course_id and not pathway["course_name"]):
+                raise ValidationError("The selected programme or course is not available")
+        elif payload.preferred_course_id:
+            raise ValidationError("Choose a programme for the selected course")
+        await db.execute(text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS awarding_body VARCHAR(100)"))
+        lead = (await db.execute(text(ADMISSION_CRM_SAVE_SQL), {
+            "draft_marker": marker, "full_name": payload.full_name.strip(),
+            "email": str(payload.email).strip().lower(), "phone": payload.phone.strip(),
+            "highest_qualification": payload.highest_qualification.strip(),
+            "interested_programme": pathway["programme_name"] if pathway else None,
+            "interested_course": pathway["course_name"] if pathway else None,
+            "awarding_body": pathway["awarding_body"] if pathway else None,
+            "academic_course_id": payload.preferred_course_id,
+            "programme_fee": pathway["price"] if pathway else None,
+            "programme_duration": pathway["duration"] if pathway else None,
+            "notes": f"Saved via Website Admission Form (Save & exit; application incomplete). {marker} Study mode: {payload.preferred_study_mode or 'To be confirmed'}.",
+        })).mappings().one()
+        await db.execute(text("INSERT INTO crm_activities (lead_id, activity_type, content) VALUES (:lead_id, 'note', :content)"), {
+            "lead_id": lead["lead_id"], "content": "Applicant chose Save & exit. Application incomplete; no student confirmation email sent.",
+        })
+        if not existing:
+            await apply_auto_assignment(db, lead["lead_id"], commit=False)
+        await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:lead_id"), {"lead_id": lead["lead_id"]})
+        await db.commit()
+        return {"lead_id": lead["lead_id"], "status": "new_lead", "message": "Your progress is saved."}
+    except Exception:
+        await db.rollback()
+        raise
+
+
 async def _send_visitor_confirmation(name: str, email: str, *, admission: bool, reference: str):
     subject, text_body, html_body = confirmation_email_content(name, admission=admission)
     try:
@@ -98,6 +175,7 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     from app.modules.crm.service import _ensure_counsellor_status_table
     await _ensure_counsellor_status_table(db)
     submission_id = str(payload.submission_id)
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:marker))"), {"marker": f"Submission ID: {submission_id}."})
     existing = (await db.execute(text("SELECT lead_id, status FROM crm_admission_leads WHERE submission_id=:submission_id"), {"submission_id": submission_id})).mappings().first()
     if existing:
         return {"lead_id": existing["lead_id"], "status": existing["status"], "message": "Your application is already on our admissions list."}
@@ -149,17 +227,8 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
         # The admissions record and the visible CRM pipeline lead are one unit.
         # Do not report success unless both have been persisted.
         await db.execute(text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS awarding_body VARCHAR(100)"))
-        new_crm_lead = (await db.execute(text("""
-            INSERT INTO crm_leads
-              (full_name, email, phone, highest_qualification, interested_programme, interested_course,
-               awarding_body, academic_course_id, programme_fee, programme_duration,
-               source, stage, priority, notes, is_archived)
-            VALUES
-              (:full_name, :email, :phone, :highest_qualification, :interested_programme, :interested_course,
-               :awarding_body, :academic_course_id, :programme_fee, :programme_duration,
-               'website_admission', 'new_lead', 'high', :notes, FALSE)
-            RETURNING lead_id
-        """), {
+        new_crm_lead = (await db.execute(text(ADMISSION_CRM_SAVE_SQL), {
+            "draft_marker": f"Submission ID: {submission_id}.",
             "full_name": payload.full_name.strip(),
             "email": str(payload.email).strip().lower(),
             "phone": payload.phone.strip(),
