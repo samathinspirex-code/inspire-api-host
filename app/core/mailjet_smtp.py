@@ -27,6 +27,8 @@ def _build_email(message: dict) -> EmailMessage:
     email = EmailMessage()
     email["From"] = _mailbox(message["From"])
     email["To"] = ", ".join(_mailbox(recipient) for recipient in message["To"])
+    if message.get("Cc"):
+        email["Cc"] = ", ".join(_mailbox(recipient) for recipient in message["Cc"])
     email["Subject"] = " ".join(str(message["Subject"]).splitlines())
     if message.get("ReplyTo"):
         email["Reply-To"] = _mailbox(message["ReplyTo"])

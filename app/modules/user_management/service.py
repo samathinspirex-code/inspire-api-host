@@ -1,4 +1,4 @@
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
@@ -8,6 +8,7 @@ from app.modules.auth import service as auth_service
 from app.modules.auth.repository import AuthenticatorRepository
 from app.modules.auth.schemas import AuthenticatorInvitationResponse
 from app.modules.crm.models.activity import CrmActivity
+from app.modules.crm.models.counsellor_status import CrmCounsellorStatus
 from app.modules.crm.models.lead import CrmLead
 from app.modules.user_management.repository import UserManagementRepository
 from app.modules.user_management.schemas import UserCreate, UserDetail, UserListResponse, UserUpdate
@@ -108,5 +109,5 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
         .where(CrmLead.assigned_counsellor_id == user_id)
         .values(assigned_counsellor_id=None, counsellor_name=None)
     )
-    await db.commit()
+    await db.execute(delete(CrmCounsellorStatus).where(CrmCounsellorStatus.user_id == user_id))
     await repo.delete(user)
