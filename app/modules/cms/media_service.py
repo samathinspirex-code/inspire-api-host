@@ -39,11 +39,14 @@ ASSIGNMENT_DOCUMENT_TYPES = {
     ".zip": "application/zip",
 }
 ASSIGNMENT_FOLDERS = {"assignment-submissions", "assignment-materials"}
+PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 def allowed_upload_type(payload: MediaUploadRequest) -> tuple[str, str]:
     extension = Path(payload.filename).suffix.lower()
     content_type = payload.content_type.lower()
+    if payload.folder == "course-materials" and extension == ".pptx" and content_type == PPTX_CONTENT_TYPE:
+        return "document", ".pptx"
     if payload.folder in ASSIGNMENT_FOLDERS and extension in ASSIGNMENT_DOCUMENT_TYPES:
         if content_type != ASSIGNMENT_DOCUMENT_TYPES[extension]:
             raise ValidationError("The file type does not match its extension")

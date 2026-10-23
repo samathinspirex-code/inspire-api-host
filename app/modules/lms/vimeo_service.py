@@ -391,6 +391,7 @@ async def finalize_upload(
     ))).scalar_one_or_none()
     if duplicate is not None:
         raise ValidationError("This Vimeo video is already linked to this section")
+    duration_seconds = int(video.get("duration") or 0)
     item = await ContentRepository(db).create_item({
         "module_id": module.module_id,
         "item_type": "video",
@@ -399,7 +400,7 @@ async def finalize_upload(
         "resource_url": resource_url,
         "thumbnail_url": _thumbnail_url(video),
         "text_content": None,
-        "duration_minutes": payload.duration_minutes or max(1, round(int(video.get("duration") or 0) / 60)),
+        "duration_minutes": payload.duration_minutes or (max(1, round(duration_seconds / 60)) if duration_seconds > 0 else None),
         "position": await ContentRepository(db).next_position(module.module_id),
         "status": payload.status,
         "is_required": payload.is_required,
@@ -416,7 +417,7 @@ def _is_ready_thumbnail(url: str | None) -> bool:
 
 
 async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> bool:
-    """Store Vimeo's final thumbnail when it is available for an LMS video."""
+    """Store Vimeo's final thumbnail and duration when processing completes."""
     item = await db.get(LmsLearningItem, item_id)
     if item is None or item.item_type != "video":
         return False
@@ -432,15 +433,23 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     async with VimeoClient() as vimeo:
         video = await vimeo.get_video(video_uri)
     thumbnail_url = _thumbnail_url(video)
-    if not _is_ready_thumbnail(thumbnail_url):
-        return False
-    if current_thumbnail != thumbnail_url:
+    duration_seconds = int(video.get("duration") or 0)
+    duration_minutes = max(1, round(duration_seconds / 60)) if duration_seconds > 0 else None
+    thumbnail_ready = _is_ready_thumbnail(thumbnail_url)
+    if (thumbnail_ready and current_thumbnail != thumbnail_url) or duration_minutes:
         item = await db.get(LmsLearningItem, item_id)
         if item is None or item.item_type != "video" or item.resource_url != resource_url:
             return False
-        item.thumbnail_url = thumbnail_url
-        await db.commit()
-    return True
+        changed = False
+        if thumbnail_ready and item.thumbnail_url != thumbnail_url:
+            item.thumbnail_url = thumbnail_url
+            changed = True
+        if duration_minutes and item.duration_minutes != duration_minutes:
+            item.duration_minutes = duration_minutes
+            changed = True
+        if changed:
+            await db.commit()
+    return thumbnail_ready and duration_minutes is not None
 
 
 async def wait_for_learning_item_thumbnail(
@@ -492,7 +501,7 @@ async def refresh_recent_learning_item_thumbnails(db: AsyncSession, limit: int =
 
 
 async def refresh_pending_learning_item_thumbnails(db: AsyncSession, limit: int = 20) -> int:
-    """Pick up video thumbnails that were unavailable when their upload completed."""
+    """Pick up video thumbnails and durations unavailable when upload completed."""
     if not is_configured():
         return 0
     rows = await db.execute(
@@ -503,6 +512,7 @@ async def refresh_pending_learning_item_thumbnails(db: AsyncSession, limit: int 
             or_(
                 LmsLearningItem.thumbnail_url.is_(None),
                 LmsLearningItem.thumbnail_url.ilike("%default%"),
+                LmsLearningItem.duration_minutes.is_(None),
             ),
         )
         .order_by(LmsLearningItem.updated_at.desc())

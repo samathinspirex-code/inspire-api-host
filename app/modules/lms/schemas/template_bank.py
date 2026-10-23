@@ -95,6 +95,7 @@ class AssessmentTemplateListResponse(BaseModel):
 
 
 class TemplateApplyRequest(BaseModel):
+    allow_late: bool = False
     course_id: int = Field(..., gt=0)
     class_id: int | None = Field(None, gt=0)
     available_from: datetime | None = None

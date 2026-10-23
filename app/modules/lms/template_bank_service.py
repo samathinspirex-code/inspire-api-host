@@ -299,7 +299,7 @@ async def apply_template(
         due_at=payload.due_at,
         duration_minutes=duration if assignment_type == "timed" or submission_type == "mcq" else None,
         max_marks=payload.max_marks or (template.max_marks if template.max_marks and Decimal(template.max_marks) > 0 else Decimal("100")),
-        allow_late=False,
+        allow_late=payload.allow_late,
         status="draft" if submission_type == "mcq" else payload.status,
     ), user_id)
     if submission_type == "mcq" and questions and created.exam_id:

@@ -398,6 +398,15 @@ async def submit_coursework_assignment(
     return await coursework_service.submit_assignment(db, assignment_id, payload, current_user.user_id)
 
 
+@router.delete("/coursework/assignments/{assignment_id}/submission", response_model=CourseworkAssignmentItem)
+async def withdraw_coursework_submission(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkAssignmentItem:
+    return await coursework_service.withdraw_submission(db, assignment_id, current_user.user_id)
+
+
 @router.get(
     "/coursework/assignments/{assignment_id}/submissions",
     response_model=CourseworkSubmissionListResponse,
@@ -1051,7 +1060,9 @@ async def complete_course_media_upload(
     current_user: CurrentUser = Depends(media_upload_access),
     db: AsyncSession = Depends(get_db),
 ) -> MediaAssetResponse:
-    return await media_service.complete_upload(db, asset_id)
+    from app.modules.lms import presentation_service
+
+    return await presentation_service.complete_course_upload(db, asset_id, current_user.user_id)
 
 
 @router.get("/my/courses/{course_id}/assistant", response_model=CourseAssistantPublicResponse)

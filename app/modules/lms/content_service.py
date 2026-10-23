@@ -297,10 +297,10 @@ async def update_course_progression_settings(
 
 
 async def read_learning_item_pdf(db: AsyncSession, item_id: int, user_id: int, role: str) -> bytes:
-    """Load a lesson PDF on the server so the student viewer is not blocked by file-store rules."""
+    """Load a PDF or rendered presentation after checking lesson access."""
     item = await db.get(LmsLearningItem, item_id)
-    if item is None or item.item_type != "pdf" or not item.resource_url:
-        raise NotFoundError("PDF material not found")
+    if item is None or item.item_type not in {"pdf", "pptx"} or not item.resource_url:
+        raise NotFoundError("Course material not found")
     module = await db.get(LmsModule, item.module_id)
     if module is None:
         raise NotFoundError("PDF material not found")
@@ -309,7 +309,12 @@ async def read_learning_item_pdf(db: AsyncSession, item_id: int, user_id: int, r
     else:
         await _ensure_course_access(db, module.course_id, user_id, role)
     resource_url = item.resource_url
+    item_type = item.item_type
     await db.commit()
+    if item_type == "pptx":
+        from app.modules.lms.presentation_service import read_presentation_preview
+
+        return await read_presentation_preview(db, resource_url)
     from app.modules.lms.assistant_service import _download_pdf
 
     return await _download_pdf(resource_url)

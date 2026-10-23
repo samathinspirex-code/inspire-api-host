@@ -26,12 +26,11 @@ class CourseworkAssignmentCreate(BaseModel):
     def validate_timing(self):
         if self.submission_type == "mcq":
             self.assignment_type = "timed"
-            self.allow_late = False
             if self.duration_minutes is None:
                 raise ValueError("Multiple-choice assignments require a duration")
         if self.assignment_type == "timed" and self.duration_minutes is None:
             raise ValueError("Timed assignments require a duration")
-        if self.assignment_type == "timed" and self.allow_late:
+        if self.assignment_type == "timed" and self.submission_type != "mcq" and self.allow_late:
             raise ValueError("Timed assignments cannot allow late submissions")
         if self.submission_type == "pdf_annotation" and self.question_paper_asset_id is None:
             raise ValueError("PDF assignments require a question paper")
@@ -43,6 +42,7 @@ class CourseworkAssignmentCreate(BaseModel):
 
 
 class CourseworkAssignmentItem(BaseModel):
+    grading_mode: Literal["marks", "bands"] = "bands"
     assignment_id: int
     course_id: int
     course_code: str
@@ -94,6 +94,7 @@ class CourseworkDraftUpdate(BaseModel):
 
 
 class CourseworkSubmissionItem(BaseModel):
+    is_late: bool = False
     submission_id: int
     assignment_id: int
     student_user_id: int
@@ -136,6 +137,7 @@ class GradeReleaseUpdate(BaseModel):
 
 
 class GradebookResultItem(BaseModel):
+    grading_mode: Literal["marks", "bands"] = "bands"
     assignment_id: int
     title: str
     submission_type: str = "written"
@@ -148,6 +150,7 @@ class GradebookResultItem(BaseModel):
 
 
 class GradebookAssignmentSummary(BaseModel):
+    grading_mode: Literal["marks", "bands"] = "bands"
     assignment_id: int
     title: str
     submission_type: str = "written"
@@ -193,6 +196,7 @@ class LecturerGradebookResponse(BaseModel):
 
 
 class StudentGradeItem(BaseModel):
+    grading_mode: Literal["marks", "bands"] = "bands"
     assignment_id: int
     title: str
     submission_type: str = "written"

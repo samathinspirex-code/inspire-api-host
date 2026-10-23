@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     MEDIA_ACCESS_KEY_ID: str = ""
     MEDIA_SECRET_ACCESS_KEY: str = ""
     MEDIA_UPLOAD_EXPIRE_SECONDS: int = 900
+    LIBREOFFICE_PATH: str = ""
 
     # Vimeo is intentionally server-only.  Never expose this token to the LMS browser.
     VIMEO_ACCESS_TOKEN: str = ""

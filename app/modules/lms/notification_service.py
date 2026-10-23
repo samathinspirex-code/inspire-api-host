@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,12 +11,13 @@ from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.lms.models import (
     ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LmsAnnouncement, LmsClass,
-    LmsCourse, LmsCourseworkAssignment, LmsExam, LmsNotification, OnlineMeeting, StudentProfile,
+    LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission, LmsExam, LmsNotification, OnlineMeeting, StudentProfile,
 )
 from app.modules.lms.notification_email import send_notification_email
 from app.modules.lms.schemas import AnnouncementItem, AnnouncementListResponse, NotificationDispatchSummary, NotificationItem, NotificationListResponse
 
 COLOMBO = timezone(timedelta(hours=5, minutes=30), "Asia/Colombo")
+logger = logging.getLogger(__name__)
 ASSIGNMENT_REMINDERS = (1440, 60)
 # 1 day, 30 minutes, 15 minutes before, and at start time.
 MEETING_REMINDERS = (1440, 30, 15, 0)
@@ -80,6 +82,27 @@ async def _student_audience_user_ids(db: AsyncSession, audience_type: str, audie
     return list(result.scalars().all())
 
 
+async def _assignment_lecturer_ids(db: AsyncSession, assignment: LmsCourseworkAssignment) -> list[int]:
+    if assignment.target_type == "class":
+        rows = await db.execute(select(ClassLecturer.lecturer_user_id).join(User, User.user_id == ClassLecturer.lecturer_user_id).where(ClassLecturer.class_id == assignment.target_id, User.is_active.is_(True)))
+        lecturers = set(rows.scalars().all())
+        if lecturers:
+            return list(lecturers)
+        rows = await db.execute(select(CourseLecturer.lecturer_user_id).join(User, User.user_id == CourseLecturer.lecturer_user_id).where(CourseLecturer.course_id == assignment.course_id, User.is_active.is_(True)))
+        return list(set(rows.scalars().all()))
+    course_ids = (await db.execute(select(CourseLecturer.lecturer_user_id).join(User, User.user_id == CourseLecturer.lecturer_user_id).where(CourseLecturer.course_id == assignment.course_id, User.is_active.is_(True)))).scalars().all()
+    class_ids = (await db.execute(
+        select(ClassLecturer.lecturer_user_id).join(LmsClass, LmsClass.class_id == ClassLecturer.class_id)
+        .join(User, User.user_id == ClassLecturer.lecturer_user_id)
+        .where(LmsClass.course_id == assignment.course_id, LmsClass.status != "cancelled", User.is_active.is_(True))
+    )).scalars().all()
+    return list(set(course_ids) | set(class_ids))
+
+
+def _assignment_title(prefix: str, title: str) -> str:
+    return f"{prefix}: {title}"[:255]
+
+
 async def _audience_label(db: AsyncSession, audience_type: str, audience_id: int | None) -> str:
     if audience_type == "all": return "Everyone in the LMS"
     if audience_type == "admin": return "LMS Admins"
@@ -99,7 +122,7 @@ async def _can_manage_audience(db: AsyncSession, role: str, user_id: int, audien
     raise ForbiddenError("You can announce only to courses or classes assigned to you")
 
 
-async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notification_type: str, title: str, message: str, action_url: str | None, importance: str, scheduled_for: datetime, email_enabled: bool, event_at: datetime | None = None) -> int:
+async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notification_type: str, title: str, message: str, action_url: str | None, importance: str, scheduled_for: datetime, email_enabled: bool, event_at: datetime | None = None, update_existing: bool = False) -> int:
     if not user_ids: return 0
     zones = dict((await db.execute(select(StudentProfile.user_id, StudentProfile.time_zone).where(StudentProfile.user_id.in_(user_ids)))).all()) if event_at else {}
     default_time = local_time(event_at) if event_at else ""
@@ -108,7 +131,20 @@ async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notifi
         "action_url": action_url, "importance": importance,
         "scheduled_for": scheduled_for, "email_enabled": email_enabled,
         "email_status": "pending" if email_enabled else "disabled"} for user_id in user_ids]
-    result = await db.execute(insert(LmsNotification).values(values).on_conflict_do_nothing(index_elements=["user_id", "event_key"]).returning(LmsNotification.notification_id))
+    statement = insert(LmsNotification).values(values)
+    if update_existing:
+        statement = statement.on_conflict_do_update(
+            index_elements=["user_id", "event_key"],
+            set_={
+                "scheduled_for": statement.excluded.scheduled_for,
+                "title": statement.excluded.title,
+                "message": statement.excluded.message,
+                "action_url": statement.excluded.action_url,
+            },
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(index_elements=["user_id", "event_key"])
+    result = await db.execute(statement.returning(LmsNotification.notification_id))
     return len(result.scalars().all())
 
 
@@ -212,10 +248,15 @@ async def notify_grade_release(db: AsyncSession, assignment: LmsCourseworkAssign
 async def notify_assessment_published(db: AsyncSession, assignment: LmsCourseworkAssignment, kind: str) -> int:
     users = await _student_audience_user_ids(db, assignment.target_type, assignment.target_id)
     deadline = f" It is due on {local_time(assignment.due_at)}." if assignment.due_at else ""
+    now = utc_now()
+    available_from = assignment.available_from
+    if available_from is not None and available_from.tzinfo is None:
+        available_from = available_from.replace(tzinfo=timezone.utc)
+    release_at = max(now, available_from) if available_from else now
     created = await _enqueue(db, users, f"{kind}:{assignment.assignment_id}:published", f"{kind}_published",
         f"New {kind}: {assignment.title}", f"A new {kind} has been published for your course.{deadline}",
         f"{settings.LMS_UI_URL.rstrip('/')}?view={'exams' if kind == 'exam' else 'assignments'}",
-        "important", utc_now(), True, event_at=assignment.due_at)
+        "important", release_at, True, event_at=assignment.due_at, update_existing=True)
     await db.commit(); return created
 
 
@@ -243,6 +284,72 @@ async def mark_all_read(db: AsyncSession, user_id: int) -> NotificationListRespo
     await db.commit(); return await list_notifications(db, user_id)
 
 
+async def generate_assignment_followups(db: AsyncSession, now: datetime) -> int:
+    """Send one deadline roster and one overdue grade-release reminder per assignment."""
+    created = 0
+    rows = (await db.execute(
+        select(LmsCourseworkAssignment, LmsCourse)
+        .join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id)
+        .outerjoin(LmsExam, LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id)
+        .where(
+            LmsCourseworkAssignment.status.in_(("published", "closed")),
+            LmsCourseworkAssignment.due_at.is_not(None),
+            LmsCourseworkAssignment.due_at <= now,
+            or_(LmsExam.exam_id.is_(None), LmsExam.assessment_kind == "graded_mcq"),
+        )
+    )).all()
+    for assignment, course in rows:
+        lecturers = await _assignment_lecturer_ids(db, assignment)
+        if not lecturers:
+            continue
+        submissions = (await db.execute(select(LmsCourseworkSubmission).where(
+            LmsCourseworkSubmission.assignment_id == assignment.assignment_id,
+        ))).scalars().all()
+        due_at = assignment.due_at if assignment.due_at.tzinfo else assignment.due_at.replace(tzinfo=timezone.utc)
+        action_url = f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments"
+        if due_at >= now - timedelta(days=1):
+            unfinished = any(
+                item.status == "in_progress"
+                and (item.started_at if item.started_at.tzinfo else item.started_at.replace(tzinfo=timezone.utc)) < due_at
+                for item in submissions
+            )
+            if not unfinished:
+                student_ids = set(await _student_audience_user_ids(db, assignment.target_type, assignment.target_id))
+                users = (await db.execute(select(User.user_id, User.full_name, User.email).where(User.user_id.in_(student_ids)))).all() if student_ids else []
+                names = {user_id: name or email for user_id, name, email in users}
+                submitted_ids = {item.student_user_id for item in submissions if item.status in {"submitted", "reviewed", "returned"} and item.submitted_at is not None}
+                submitted = sorted((names[user_id] for user_id in student_ids & submitted_ids if user_id in names), key=str.casefold)
+                missing = sorted((names[user_id] for user_id in student_ids - submitted_ids if user_id in names), key=str.casefold)
+                target_class = await db.get(LmsClass, assignment.target_id) if assignment.target_type == "class" else None
+                class_name = target_class.name if target_class else "Entire course"
+                message = (
+                    f"{course.code} · {class_name}\nDeadline: {local_time(due_at)}\n"
+                    f"Submitted ({len(submitted)}): {', '.join(submitted) or 'None'}\n"
+                    f"Not submitted ({len(missing)}): {', '.join(missing) or 'None'}\n"
+                    "Open Assignments to review and mark the submitted work."
+                )
+                created += await _enqueue(
+                    db, lecturers, f"assignment:{assignment.assignment_id}:deadline-summary:{due_at.isoformat()}",
+                    "assignment_deadline_summary", _assignment_title("Submission summary", assignment.title),
+                    message, action_url, "important", now, True,
+                )
+        if assignment.grades_released:
+            continue
+        finished = [item for item in submissions if item.status in {"submitted", "reviewed", "returned", "expired"}]
+        if not finished or any(item.marks_awarded is None or item.marked_at is None for item in finished):
+            continue
+        latest_mark = max(item.marked_at if item.marked_at.tzinfo else item.marked_at.replace(tzinfo=timezone.utc) for item in finished)
+        if now < latest_mark + timedelta(days=2):
+            continue
+        created += await _enqueue(
+            db, lecturers, f"assignment:{assignment.assignment_id}:release-reminder:{latest_mark.isoformat()}",
+            "assignment_release_reminder", _assignment_title("Release results", assignment.title),
+            f"All {len(finished)} completed attempts for {course.code} · {assignment.title} have been marked. Results have remained unreleased for two days. Open Assignments and release the results to students.",
+            action_url, "important", now, True,
+        )
+    return created
+
+
 async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> tuple[int, int]:
     now = now or utc_now(); created = 0; published = 0
     announcements = (await db.execute(select(LmsAnnouncement).where(LmsAnnouncement.status == "scheduled", LmsAnnouncement.publish_at <= now))).scalars().all()
@@ -250,7 +357,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
     expiring = (await db.execute(select(LmsAnnouncement).where(LmsAnnouncement.status == "published", LmsAnnouncement.expires_at.is_not(None), LmsAnnouncement.expires_at <= now))).scalars().all()
     for item in expiring: item.status = "expired"
 
-    assignment_rows = (await db.execute(select(LmsCourseworkAssignment, LmsCourse).join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id).outerjoin(LmsExam, LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id).where(LmsCourseworkAssignment.status == "published", LmsCourseworkAssignment.due_at.is_not(None), LmsCourseworkAssignment.due_at > now, LmsCourseworkAssignment.due_at <= now + timedelta(minutes=max(ASSIGNMENT_REMINDERS) + 10), LmsExam.exam_id.is_(None)))).all()
+    assignment_rows = (await db.execute(select(LmsCourseworkAssignment, LmsCourse).join(LmsCourse, LmsCourse.course_id == LmsCourseworkAssignment.course_id).outerjoin(LmsExam, LmsExam.assignment_id == LmsCourseworkAssignment.assignment_id).where(LmsCourseworkAssignment.status == "published", or_(LmsCourseworkAssignment.available_from.is_(None), LmsCourseworkAssignment.available_from <= now), LmsCourseworkAssignment.due_at.is_not(None), LmsCourseworkAssignment.due_at > now, LmsCourseworkAssignment.due_at <= now + timedelta(minutes=max(ASSIGNMENT_REMINDERS) + 10), LmsExam.exam_id.is_(None)))).all()
     for assignment, course in assignment_rows:
         users = await _student_audience_user_ids(db, assignment.target_type, assignment.target_id)
         for offset in ASSIGNMENT_REMINDERS:
@@ -259,14 +366,14 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
                 key = f"assignment:{assignment.assignment_id}:due:{assignment.due_at.isoformat()}:{offset}"
                 created += await _enqueue(db, users, key, "assignment_deadline", f"Assignment due in {label}: {assignment.title}", f"{course.code} assignment is due on {local_time(assignment.due_at)}.", f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments", "important" if offset == 60 else "normal", now, True, event_at=assignment.due_at)
 
-    exam_rows = (await db.execute(select(LmsExam, LmsCourse).join(LmsCourse, LmsCourse.course_id == LmsExam.course_id).where(LmsExam.status == "published", LmsExam.due_at.is_not(None), LmsExam.due_at > now, LmsExam.due_at <= now + timedelta(minutes=max(ASSIGNMENT_REMINDERS) + 10)))).all()
+    exam_rows = (await db.execute(select(LmsExam, LmsCourse).join(LmsCourse, LmsCourse.course_id == LmsExam.course_id).where(LmsExam.status == "published", or_(LmsExam.available_from.is_(None), LmsExam.available_from <= now), LmsExam.due_at.is_not(None), LmsExam.due_at > now, LmsExam.due_at <= now + timedelta(minutes=max(ASSIGNMENT_REMINDERS) + 10)))).all()
     for exam, course in exam_rows:
         users = await _student_audience_user_ids(db, exam.target_type, exam.target_id)
         for offset in ASSIGNMENT_REMINDERS:
             if reminder_due(exam.due_at, offset, now):
                 label = "24 hours" if offset == 1440 else "1 hour"
                 key = f"exam:{exam.exam_id}:due:{exam.due_at.isoformat()}:{offset}"
-                created += await _enqueue(db, users, key, "exam_deadline", f"Exam deadline in {label}: {exam.title}", f"{course.code} exam must be started before {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view=exams", "important" if offset == 60 else "normal", now, True, event_at=exam.due_at)
+                created += await _enqueue(db, users, key, "exam_deadline", f"Exam deadline in {label}: {exam.title}", f"{course.code} assessment is due on {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view={'assignments' if exam.assessment_kind == 'graded_mcq' else 'exams'}", "important" if offset == 60 else "normal", now, True, event_at=exam.due_at)
 
     meeting_rows = (await db.execute(select(OnlineMeeting, LmsClass, LmsCourse).join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id).join(LmsCourse, LmsCourse.course_id == LmsClass.course_id).where(OnlineMeeting.status == "scheduled", OnlineMeeting.start_time >= now - timedelta(minutes=10), OnlineMeeting.start_time <= now + timedelta(minutes=max(MEETING_REMINDERS) + 10)))).all()
     for meeting, class_, course in meeting_rows:
@@ -281,6 +388,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
                 audience = getattr(meeting, "audience_label", None) or f"{course.code} · {class_.name}"
                 created += await _enqueue(db, list(users), key, "class_reminder", title, f"{audience} starts on {local_time(meeting.start_time)}. Use the LMS Join class button to enter.", f"{settings.LMS_UI_URL.rstrip('/')}?view=meetings", "urgent" if offset <= 15 else "important", now, True, event_at=meeting.start_time)
+    created += await generate_assignment_followups(db, now)
     await db.commit(); return created, published
 
 
@@ -307,6 +415,18 @@ async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, 
 
 
 async def dispatch_cycle(db: AsyncSession, now: datetime | None = None) -> NotificationDispatchSummary:
+    from app.modules.lms import coursework_service, exam_service
+
+    try:
+        await coursework_service.finalize_due_drafts(db, now)
+    except Exception:
+        await db.rollback()
+        logger.exception("Could not finalize due assignment drafts")
+    try:
+        await exam_service.finalize_expired_graded_attempts(db, now)
+    except Exception:
+        await db.rollback()
+        logger.exception("Could not finalize expired assignment quizzes")
     # This worker is also the durable retry point for Vimeo's asynchronous
     # transcoding thumbnails. It makes newly uploaded lecture previews appear
     # even when the first upload response arrived before Vimeo was ready.

@@ -100,6 +100,7 @@ class StudentAcademicClass(BaseModel):
 
 
 class StudentAcademicAssessment(BaseModel):
+    grading_mode: str = "bands"
     assessment_id: int
     kind: str
     submission_type: str | None = None
