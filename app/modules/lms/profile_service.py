@@ -15,6 +15,7 @@ from app.modules.cms.models import MediaAsset, Program
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
 from app.modules.lms import content_service
 from app.modules.lms.coursework_service import grade_band_for_score
+from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -642,6 +643,7 @@ async def get_student_academic_profile(
 
     exam_assignment_ids = {exam.assignment_id for exam, _attempt in exam_rows if exam.assessment_kind != "graded_mcq"}
     show_private_marks = viewer_role != "STUDENT"
+    await load_assignment_grading_modes(db, [assignment for assignment, _ in assignment_rows])
     assignments = []
     for assignment, submission in assignment_rows:
         if assignment.assignment_id in exam_assignment_ids:
@@ -649,6 +651,7 @@ async def get_student_academic_profile(
         visible = show_private_marks or assignment.grades_released
         marks = submission.marks_awarded if submission and visible else None
         assignments.append(StudentAcademicAssessment(
+            grading_mode=grading_mode(assignment),
             assessment_id=assignment.assignment_id, kind="assignment", submission_type=assignment.submission_type, title=assignment.title,
             course_code=course_map[assignment.course_id].code,
             course_title=course_map[assignment.course_id].title,
@@ -656,7 +659,7 @@ async def get_student_academic_profile(
             status=submission.status if submission else "not_started", marks_awarded=marks,
             max_marks=assignment.max_marks, percentage=_percent(marks, assignment.max_marks),
             grade_band=(submission.grade_band or grade_band_for_score(marks, assignment.max_marks))
-            if assignment.submission_type != "mcq" and submission and marks is not None else None,
+            if grading_mode(assignment) == "bands" and assignment.submission_type != "mcq" and submission and marks is not None else None,
             feedback=submission.feedback if submission and visible else None,
             submitted_at=submission.submitted_at if submission else None, due_at=assignment.due_at,
             grades_released=assignment.grades_released,

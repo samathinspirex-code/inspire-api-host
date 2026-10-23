@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import User
 from app.modules.cms.models import MediaAsset
+from app.modules.lms.assessment_grading import load_assignment_grading_modes
 from app.modules.lms.models import (
     ClassLecturer,
     ClassStudent,
@@ -59,7 +60,9 @@ class CourseworkRepository:
             )
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
-        return list((await self.db.execute(stmt)).all())
+        rows = list((await self.db.execute(stmt)).all())
+        await load_assignment_grading_modes(self.db, [row[0] for row in rows])
+        return rows
 
     async def list_for_manager(self):
         stmt = (
@@ -75,7 +78,9 @@ class CourseworkRepository:
             .where(~_separate_exam())
             .order_by(LmsCourseworkAssignment.created_at.desc())
         )
-        return list((await self.db.execute(stmt)).all())
+        rows = list((await self.db.execute(stmt)).all())
+        await load_assignment_grading_modes(self.db, [row[0] for row in rows])
+        return rows
 
     async def list_for_student(self, user_id: int, include_exams: bool = False):
         class_access = (
@@ -127,10 +132,15 @@ class CourseworkRepository:
         )
         if not include_exams:
             stmt = stmt.where(~_separate_exam())
-        return list((await self.db.execute(stmt)).all())
+        rows = list((await self.db.execute(stmt)).all())
+        await load_assignment_grading_modes(self.db, [row[0] for row in rows])
+        return rows
 
     async def get_assignment(self, assignment_id: int):
-        return await self.db.get(LmsCourseworkAssignment, assignment_id)
+        assignment = await self.db.get(LmsCourseworkAssignment, assignment_id)
+        if assignment is not None:
+            await load_assignment_grading_modes(self.db, [assignment])
+        return assignment
 
     async def get_assignment_context(self, assignment_id: int):
         stmt = (
@@ -145,7 +155,10 @@ class CourseworkRepository:
             )
             .where(LmsCourseworkAssignment.assignment_id == assignment_id)
         )
-        return (await self.db.execute(stmt)).one_or_none()
+        row = (await self.db.execute(stmt)).one_or_none()
+        if row is not None:
+            await load_assignment_grading_modes(self.db, [row[0]])
+        return row
 
     async def get_submission(self, assignment_id: int, student_user_id: int, for_update: bool = False):
         stmt = select(LmsCourseworkSubmission).where(
@@ -162,7 +175,10 @@ class CourseworkRepository:
             .join(User, User.user_id == LmsCourseworkSubmission.student_user_id)
             .join(StudentProfile, StudentProfile.user_id == LmsCourseworkSubmission.student_user_id)
             .outerjoin(MediaAsset, MediaAsset.media_asset_id == LmsCourseworkSubmission.attachment_asset_id)
-            .where(LmsCourseworkSubmission.assignment_id == assignment_id)
+            .where(
+                LmsCourseworkSubmission.assignment_id == assignment_id,
+                LmsCourseworkSubmission.status != "withdrawn",
+            )
             .order_by(LmsCourseworkSubmission.started_at.desc())
         )
         return list((await self.db.execute(stmt)).all())
@@ -176,4 +192,7 @@ class CourseworkRepository:
             )
             .where(LmsCourseworkSubmission.submission_id == submission_id)
         )
-        return (await self.db.execute(stmt)).one_or_none()
+        row = (await self.db.execute(stmt)).one_or_none()
+        if row is not None:
+            await load_assignment_grading_modes(self.db, [row[1]])
+        return row

@@ -10,6 +10,7 @@ from app.modules.auth.invitation_email import EmailDeliveryResult, MAILJET_SEND_
 logger = logging.getLogger(__name__)
 
 MEETING_NOTIFICATION_TYPES = {"class_schedule", "class_reminder"}
+ASSIGNMENT_FOLLOWUP_TYPES = {"assignment_deadline_summary", "assignment_release_reminder"}
 MEETING_LABELS = (
     "Online class scheduled",
     "Online class rescheduled",
@@ -119,6 +120,19 @@ def _standard_html(full_name: str, title: str, message: str, action_url: str) ->
 <tr><td style="background:#F1ECF3;padding:16px 28px;color:#827487;font-size:11px;">Inspire College LMS · Automated notification</td></tr></table></td></tr></table></body></html>"""
 
 
+def _assignment_followup_html(full_name: str, title: str, message: str, action_url: str, notification_type: str) -> str:
+    safe_name = html.escape(full_name or "Lecturer")
+    safe_title = html.escape(title)
+    safe_message = html.escape(message).replace("\n", "<br>")
+    safe_url = html.escape(action_url, quote=True)
+    label = "Deadline summary" if notification_type == "assignment_deadline_summary" else "Results reminder"
+    return f"""<!doctype html><html lang="en"><body style="margin:0;background:#F6F3F7;font-family:Arial,Helvetica,sans-serif;color:#24152C;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td align="center" style="padding:28px 12px;"><table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#FFFFFF;border:1px solid #E8DFEB;border-radius:14px;overflow:hidden;">
+<tr><td style="background:#27003D;padding:20px 28px;color:#FFFFFF;font-size:18px;font-weight:700;">INSPIRE <span style="color:#C997E2;">COLLEGE</span></td></tr>
+<tr><td style="padding:30px 28px;"><span style="display:inline-block;padding:7px 11px;background:#F1E8F6;color:#65009B;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;">{label}</span><p style="margin:20px 0 8px;color:#736579;">Hello {safe_name},</p><h1 style="margin:0 0 18px;font-size:23px;line-height:1.3;">{safe_title}</h1><div style="padding:18px;background:#FAF8FB;border-left:4px solid #65009B;border-radius:8px;color:#55465C;line-height:1.7;">{safe_message}</div><a href="{safe_url}" style="display:inline-block;margin-top:22px;padding:12px 20px;background:#65009B;color:#FFFFFF;text-decoration:none;border-radius:8px;font-weight:700;">Open assignments</a></td></tr>
+<tr><td style="background:#F1ECF3;padding:16px 28px;color:#827487;font-size:11px;">Inspire College LMS · Assignment notification</td></tr></table></td></tr></table></body></html>"""
+
+
 def build_notification_payload(
     to_email: str,
     full_name: str,
@@ -130,14 +144,14 @@ def build_notification_payload(
 ) -> dict:
     url = action_url or settings.LMS_UI_URL
     is_meeting = notification_type in MEETING_NOTIFICATION_TYPES
-    html_part = _meeting_html(full_name, title, message, url) if is_meeting else _standard_html(full_name, title, message, url)
+    html_part = _meeting_html(full_name, title, message, url) if is_meeting else _assignment_followup_html(full_name, title, message, url, notification_type) if notification_type in ASSIGNMENT_FOLLOWUP_TYPES else _standard_html(full_name, title, message, url)
     if is_meeting:
         status, event_title = _meeting_parts(title)
         subject = _subject(f"{status} · {event_title}")
         button_label = _meeting_button_label(status)
     else:
         subject = _subject(f"Inspire LMS: {title}")
-        button_label = "Open Inspire LMS"
+        button_label = "Open assignments" if notification_type in ASSIGNMENT_FOLLOWUP_TYPES else "Open Inspire LMS"
     return {"Messages": [{
         "From": {"Email": settings.MAILJET_FROM_EMAIL, "Name": settings.MAILJET_FROM_NAME},
         "To": [{"Email": to_email, "Name": full_name}],

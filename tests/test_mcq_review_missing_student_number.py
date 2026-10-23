@@ -10,7 +10,7 @@ from app.modules.lms import coursework_service, exam_service
 class MissingStudentNumberReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_assignment_results_load_without_student_number(self):
         now = datetime(2026, 10, 20, tzinfo=timezone.utc)
-        assignment = SimpleNamespace(assignment_id=52, course_id=53)
+        assignment = SimpleNamespace(assignment_id=52, course_id=53, submission_type="mcq", max_marks=Decimal("10"), due_at=None)
         submission = SimpleNamespace(
             submission_id=1, assignment_id=52, student_user_id=8,
             status="submitted", started_at=now, expires_at=now, submitted_at=now,
@@ -39,7 +39,7 @@ class MissingStudentNumberReviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_question_results_load_without_student_number(self):
         now = datetime(2026, 10, 20, tzinfo=timezone.utc)
-        exam = SimpleNamespace(exam_id=31, course_id=53)
+        exam = SimpleNamespace(exam_id=31, course_id=53, assessment_kind="graded_mcq")
         assignment = SimpleNamespace(max_marks=Decimal("10"))
         attempt = SimpleNamespace(
             attempt_id=4, student_user_id=8, status="reviewed", question_order=[],

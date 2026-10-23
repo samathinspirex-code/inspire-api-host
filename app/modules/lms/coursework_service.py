@@ -29,6 +29,7 @@ from app.modules.lms.schemas import (
     CourseworkSubmissionListResponse,
 )
 from app.modules.lms import notification_service
+from app.modules.lms.assessment_grading import grading_mode
 
 
 GRADE_BAND_PERCENT = {"fail": Decimal("0"), "pass": Decimal("50"), "merit": Decimal("65"), "distinction": Decimal("85")}
@@ -82,6 +83,14 @@ def assignment_is_available(available_from: datetime | None, now: datetime | Non
     return available_from is None or as_utc(available_from) <= (as_utc(now) or utc_now())
 
 
+def submission_is_late(submission, due_at: datetime | None) -> bool:
+    return bool(
+        due_at and submission.submitted_at
+        and submission.status in {"submitted", "reviewed", "returned"}
+        and as_utc(submission.submitted_at) > as_utc(due_at)
+    )
+
+
 def _expire_with_zero(submission: LmsCourseworkSubmission, closed_at: datetime | None = None) -> None:
     submission.status = "expired"
     submission.submitted_at = as_utc(closed_at) or utc_now()
@@ -89,6 +98,24 @@ def _expire_with_zero(submission: LmsCourseworkSubmission, closed_at: datetime |
     submission.grade_band = "fail"
     submission.feedback = "Automatically graded zero because the submission deadline passed."
     submission.marked_at = utc_now()
+
+
+def _finalize_saved_draft(submission: LmsCourseworkSubmission, closed_at: datetime | None = None) -> None:
+    """Submit saved work at the cutoff; only empty attempts receive a zero."""
+    if (submission.answer_text or "").strip() or submission.attachment_asset_id:
+        submission.status = "submitted"
+        submission.submitted_at = as_utc(closed_at) or utc_now()
+    else:
+        _expire_with_zero(submission, closed_at)
+
+
+def _can_change_submission(assignment: LmsCourseworkAssignment, submission: LmsCourseworkSubmission, now: datetime) -> bool:
+    return (
+        assignment.submission_type != "mcq"
+        and not assignment.grades_released
+        and (assignment.due_at is None or as_utc(assignment.due_at) > now)
+        and (submission.expires_at is None or as_utc(submission.expires_at) > now)
+    )
 
 
 async def _ensure_lecturer_course(db: AsyncSession, course_id: int, user_id: int) -> None:
@@ -116,6 +143,7 @@ def _assignment_item(
 ) -> CourseworkAssignmentItem:
     assignment, course, target_class = row
     return CourseworkAssignmentItem(
+        grading_mode=grading_mode(assignment),
         assignment_id=assignment.assignment_id,
         course_id=assignment.course_id,
         course_code=course.code,
@@ -148,7 +176,7 @@ def _assignment_item(
         submitted_at=submission.submitted_at if submission else None,
         marks_awarded=submission.marks_awarded if submission and (assignment.grades_released or expose_grade) else None,
         grade_band=(submission.grade_band or grade_band_for_score(submission.marks_awarded, assignment.max_marks))
-        if assignment.submission_type != "mcq" and submission and submission.marks_awarded is not None and (assignment.grades_released or expose_grade) else None,
+        if grading_mode(assignment) == "bands" and assignment.submission_type != "mcq" and submission and submission.marks_awarded is not None and (assignment.grades_released or expose_grade) else None,
         feedback=submission.feedback if submission and (assignment.grades_released or expose_grade) else None,
         answer_text=submission.answer_text if submission else None,
         attachment_asset_id=submission.attachment_asset_id if submission else None,
@@ -185,6 +213,8 @@ async def create_assignment(db: AsyncSession, payload: CourseworkAssignmentCreat
     question_paper = await _validate_assignment_material(db, payload.question_paper_asset_id, user_id)
     material = await _validate_general_material(db, payload.material_asset_id, user_id)
     row = LmsCourseworkAssignment(**payload.model_dump(), created_by=user_id)
+    if row.status == "published" and row.available_from is None:
+        row.available_from = utc_now()
     db.add(row)
     await db.flush()
     exam_id = None
@@ -239,8 +269,11 @@ async def update_assignment(
         db, payload.material_asset_id, user_id, assignment.material_asset_id,
     )
     was_published = assignment.status == "published"
+    previous_available_from = assignment.available_from
     for field, value in payload.model_dump().items():
         setattr(assignment, field, value)
+    if assignment.status == "published" and assignment.available_from is None:
+        assignment.available_from = utc_now()
     if assignment.submission_type == "mcq":
         exam = await db.scalar(select(LmsExam).where(
             LmsExam.assignment_id == assignment_id,
@@ -259,7 +292,7 @@ async def update_assignment(
             setattr(exam, field, getattr(assignment, field))
     await db.commit()
     await db.refresh(assignment)
-    if not was_published and assignment.status == "published":
+    if assignment.status == "published" and (not was_published or assignment.available_from != previous_available_from):
         await notification_service.notify_assessment_published(db, assignment, "assignment")
     context = await CourseworkRepository(db).get_assignment_context(assignment_id)
     return _assignment_item(context, question_paper=question_paper, material=material)
@@ -280,6 +313,8 @@ async def delete_assignment(db: AsyncSession, assignment_id: int, user_id: int) 
             f"grade:exam:{assignment_id}:released",
         )),
         LmsNotification.event_key.like(f"assignment:{assignment_id}:due:%"),
+        LmsNotification.event_key.like(f"assignment:{assignment_id}:deadline-summary:%"),
+        LmsNotification.event_key.like(f"assignment:{assignment_id}:release-reminder:%"),
     ]
     if exam_id is not None:
         notification_keys.append(LmsNotification.event_key.like(f"exam:{exam_id}:due:%"))
@@ -306,6 +341,8 @@ async def activate_assignment(db: AsyncSession, assignment_id: int, user_id: int
         exam_id = exam.exam_id
     if assignment.status != "published":
         assignment.status = "published"
+        if assignment.available_from is None:
+            assignment.available_from = utc_now()
         await db.commit()
         await db.refresh(assignment)
         await notification_service.notify_assessment_published(db, assignment, "assignment")
@@ -366,8 +403,11 @@ async def list_assignments(
             _expire_with_zero(submission, assignment.due_at)
             db.add(submission)
             await db.flush()
-        elif submission and submission.status == "in_progress" and (timer_finished or deadline_finished):
-            _expire_with_zero(submission, submission.expires_at or assignment.due_at)
+        elif submission and submission.status == "in_progress" and (timer_finished or (assignment.due_at and as_utc(assignment.due_at) <= now and as_utc(submission.started_at) < as_utc(assignment.due_at))):
+            cutoff = min((time for time in (as_utc(submission.expires_at), as_utc(assignment.due_at)) if time is not None), default=now)
+            _finalize_saved_draft(submission, cutoff)
+        elif submission and submission.status == "withdrawn" and deadline_finished:
+            _expire_with_zero(submission, assignment.due_at)
         elif submission and submission.status == "expired" and submission.marks_awarded is None:
             _expire_with_zero(submission, submission.expires_at or assignment.due_at)
         asset = await db.get(MediaAsset, submission.attachment_asset_id) if submission and submission.attachment_asset_id else None
@@ -426,8 +466,23 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
         db.add(submission)
         await db.commit()
         await db.refresh(submission)
-    elif submission.status == "in_progress" and remaining_seconds(submission.expires_at) == 0:
-        _expire_with_zero(submission, submission.expires_at)
+    elif submission.status == "in_progress" and (
+        remaining_seconds(submission.expires_at) == 0
+        or (assignment.due_at and as_utc(assignment.due_at) <= utc_now()
+            and as_utc(submission.started_at) < as_utc(assignment.due_at))
+    ):
+        _finalize_saved_draft(submission, submission.expires_at or assignment.due_at)
+        await db.commit()
+    elif submission.status in {"submitted", "reviewed", "withdrawn"}:
+        if not _can_change_submission(assignment, submission, utc_now()):
+            raise ValidationError("This submission can no longer be edited")
+        submission.status = "in_progress"
+        submission.submitted_at = None
+        submission.marks_awarded = None
+        submission.grade_band = None
+        submission.feedback = None
+        submission.marked_by = None
+        submission.marked_at = None
         await db.commit()
     asset = await db.get(MediaAsset, submission.attachment_asset_id) if submission.attachment_asset_id else None
     material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
@@ -445,15 +500,15 @@ async def _active_submission(db: AsyncSession, assignment_id: int, user_id: int)
     if submission.status != "in_progress":
         raise ValidationError("This attempt is already finished")
     if remaining_seconds(submission.expires_at) == 0:
-        _expire_with_zero(submission, submission.expires_at)
+        _finalize_saved_draft(submission, submission.expires_at)
         await db.commit()
         raise ValidationError("The assignment timer has expired")
     if (
         assignment.due_at
         and as_utc(assignment.due_at) <= utc_now()
-        and not assignment.allow_late
+        and (not assignment.allow_late or as_utc(submission.started_at) < as_utc(assignment.due_at))
     ):
-        _expire_with_zero(submission, assignment.due_at)
+        _finalize_saved_draft(submission, assignment.due_at)
         await db.commit()
         raise ValidationError("The deadline for this assignment has passed")
     return context, submission
@@ -514,6 +569,58 @@ async def submit_assignment(db: AsyncSession, assignment_id: int, payload: Cours
     return _assignment_item(context, submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment))
 
 
+async def withdraw_submission(db: AsyncSession, assignment_id: int, user_id: int):
+    context = await _student_context(db, assignment_id, user_id)
+    assignment = context[0]
+    submission = await CourseworkRepository(db).get_submission(assignment_id, user_id, for_update=True)
+    if submission is None or submission.status not in {"in_progress", "submitted", "reviewed"}:
+        raise ValidationError("There is no submission to delete")
+    if not _can_change_submission(assignment, submission, utc_now()):
+        raise ValidationError("The deadline or attempt timer has ended; this submission cannot be deleted")
+    submission.status = "withdrawn"
+    submission.answer_text = None
+    submission.attachment_asset_id = None
+    submission.submitted_at = None
+    submission.marks_awarded = None
+    submission.grade_band = None
+    submission.feedback = None
+    submission.marked_by = None
+    submission.marked_at = None
+    await db.commit()
+    return _assignment_item(context, submission, expose_grade=False)
+
+
+async def finalize_due_drafts(db: AsyncSession, now: datetime | None = None) -> int:
+    """Close saved drafts even when students never reopen the assignment page."""
+    now = as_utc(now) or utc_now()
+    rows = (await db.execute(
+        select(LmsCourseworkSubmission, LmsCourseworkAssignment)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsCourseworkSubmission.assignment_id)
+        .where(
+            LmsCourseworkAssignment.status.in_(("published", "closed")),
+            LmsCourseworkAssignment.submission_type != "mcq",
+            LmsCourseworkSubmission.status.in_(("in_progress", "withdrawn")),
+            or_(LmsCourseworkSubmission.expires_at <= now, LmsCourseworkAssignment.due_at <= now),
+        )
+        .with_for_update(of=LmsCourseworkSubmission, skip_locked=True)
+    )).all()
+    changed = 0
+    for submission, assignment in rows:
+        timer_ended = submission.expires_at is not None and as_utc(submission.expires_at) <= now
+        deadline_ended = assignment.due_at is not None and as_utc(assignment.due_at) <= now and as_utc(submission.started_at) < as_utc(assignment.due_at)
+        if not timer_ended and not deadline_ended:
+            continue
+        cutoff = min((time for time in (as_utc(submission.expires_at), as_utc(assignment.due_at)) if time is not None), default=now)
+        if submission.status == "withdrawn":
+            _expire_with_zero(submission, cutoff)
+        else:
+            _finalize_saved_draft(submission, cutoff)
+        changed += 1
+    if changed:
+        await db.commit()
+    return changed
+
+
 async def _graded_exam_ids(db: AsyncSession, assignment_ids: list[int]) -> dict[int, int]:
     if not assignment_ids:
         return {}
@@ -554,6 +661,7 @@ async def list_submissions(db: AsyncSession, assignment_id: int, user_id: int):
         if awarded is None and attempt is not None and attempt.status != "in_progress":
             awarded = attempt.auto_marks
         items.append(CourseworkSubmissionItem(
+            is_late=submission_is_late(submission, assignment.due_at),
             submission_id=submission.submission_id,
             assignment_id=submission.assignment_id,
             student_user_id=submission.student_user_id,
@@ -570,7 +678,7 @@ async def list_submissions(db: AsyncSession, assignment_id: int, user_id: int):
             attachment_name=asset.original_filename if asset else None,
             marks_awarded=awarded,
             grade_band=(submission.grade_band or grade_band_for_score(awarded, assignment.max_marks))
-            if assignment.submission_type != "mcq" and awarded is not None else None,
+            if grading_mode(assignment) == "bands" and assignment.submission_type != "mcq" and awarded is not None else None,
             auto_marks=attempt.auto_marks if attempt is not None and attempt.status != "in_progress" else None,
             feedback=submission.feedback,
             marked_at=submission.marked_at,
@@ -588,7 +696,13 @@ async def mark_submission(db: AsyncSession, submission_id: int, payload: Coursew
         raise ValidationError("The student has not finished this attempt")
     if assignment.submission_type == "mcq":
         raise ValidationError("Quiz marks are calculated automatically from the answers")
-    if payload.grade_band is not None:
+    if grading_mode(assignment) == "marks" and payload.marks_awarded is None:
+        raise ValidationError("Enter numeric marks for this CPD assignment")
+    if grading_mode(assignment) == "marks":
+        awarded = Decimal(payload.marks_awarded)
+        if awarded > Decimal(assignment.max_marks):
+            raise ValidationError(f"Marks cannot exceed {assignment.max_marks}")
+    elif payload.grade_band is not None:
         awarded = band_marks(assignment.max_marks, payload.grade_band)
     elif payload.marks_awarded is not None:
         awarded = Decimal(payload.marks_awarded)
@@ -597,7 +711,7 @@ async def mark_submission(db: AsyncSession, submission_id: int, payload: Coursew
     else:
         raise ValidationError("Choose a grade")
     submission.marks_awarded = awarded
-    submission.grade_band = payload.grade_band or grade_band_for_score(awarded, assignment.max_marks)
+    submission.grade_band = (payload.grade_band or grade_band_for_score(awarded, assignment.max_marks)) if grading_mode(assignment) == "bands" else None
     submission.feedback = payload.feedback
     submission.marked_by = user_id
     submission.marked_at = utc_now()

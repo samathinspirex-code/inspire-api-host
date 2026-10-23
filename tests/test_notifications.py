@@ -65,6 +65,19 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("View class update", message["HTMLPart"])
         self.assertIn("#B42318", message["HTMLPart"])
 
+    def test_assignment_summary_email_uses_safe_lecturer_template(self):
+        payload = build_notification_payload(
+            "lecturer@example.com", "Lecturer", "Submission summary: Essay",
+            "Submitted (1): Alice\nNot submitted (1): <Bob>",
+            "https://lms.example.com/?view=assignments", "assignment-4",
+            notification_type="assignment_deadline_summary",
+        )
+        message = payload["Messages"][0]
+        self.assertIn("Deadline summary", message["HTMLPart"])
+        self.assertIn("Open assignments", message["HTMLPart"])
+        self.assertIn("&lt;Bob&gt;", message["HTMLPart"])
+        self.assertNotIn("<Bob>", message["HTMLPart"])
+
     def test_admin_audiences_do_not_require_course_or_class_ids(self):
         common = {
             "title": "Staff notice", "message": "Review the latest LMS update.",

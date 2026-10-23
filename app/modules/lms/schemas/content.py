@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-LearningItemType = Literal["video", "pdf", "text", "link", "assignment", "quiz"]
+LearningItemType = Literal["video", "pdf", "pptx", "text", "link", "assignment", "quiz"]
 LearningItemStatus = Literal["draft", "published"]
 AccessScope = Literal["course", "class", "student"]
 
@@ -20,7 +20,7 @@ class LearningItemCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_resource(self):
-        if self.item_type in {"video", "pdf", "link"} and not self.resource_url:
+        if self.item_type in {"video", "pdf", "pptx", "link"} and not self.resource_url:
             raise ValueError(f"resource_url is required for {self.item_type} content")
         if self.item_type == "text" and not self.text_content:
             raise ValueError("text_content is required for text content")

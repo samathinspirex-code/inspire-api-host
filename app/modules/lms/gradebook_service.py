@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import NotFoundError, ValidationError
 from app.modules.auth.models import User
 from app.modules.lms.coursework_service import _assignment_item, _ensure_lecturer_course, grade_band_for_score
+from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes
 from app.modules.lms.models import (
     ClassStudent,
     CourseEnrollment,
@@ -81,6 +82,7 @@ async def lecturer_gradebook(
         assignment_stmt = assignment_stmt.where(LmsCourseworkAssignment.assignment_id == assignment_id)
     assignment_rows = list((await db.execute(assignment_stmt.order_by(LmsCourseworkAssignment.created_at))).all())
     assignments = [row[0] for row in assignment_rows]
+    await load_assignment_grading_modes(db, assignments)
 
     student_stmt = (
         select(User, StudentProfile)
@@ -142,6 +144,7 @@ async def lecturer_gradebook(
                 possible += Decimal(assignment.max_marks)
                 graded_count += 1
             results.append(GradebookResultItem(
+                grading_mode=grading_mode(assignment),
                 assignment_id=assignment.assignment_id,
                 title=assignment.title,
                 submission_type=assignment.submission_type,
@@ -150,7 +153,7 @@ async def lecturer_gradebook(
                 marks_awarded=marks,
                 percentage=percentage(marks, assignment.max_marks) if graded else None,
                 grade_band=(submission.grade_band or grade_band_for_score(marks, assignment.max_marks))
-                if graded and assignment.submission_type != "mcq" else None,
+                if graded and grading_mode(assignment) == "bands" and assignment.submission_type != "mcq" else None,
                 graded=graded,
             ))
         students.append(GradebookStudentItem(
@@ -176,6 +179,7 @@ async def lecturer_gradebook(
         graded = [item for item in relevant if item and item.marks_awarded is not None]
         average = round(sum(percentage(item.marks_awarded, assignment.max_marks) for item in graded) / len(graded), 2) if graded else 0.0
         assignment_summaries.append(GradebookAssignmentSummary(
+            grading_mode=grading_mode(assignment),
             assignment_id=assignment.assignment_id,
             title=assignment.title,
             submission_type=assignment.submission_type,
@@ -226,6 +230,7 @@ async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesRespons
         group["earned"] += Decimal(submission.marks_awarded)
         group["possible"] += Decimal(assignment.max_marks)
         group["grades"].append(StudentGradeItem(
+            grading_mode=grading_mode(assignment),
             assignment_id=assignment.assignment_id,
             title=assignment.title,
             submission_type=assignment.submission_type,
@@ -236,7 +241,7 @@ async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesRespons
             marks_awarded=submission.marks_awarded,
             percentage=percentage(submission.marks_awarded, assignment.max_marks),
             grade_band=(submission.grade_band or grade_band_for_score(submission.marks_awarded, assignment.max_marks))
-            if assignment.submission_type != "mcq" else None,
+            if grading_mode(assignment) == "bands" and assignment.submission_type != "mcq" else None,
             feedback=submission.feedback,
             marked_at=submission.marked_at,
         ))
@@ -296,7 +301,9 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
             select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment_id)
         )).scalars().all()
         for submission in submissions:
-            if submission.marks_awarded is not None and submission.grade_band is None:
+            if grading_mode(assignment) == "marks":
+                submission.grade_band = None
+            elif submission.marks_awarded is not None and submission.grade_band is None:
                 submission.grade_band = grade_band_for_score(submission.marks_awarded, assignment.max_marks)
     assignment.grades_released = released
     linked_exam = (await db.execute(
@@ -326,7 +333,7 @@ def build_gradebook_csv(report: LecturerGradebookResponse) -> str:
             assignment = assignment_map[result.assignment_id]
             result_value = (
                 f"{result.marks_awarded} / {result.max_marks}"
-                if result.submission_type == "mcq" and result.marks_awarded is not None else
+                if (result.grading_mode == "marks" or result.submission_type == "mcq") and result.marks_awarded is not None else
                 result.grade_band or (grade_band_for_score(result.marks_awarded, result.max_marks) if result.marks_awarded is not None else None)
             )
             writer.writerow([_csv_safe(report.course_code), _csv_safe(report.class_label), _csv_safe(student.student_number), _csv_safe(student.student_name), _csv_safe(student.student_email), _csv_safe(result.title), _csv_safe(result.status), _csv_safe(result_value), _csv_safe(assignment.grades_released)])

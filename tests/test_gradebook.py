@@ -48,6 +48,11 @@ class GradebookTests(unittest.TestCase):
                 target_label="Entire course", max_marks=Decimal("10"), due_at=None,
                 grades_released=True, eligible_students=1, submitted_count=1,
                 graded_count=1, average_percentage=70,
+            ), GradebookAssignmentSummary(
+                assignment_id=5, title="CPD coursework", grading_mode="marks",
+                target_label="CPD class", max_marks=Decimal("100"), due_at=None,
+                grades_released=True, eligible_students=1, submitted_count=1,
+                graded_count=1, average_percentage=78.25,
             )],
             students=[GradebookStudentItem(
                 student_user_id=3,
@@ -72,6 +77,11 @@ class GradebookTests(unittest.TestCase):
                     status="reviewed", max_marks=Decimal("10"),
                     marks_awarded=Decimal("7"), percentage=70,
                     grade_band=None, graded=True,
+                ), GradebookResultItem(
+                    assignment_id=5, title="CPD coursework", grading_mode="marks",
+                    status="reviewed", max_marks=Decimal("100"),
+                    marks_awarded=Decimal("78.25"), percentage=78.25,
+                    grade_band=None, graded=True,
                 )],
             )],
         )
@@ -84,6 +94,7 @@ class GradebookTests(unittest.TestCase):
         self.assertEqual(rows[1][7], "merit")
         self.assertEqual(rows[1][8], "True")
         self.assertEqual(rows[2][7], "7 / 10")
+        self.assertEqual(rows[3][7], "78.25 / 100")
 
 
 if __name__ == "__main__":

@@ -573,7 +573,7 @@ async def ingest_course_content(
         raise NotFoundError(f"Course {course_id} not found")
     item_query = select(LmsLearningItem).join(LmsModule).where(
         LmsModule.course_id == course_id,
-        LmsLearningItem.item_type.in_(["pdf", "text", "video"]),
+        LmsLearningItem.item_type.in_(["pdf", "pptx", "text", "video"]),
     )
     if target_item_id is not None:
         item_query = item_query.where(LmsLearningItem.learning_item_id == target_item_id)
@@ -624,6 +624,7 @@ async def ingest_course_content(
         try:
             source_type = {
                 "pdf": "pdf",
+                "pptx": "pdf",
                 "text": "text_lesson",
                 "video": "video_transcript",
             }[item_type]
@@ -644,11 +645,16 @@ async def ingest_course_content(
                 if not chunks:
                     raise ValidationError("Text lesson has no readable content")
                 source.content = (item_text_content or "")[:50000]
-            elif item_type == "pdf":
+            elif item_type in {"pdf", "pptx"}:
                 if not item_resource_url:
                     raise ValidationError("PDF learning item has no resource URL")
                 await _release_connection(db)
-                pdf_data = await _download_pdf(item_resource_url)
+                if item_type == "pptx":
+                    from app.modules.lms.presentation_service import read_presentation_preview
+
+                    pdf_data = await read_presentation_preview(db, item_resource_url)
+                else:
+                    pdf_data = await _download_pdf(item_resource_url)
                 pages = await asyncio.to_thread(_extract_pdf_pages, pdf_data)
                 chunks = [
                     (piece, page_number, None, None)

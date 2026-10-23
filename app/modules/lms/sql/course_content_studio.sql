@@ -7,7 +7,7 @@ ALTER TABLE lms_courses
 CREATE TABLE IF NOT EXISTS lms_learning_items (
     learning_item_id BIGSERIAL PRIMARY KEY,
     module_id BIGINT NOT NULL REFERENCES lms_modules(module_id) ON DELETE CASCADE,
-    item_type VARCHAR(30) NOT NULL CHECK (item_type IN ('video', 'pdf', 'text', 'link', 'assignment', 'quiz')),
+    item_type VARCHAR(30) NOT NULL CHECK (item_type IN ('video', 'pdf', 'pptx', 'text', 'link', 'assignment', 'quiz')),
     title VARCHAR(255) NOT NULL,
     description TEXT,
     resource_url TEXT,

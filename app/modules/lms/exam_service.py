@@ -46,10 +46,10 @@ from app.modules.lms.schemas.exam import ExamAttemptQuestion, ExamResultAnswer, 
 from app.modules.lms import notification_service
 
 
-def fixed_exam_expiry(started_at: datetime, duration_minutes: int, due_at: datetime | None) -> datetime:
+def fixed_exam_expiry(started_at: datetime, duration_minutes: int, due_at: datetime | None, allow_late: bool = False) -> datetime:
     duration_end = as_utc(started_at) + timedelta(minutes=duration_minutes)
     due = as_utc(due_at)
-    return min(duration_end, due) if due else duration_end
+    return min(duration_end, due) if due and not allow_late else duration_end
 
 
 def shuffled(values: list[int], enabled: bool) -> list[int]:
@@ -382,6 +382,8 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
     if status == "published" and exam.assessment_kind == "graded_mcq":
         await _sync_max_marks(db, exam)
     exam.status = status; assignment.status = status
+    if status == "published" and assignment.available_from is None:
+        assignment.available_from = exam.available_from = utc_now()
     if assignment.learning_item_id:
         learning_item = await db.get(LmsLearningItem, assignment.learning_item_id)
         if learning_item is not None:
@@ -403,17 +405,24 @@ async def update_schedule(
     )
     if attempt_count:
         raise ValidationError("The release plan cannot be changed after a student has started this test")
+    previous_available_from = assignment.available_from
     exam.available_from = payload.available_from
     exam.due_at = payload.due_at
     exam.duration_minutes = payload.duration_minutes
     assignment.available_from = payload.available_from
     assignment.due_at = payload.due_at
     assignment.duration_minutes = payload.duration_minutes
+    if assignment.status == "published" and assignment.available_from is None:
+        assignment.available_from = exam.available_from = utc_now()
     if assignment.learning_item_id:
         item = await db.get(LmsLearningItem, assignment.learning_item_id)
         if item is not None:
             item.duration_minutes = payload.duration_minutes
     await db.commit()
+    if assignment.status == "published" and assignment.available_from != previous_available_from:
+        await notification_service.notify_assessment_published(
+            db, assignment, "assignment" if exam.assessment_kind == "graded_mcq" else "exam"
+        )
     return await get_editor(db, exam_id, user_id)
 
 
@@ -587,7 +596,8 @@ async def start_exam(db: AsyncSession, exam_id: int, user_id: int) -> ExamAttemp
     if attempt is None:
         now = utc_now()
         if exam.available_from and as_utc(exam.available_from) > now: raise ValidationError("This exam is not available yet")
-        if exam.due_at and as_utc(exam.due_at) <= now: raise ValidationError("The exam deadline has passed")
+        late_allowed = exam.assessment_kind == "graded_mcq" and assignment.allow_late
+        if exam.due_at and as_utc(exam.due_at) <= now and not late_allowed: raise ValidationError("The exam deadline has passed")
         questions = await _question_rows(db, exam_id)
         if not questions: raise ValidationError("This exam has no questions")
         order = shuffled([item.question_id for item in questions], exam.randomize_questions)
@@ -596,7 +606,7 @@ async def start_exam(db: AsyncSession, exam_id: int, user_id: int) -> ExamAttemp
             for item in questions if item.question_type in {"mcq", "multiple_answer"}
         }
         attempt = LmsExamAttempt(exam_id=exam_id, student_user_id=user_id, status="in_progress", started_at=now,
-            expires_at=fixed_exam_expiry(now, exam.duration_minutes, exam.due_at), question_order=order, option_orders=option_orders)
+            expires_at=fixed_exam_expiry(now, exam.duration_minutes, exam.due_at, allow_late=late_allowed), question_order=order, option_orders=option_orders)
         db.add(attempt); await db.flush()
         mirror = (await db.execute(select(LmsCourseworkSubmission).where(
             LmsCourseworkSubmission.assignment_id == assignment.assignment_id,
@@ -715,6 +725,25 @@ async def _finalize_attempt(db: AsyncSession, exam: LmsExam, assignment: LmsCour
         mirror.grade_band = attempt.grade_band
         mirror.marked_at = attempt.marked_at
     await db.commit()
+
+
+async def finalize_expired_graded_attempts(db: AsyncSession, now: datetime | None = None) -> int:
+    """Finish timed assignment quizzes even when the student closes the browser."""
+    now = as_utc(now) or utc_now()
+    rows = (await db.execute(
+        select(LmsExamAttempt, LmsExam, LmsCourseworkAssignment)
+        .join(LmsExam, LmsExam.exam_id == LmsExamAttempt.exam_id)
+        .join(LmsCourseworkAssignment, LmsCourseworkAssignment.assignment_id == LmsExam.assignment_id)
+        .where(
+            LmsExam.assessment_kind == "graded_mcq",
+            LmsExamAttempt.status == "in_progress",
+            LmsExamAttempt.expires_at <= now,
+        )
+        .with_for_update(of=LmsExamAttempt, skip_locked=True)
+    )).all()
+    for attempt, exam, assignment in rows:
+        await _finalize_attempt(db, exam, assignment, attempt, expired=True)
+    return len(rows)
 
 
 async def submit_exam(db: AsyncSession, attempt_id: int, payload, user_id: int) -> ExamAttemptResponse:
