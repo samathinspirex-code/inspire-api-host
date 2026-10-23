@@ -213,6 +213,42 @@ class AuthenticatorInvitationDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([link.portal for link in result.portal_links], ["LMS"])
         self.assertEqual(parse_qs(urlparse(result.setup_url).query)["setup"], ["password"])
 
+    async def test_cms_initiated_password_invitation_uses_account_portals(self):
+        cases = [
+            (("LMS", "ADMIN"), ("LMS",)),
+            (("LMS", "LECTURER"), ("LMS",)),
+            (("CMS",), ("CMS",)),
+            (("CMS", "LMS", "ADMIN"), ("CMS", "LMS")),
+        ]
+        setup = AuthenticatorSetupTokenResponse(
+            user_id=25, email="member@example.test", setup_token="a" * 64,
+            expires_at=datetime(2026, 9, 4, tzinfo=timezone.utc),
+        )
+        for grants, expected_portals in cases:
+            with self.subTest(grants=grants):
+                user = SimpleNamespace(full_name="Member", access_levels=[
+                    SimpleNamespace(access_level=SimpleNamespace(access_key=key, is_active=True))
+                    for key in grants
+                ])
+                sender = AsyncMock(return_value=SimpleNamespace(sent=True))
+                with (
+                    patch.object(settings, "CMS_UI_URL", "https://cms.example.test/"),
+                    patch.object(settings, "LMS_UI_URL", "https://lms.example.test/"),
+                    patch.object(service, "UserRepository", return_value=SimpleNamespace(get=AsyncMock(return_value=user))),
+                    patch.object(service, "issue_authenticator_setup_token", AsyncMock(return_value=setup)),
+                    patch.object(service, "send_authenticator_invitation", sender),
+                ):
+                    result = await service.issue_student_password_setup_invitation(
+                        None, 25, 1, settings.CMS_UI_URL
+                    )
+                self.assertEqual(tuple(link.portal for link in result.portal_links), expected_portals)
+                self.assertEqual(result.setup_url, result.portal_links[0].setup_url)
+                self.assertEqual(sender.await_args.kwargs["portal_links"], result.portal_links)
+                for link in result.portal_links:
+                    self.assertEqual(link.login_url, f"https://{link.portal.lower()}.example.test")
+                    self.assertEqual(urlparse(link.setup_url).netloc, f"{link.portal.lower()}.example.test")
+
+
     async def test_password_is_allowed_when_account_has_privileged_access(self):
         for extra_access in ("LECTURER", "ADMIN", "SUPER_ADMIN", "CMS"):
             with self.subTest(extra_access=extra_access):

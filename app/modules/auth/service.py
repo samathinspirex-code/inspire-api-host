@@ -236,29 +236,18 @@ async def issue_student_password_setup_invitation(
         raise APIError(403, "PASSWORD_NOT_ALLOWED", "This account does not have CMS or LMS access.")
     setup = await issue_authenticator_setup_token(db, user_id, created_by)
     access = set(_user_access_keys(user))
-    # A portal that explicitly initiated the invitation gets one matching link.
-    # This avoids LMS lecturers accidentally opening the CMS sign-in screen.
+    # The user's grants determine which portals can be offered. The portal
+    # that initiated setup only determines the preferred link among those.
     def is_local(u: str | None) -> bool:
         return not u or "localhost" in u.lower() or "127.0.0.1" in u
 
-    lms_url = settings.LMS_UI_URL
-    cms_url = settings.CMS_UI_URL if not is_local(settings.CMS_UI_URL) else lms_url
-
-    if setup_ui_url and not is_local(setup_ui_url):
-        destinations = [(
-            "LMS" if setup_ui_url.rstrip("/") == lms_url.rstrip("/") else "CMS",
-            setup_ui_url,
-        )]
-    elif setup_ui_url and is_local(setup_ui_url) and not is_local(lms_url):
-        destinations = [("LMS", lms_url)]
-    else:
-        destinations = []
-        if access & CMS_ACCESS_KEYS and not is_local(settings.CMS_UI_URL):
-            destinations.append(("CMS", settings.CMS_UI_URL))
-        if "LMS" in access or not destinations:
-            destinations.append(("LMS", lms_url))
-        if not destinations:
-            destinations.append(("Inspire", lms_url))
+    destinations = []
+    if access & CMS_ACCESS_KEYS and (not is_local(settings.CMS_UI_URL) or is_local(settings.LMS_UI_URL)):
+        destinations.append(("CMS", settings.CMS_UI_URL))
+    if "LMS" in access:
+        destinations.append(("LMS", settings.LMS_UI_URL))
+    if not destinations:
+        raise APIError(503, "SETUP_URL_UNAVAILABLE", "A public CMS setup URL is not configured.")
     portal_links = [AuthenticatorPortalLink(
         portal=portal,
         setup_url=build_password_setup_url(setup.email, setup.setup_token, url),
