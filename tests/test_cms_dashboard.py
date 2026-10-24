@@ -1,5 +1,6 @@
 """CMS dashboard aggregation and access checks, using only an in-memory database."""
 import unittest
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -114,6 +115,22 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.session.execute(delete(LmsLearningItem).where(LmsLearningItem.learning_item_id == 8))
         self.session.commit()
         self.assertEqual((await get_dashboard(self.db)).published_content, 8)
+
+    async def test_selected_day_filters_student_and_content_counts(self):
+        self.session.add(program(1))
+        self.session.add(LmsCourse(course_id=1, program_id=1, code="C1", title="Course"))
+        self.session.add(LmsModule(module_id=1, course_id=1, title="Section", position=1))
+        for uid, when in [(1, datetime(2026, 10, 23, 17, 0, tzinfo=timezone.utc)),
+                          (2, datetime(2026, 10, 23, 23, 0, tzinfo=timezone.utc))]:
+            self.session.add(User(user_id=uid, email=f"u{uid}@example.test"))
+            self.session.add(StudentProfile(user_id=uid, student_number=f"S{uid}", created_at=when))
+            self.session.add(LmsLearningItem(learning_item_id=uid, module_id=1, position=uid,
+                                             item_type="pdf", title=f"PDF {uid}", status="published", created_at=when))
+        self.session.commit()
+        result = await get_dashboard(self.db, date(2026, 10, 24), date(2026, 10, 24))
+        self.assertEqual(result.total_students, 1)
+        self.assertEqual(result.published_content, 1)
+        self.assertEqual(result.total_programs, 1)  # Programs have no creation date.
 
 
 class DashboardAccessTests(unittest.TestCase):

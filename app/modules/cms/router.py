@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -64,9 +65,12 @@ async def get_activity_log(
 
 
 @router.get("/dashboard", response_model=CmsDashboardResponse)
-async def get_dashboard(response: Response, db: AsyncSession = Depends(get_db)) -> CmsDashboardResponse:
+async def get_dashboard(response: Response, date_from: date | None = Query(None), date_to: date | None = Query(None), db: AsyncSession = Depends(get_db)) -> CmsDashboardResponse:
+    if (date_from is None) != (date_to is None) or (date_from and date_to and date_from > date_to):
+        from app.core.errors import ValidationError
+        raise ValidationError("Choose a valid dashboard date range")
     response.headers["Cache-Control"] = "no-store"
-    return await dashboard_service.get_dashboard(db)
+    return await dashboard_service.get_dashboard(db, date_from, date_to)
 
 
 @router.get("/media", response_model=MediaAssetListResponse)
