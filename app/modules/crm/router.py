@@ -236,11 +236,16 @@ async def get_pipeline(
 @router.get("/leads/dashboard", response_model=CrmDashboardResponse)
 async def get_dashboard(
     counsellor_id: int | None = Query(None, gt=0),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmDashboardResponse:
+    if (date_from is None) != (date_to is None) or (date_from and date_to and date_from > date_to):
+        from app.core.errors import ValidationError
+        raise ValidationError("Choose a valid dashboard date range")
     scoped_id = current_user.user_id if _counsellor_only(current_user) else counsellor_id
-    return await service.get_dashboard(db, scoped_id)
+    return await service.get_dashboard(db, scoped_id, date_from, date_to)
 
 
 @router.get("/leads/followups", response_model=list[CrmLeadSummary])

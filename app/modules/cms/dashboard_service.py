@@ -1,5 +1,6 @@
 """Small, uncached aggregates for the CMS home; never load student rosters."""
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,24 +11,34 @@ from app.modules.cms.schemas.dashboard import CmsDashboardResponse, DashboardPro
 from app.modules.lms.models import LmsCourse, LmsLearningItem, LmsModule, StudentProfile
 
 
-async def get_dashboard(db: AsyncSession) -> CmsDashboardResponse:
+async def get_dashboard(db: AsyncSession, date_from: date | None = None, date_to: date | None = None) -> CmsDashboardResponse:
+    # Dashboard dates are chosen in Sri Lankan local time. Use an exclusive end
+    # so every record on the final selected day is included.
+    start = datetime.combine(date_from, time.min, ZoneInfo("Asia/Colombo")).astimezone(timezone.utc) if date_from else None
+    end = datetime.combine(date_to + timedelta(days=1), time.min, ZoneInfo("Asia/Colombo")).astimezone(timezone.utc) if date_to else None
+    student_count = select(func.count()).select_from(StudentProfile).join(User, User.user_id == StudentProfile.user_id)
+    if start:
+        student_count = student_count.where(StudentProfile.created_at >= start)
+    if end:
+        student_count = student_count.where(StudentProfile.created_at < end)
     # Match the CMS program catalogue and LMS student registry. Count people,
     # not enrolments: one student may belong to multiple courses or no course.
     totals = (await db.execute(select(
         select(func.count()).select_from(Program).scalar_subquery().label("programs"),
-        select(func.count()).select_from(StudentProfile)
-        .join(User, User.user_id == StudentProfile.user_id)
-        .scalar_subquery().label("students"),
+        student_count.scalar_subquery().label("students"),
     ))).one()
 
     # Count the items INSIDE course sections, once each, by their saved status.
     # Audience releases/enrolments must not multiply this inventory count.
-    content = (await db.execute(
-        select(LmsLearningItem.status, LmsLearningItem.item_type, func.count())
+    content_query = (select(LmsLearningItem.status, LmsLearningItem.item_type, func.count())
         .join(LmsModule, LmsModule.module_id == LmsLearningItem.module_id)
         .join(LmsCourse, LmsCourse.course_id == LmsModule.course_id)
-        .group_by(LmsLearningItem.status, LmsLearningItem.item_type)
-    )).all()
+        .group_by(LmsLearningItem.status, LmsLearningItem.item_type))
+    if start:
+        content_query = content_query.where(LmsLearningItem.created_at >= start)
+    if end:
+        content_query = content_query.where(LmsLearningItem.created_at < end)
+    content = (await db.execute(content_query)).all()
     published_by_type = {kind: 0 for kind in ("video", "pdf", "text", "link", "assignment", "quiz")}
     draft_content = 0
     for status, kind, count in content:

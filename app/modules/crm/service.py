@@ -974,13 +974,16 @@ async def get_pipeline(
     )
 
 
-async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None) -> CrmDashboardResponse:
+async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, date_from: Optional[date] = None, date_to: Optional[date] = None) -> CrmDashboardResponse:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     thirty_days_ago = now - timedelta(days=30)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
     week_ago = now - timedelta(days=7)
     active = and_(CrmLead.is_archived == False, CrmLead.assigned_counsellor_id == counsellor_id) if counsellor_id is not None else CrmLead.is_archived == False  # noqa: E712
+    if date_from is not None and date_to is not None:
+        start, end, _, _ = _period_bounds(date_from, date_to)
+        active = and_(active, CrmLead.created_at >= start, CrmLead.created_at < end)
 
     totals = (
         await db.execute(
@@ -1021,6 +1024,8 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None) -
         followups_today_count,
         unassigned,
     ) = (int(value or 0) for value in totals)
+    if date_from is not None:
+        new_leads_30d = total_leads
     conversion_rate = round((assigned_enrolled / assigned_total) * 100, 2) if assigned_total > 0 else 0.0
 
     programme_name = func.coalesce(
