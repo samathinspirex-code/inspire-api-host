@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS lms_coursework_assignments (
     instructions TEXT NOT NULL,
     material_asset_id BIGINT REFERENCES media_assets(media_asset_id) ON DELETE SET NULL,
     assignment_type VARCHAR(20) NOT NULL DEFAULT 'regular' CHECK (assignment_type IN ('regular', 'timed')),
+    submission_type VARCHAR(30) NOT NULL DEFAULT 'written',
     available_from TIMESTAMPTZ,
     due_at TIMESTAMPTZ,
     duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 1440),
@@ -18,7 +19,7 @@ CREATE TABLE IF NOT EXISTS lms_coursework_assignments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (assignment_type <> 'timed' OR duration_minutes IS NOT NULL),
-    CHECK (assignment_type <> 'timed' OR allow_late = FALSE),
+    CONSTRAINT chk_lms_coursework_timed_late CHECK (assignment_type <> 'timed' OR allow_late = FALSE OR submission_type = 'mcq'),
     CHECK (available_from IS NULL OR due_at IS NULL OR due_at > available_from)
 );
 
