@@ -184,7 +184,7 @@ def prepare(group: list[dict[str, Any]], catalogue: dict[int, dict[str, Any]], b
     status_row = next((row for row in reversed(ordered) if key(row["Status"]) == "payment done"), latest)
     status = clean(status_row["Status"])
     if key(status) == "texting through whatsapp discussing the details":
-        stage = {"stage": "contactable", "status_reason": None, "status_remarks": status,
+        stage = {"stage": "contacted", "status_reason": None, "status_remarks": status,
                  "affordability_reason": None, "delay_reason": None, "enrollment_email_status": None}
     else:
         stage = stage_fields(status)

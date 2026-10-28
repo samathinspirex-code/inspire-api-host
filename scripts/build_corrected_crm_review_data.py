@@ -95,7 +95,7 @@ async def build(source: Path, review: Path, output: Path) -> None:
                 try:
                     source_stage = stage_fields(raw_status)["stage"]
                 except ValueError:
-                    source_stage = "contactable" if key(raw_status) == "texting through whatsapp discussing the details" else "unmapped"
+                    source_stage = "contacted" if key(raw_status) == "texting through whatsapp discussing the details" else "unmapped"
                 issue = []
                 if len(sorted_candidates) > 1:
                     issue.append("Multiple CRM leads share this phone")

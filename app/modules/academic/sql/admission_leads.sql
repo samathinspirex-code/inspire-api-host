@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS crm_admission_leads (
     result_document_name VARCHAR(255),
     result_document_content_type VARCHAR(100),
     status VARCHAR(30) NOT NULL DEFAULT 'new_lead'
-      CHECK (status IN ('new_lead','contactable','uncontactable','future_prospect','not_interested','lost_to_competitor','cant_afford','enrolled')),
+      CHECK (status IN ('new_lead','contacted','uncontactable','future_prospect','not_interested','lost_to_competitor','cant_afford','enrolled')),
     source VARCHAR(50) NOT NULL DEFAULT 'website_admissions',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

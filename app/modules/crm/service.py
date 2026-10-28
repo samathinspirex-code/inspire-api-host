@@ -46,7 +46,7 @@ from app.modules.crm.schemas import (
 PIPELINE_STAGES = [
     "new_lead",
     "uncontactable",
-    "contactable",
+    "contacted",
     "future_prospect",
     "not_interested",
     "lost_to_competitor",
@@ -55,12 +55,12 @@ PIPELINE_STAGES = [
 ]
 
 IN_PROGRESS_STAGES = [
-    "uncontactable", "contactable", "future_prospect",
+    "uncontactable", "contacted", "future_prospect",
 ]
 
 
 ACTIVE_ASSIGNED_STAGES = [
-    "new_lead", "uncontactable", "contactable", "future_prospect",
+    "new_lead", "uncontactable", "contacted", "future_prospect",
 ]
 
 CONTACT_ACTIVITY_TYPES = {"call", "email", "whatsapp", "counselling_session", "follow_up_completed"}
@@ -1184,7 +1184,7 @@ async def get_counsellor_report(
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
-    contacted_stages = CrmLead.stage.in_(("contactable", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
+    contacted_stages = CrmLead.stage.in_(("contacted", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
     contacted_cohort = and_(in_created, or_(in_contacted, contacted_stages))
     not_contacted_cohort = and_(in_created, ~or_(in_contacted, contacted_stages))
     metric_rows = (
@@ -1512,7 +1512,7 @@ async def export_leads_csv(
         stage_display = {
             "new_lead": "New Lead",
             "uncontactable": "Uncontactable",
-            "contactable": "Contactable",
+            "contacted": "Contacted",
             "future_prospect": "Future Prospect",
             "not_interested": "Not Interested",
             "lost_to_competitor": "Lost to Competitor",

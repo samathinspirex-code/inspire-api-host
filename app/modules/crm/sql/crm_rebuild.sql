@@ -1,5 +1,6 @@
 -- Additive CRM rebuild. Run before deploying the new API.
 ALTER TABLE crm_leads ALTER COLUMN stage SET DEFAULT 'new_lead';
+UPDATE crm_leads SET stage='contacted' WHERE stage='contactable';
 ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS status_reason VARCHAR(150);
 ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS status_remarks TEXT;
 ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS affordability_reason VARCHAR(150);
@@ -32,10 +33,11 @@ CREATE INDEX IF NOT EXISTS ix_crm_leads_followup ON crm_leads(followup_date);
 -- Permit new website admission submissions during the deployment window while
 -- historical admission rows still carry the old value until the CRM cutover.
 ALTER TABLE crm_admission_leads DROP CONSTRAINT IF EXISTS crm_admission_leads_status_check;
+UPDATE crm_admission_leads SET status='contacted' WHERE status='contactable';
 ALTER TABLE crm_admission_leads ALTER COLUMN status SET DEFAULT 'new_lead';
 ALTER TABLE crm_admission_leads ADD CONSTRAINT crm_admission_leads_status_check
-  CHECK (status IN ('new_lead', 'uncontactable', 'contactable', 'future_prospect',
+  CHECK (status IN ('new_lead', 'uncontactable', 'contacted', 'future_prospect',
                    'not_interested', 'lost_to_competitor', 'cant_afford',
-                   'new_inquiry', 'contacted', 'counselling',
+                   'new_inquiry', 'counselling',
                    'application_started', 'documents_pending', 'application_submitted',
                    'offer_sent', 'enrolled', 'lost', 'deferred'));

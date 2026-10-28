@@ -11,7 +11,7 @@ def _lead(email="student@example.com"):
 
 def test_statuses_match_the_new_workflow():
     assert PIPELINE_STAGES == [
-        "new_lead", "uncontactable", "contactable", "future_prospect",
+        "new_lead", "uncontactable", "contacted", "future_prospect",
         "not_interested", "lost_to_competitor", "cant_afford", "enrolled",
     ]
 

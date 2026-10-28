@@ -264,6 +264,11 @@ are sent for this check; OpenAI response storage is disabled.
 
 ## CRM rebuild cutover
 
+For the Contactable-to-Contacted stage rename on an existing CRM database, run
+`python scripts/apply_contacted_stage_migration.py` before deploying the matching
+API and CMS. The migration updates existing leads and the admission status
+constraint without changing their creation dates or activity history.
+
 `CRM-corrected.xlsx` supplies field requirements only. Do not run the old CRM
 workbook import scripts for this release. The reset does not touch users,
 academic courses, or LMS students.
