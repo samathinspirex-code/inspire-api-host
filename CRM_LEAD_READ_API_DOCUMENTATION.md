@@ -46,7 +46,7 @@ Returns a page of lead summaries and an unpaginated `total`. The response has no
 
 Filters can be combined. A page beyond the available results returns `{"data":[],"total":<matching_count>}`. `total` counts all matching leads before pagination. `include_archived=false` excludes archived leads. The created-date filter handles imported CRM records and newer API-created records according to the backend's stored timestamp conventions; date-time fields in the response can lack a time-zone offset.
 
-Known stage values: `new_lead`, `uncontactable`, `contactable`, `future_prospect`, `not_interested`, `lost_to_competitor`, `cant_afford`, `enrolled`.
+Known stage values: `new_lead`, `uncontactable`, `contacted`, `future_prospect`, `not_interested`, `lost_to_competitor`, `cant_afford`, `enrolled`.
 
 ```bash
 curl -G 'http://localhost:8000/api/v1/cms/crm/leads' \

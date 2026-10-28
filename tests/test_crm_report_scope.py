@@ -20,11 +20,11 @@ async def test_counsellor_report_is_limited_to_signed_in_counsellor(monkeypatch)
         all_time=False,
         counsellor_id=180,
         programme="HND",
-        stage="contactable",
+        stage="contacted",
         source="whatsapp",
         db=object(),
         current_user=user,
     )
 
     assert result is report
-    assert get_report.await_args.args[3:] == (179, "HND", False, "contactable", "whatsapp")
+    assert get_report.await_args.args[3:] == (179, "HND", False, "contacted", "whatsapp")

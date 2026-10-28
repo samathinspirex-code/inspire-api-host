@@ -201,7 +201,7 @@ For a reversible removal from normal list views, use `PUT /leads/{lead_id}` with
 | `counsellor_name`, `followup_type` | string or null | no | yes | `counsellor_name` is managed automatically when assignment ID changes |
 | `is_archived` | boolean | no | yes | `true` hides the lead from the default list; can be reversed |
 
-**Stage values:** `new_lead`, `uncontactable`, `contactable`, `future_prospect`, `not_interested`, `lost_to_competitor`, `cant_afford`, `enrolled`. For `not_interested` or `lost_to_competitor`, supply a valid `status_reason`; for `cant_afford`, supply an `affordability_reason`; for `future_prospect`, supply a `delay_reason`. If a reason is `Other`, supply `status_remarks`. `enrolled` requires a valid email and may trigger an enrollment email.
+**Stage values:** `new_lead`, `uncontactable`, `contacted`, `future_prospect`, `not_interested`, `lost_to_competitor`, `cant_afford`, `enrolled`. For `not_interested` or `lost_to_competitor`, supply a valid `status_reason`; for `cant_afford`, supply an `affordability_reason`; for `future_prospect`, supply a `delay_reason`. If a reason is `Other`, supply `status_remarks`. `enrolled` requires a valid email and may trigger an enrollment email.
 
 | Field | Valid values when required |
 | --- | --- |

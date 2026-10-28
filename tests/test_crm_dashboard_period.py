@@ -31,13 +31,13 @@ class CrmDashboardPeriodTests(unittest.IsolatedAsyncioTestCase):
             CrmLead(lead_id=1, full_name="Earlier lead", created_at=datetime(2026, 9, 10, 9),
                     updated_at=datetime(2026, 9, 10, 9), stage="new_lead"),
             CrmLead(lead_id=2, full_name="Selected lead", created_at=datetime(2026, 10, 24, 11),
-                    updated_at=datetime(2026, 10, 24, 11), stage="contactable"),
+                    updated_at=datetime(2026, 10, 24, 11), stage="contacted"),
         ])
         self.session.commit()
         all_days = await get_dashboard(self.db)
         selected = await get_dashboard(self.db, date_from=date(2026, 10, 24), date_to=date(2026, 10, 24))
         self.assertEqual(all_days.stats.total_leads, 2)
         self.assertEqual(selected.stats.total_leads, 1)
-        self.assertEqual(selected.stats.pipeline_counts.get("contactable"), 1)
+        self.assertEqual(selected.stats.pipeline_counts.get("contacted"), 1)
         self.assertEqual(selected.stats.pipeline_counts.get("new_lead", 0), 0)
         self.assertEqual([lead.full_name for lead in selected.recent_leads], ["Selected lead"])

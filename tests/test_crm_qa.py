@@ -199,7 +199,7 @@ def test_canonical_pipeline_stages_order():
     expected_order = [
         "new_lead",
         "uncontactable",
-        "contactable",
+        "contacted",
         "future_prospect",
         "not_interested",
         "lost_to_competitor",

@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr, TypeAdapter
 
 
 LEAD_STATUSES = (
-    "new_lead", "uncontactable", "contactable", "future_prospect",
+    "new_lead", "uncontactable", "contacted", "future_prospect",
     "not_interested", "lost_to_competitor", "cant_afford", "enrolled",
 )
 LOSS_REASONS = (

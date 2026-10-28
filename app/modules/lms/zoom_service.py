@@ -148,10 +148,16 @@ async def update_settings(db: AsyncSession, payload: dict, user_id: int) -> dict
     return await get_settings(db)
 
 
-async def begin_connection(db: AsyncSession, user_id: int) -> str:
+async def begin_connection(db: AsyncSession, user_id: int, connection_id: int | None = None) -> str:
     if not _configured():
         raise ValidationError("Zoom OAuth credentials are not configured")
-    raw = secrets.token_urlsafe(48)
+    if connection_id is not None:
+        existing = await db.scalar(text(
+            "SELECT 1 FROM lms_zoom_host_connections WHERE connection_id=:id"
+        ), {"id": connection_id})
+        if not existing:
+            raise NotFoundError("Zoom host account not found")
+    raw = f"relink:{connection_id}:{secrets.token_urlsafe(48)}" if connection_id is not None else secrets.token_urlsafe(48)
     await db.execute(text("DELETE FROM lms_zoom_oauth_states WHERE requested_by=:user OR expires_at<now()"), {"user": user_id})
     await db.execute(text("""
       INSERT INTO lms_zoom_oauth_states(state_hash,requested_by,expires_at)
@@ -170,6 +176,7 @@ async def complete_connection(db: AsyncSession, code: str, state: str) -> str:
     """), {"hash": state_hash})).scalar_one_or_none()
     if valid is None:
         raise ValidationError("The Zoom connection link is invalid or expired")
+    relink_id = int(state.split(":", 2)[1]) if state.startswith("relink:") else None
     auth = (settings.ZOOM_CLIENT_ID, settings.ZOOM_CLIENT_SECRET)
     async with httpx.AsyncClient(timeout=25) as client:
         token_response = await client.post(ZOOM_TOKEN, auth=auth, data={"grant_type":"authorization_code", "code":code,
@@ -187,6 +194,14 @@ async def complete_connection(db: AsyncSession, code: str, state: str) -> str:
         if profile_response.is_error:
             raise ValidationError("The connected Zoom host could not be verified")
         profile = profile_response.json()
+    if relink_id is not None:
+        existing = (await db.execute(text(
+            "SELECT zoom_user_id,email FROM lms_zoom_host_connections WHERE connection_id=:id"
+        ), {"id": relink_id})).mappings().first()
+        if not existing:
+            raise NotFoundError("Zoom host account not found")
+        if existing["zoom_user_id"] != str(profile["id"]):
+            raise ValidationError(f"Sign in to Zoom as {existing['email']} to reconnect this host. Its scheduled meetings were not changed.")
     refresh = tokens.get("refresh_token")
     if not refresh:
         raise ValidationError("Zoom did not return a refresh token")
