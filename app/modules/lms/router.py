@@ -915,6 +915,15 @@ async def connect_zoom_host(
     return {"authorization_url": await zoom_service.begin_connection(db, current_user.user_id)}
 
 
+@router.post("/integrations/zoom/hosts/{connection_id}/reconnect")
+async def reconnect_zoom_host(
+    connection_id: int,
+    current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return {"authorization_url": await zoom_service.begin_connection(db, current_user.user_id, connection_id)}
+
+
 @router.patch("/integrations/zoom/hosts/{connection_id}")
 async def update_zoom_host(
     connection_id: int,
