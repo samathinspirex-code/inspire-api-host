@@ -7,6 +7,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "Inspire API"
     ENVIRONMENT: str = "development"
 
+    PAYMENTS_DATABASE_POOL_SIZE: int = 3
+    PAYMENTS_PUBLIC_BASE_URL: str = "http://localhost:8001"
+    PAYMENTS_PAYHERE_MODE: str = "sandbox"
+    PAYMENTS_PAYHERE_MERCHANT_ID: str = ""
+    PAYMENTS_PAYHERE_MERCHANT_SECRET: str = ""
+    PAYMENTS_MESSAGES_ENABLED: bool = False
+    PAYMENTS_WHATSAPP_TOKEN: str = ""
+    PAYMENTS_WHATSAPP_PHONE_ID: str = ""
+    PAYMENTS_WHATSAPP_TEMPLATE: str = "fee_payment_link"
+    PAYMENTS_WHATSAPP_LANGUAGE: str = "en"
+    PAYMENTS_WHATSAPP_API_VERSION: str = ""
+    PAYMENTS_SMS_URL: str = ""
+    PAYMENTS_SMS_TOKEN: str = ""
+    PAYMENTS_SMS_SENDER: str = "InspireCol"
+
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

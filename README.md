@@ -301,3 +301,21 @@ academic courses, or LMS students.
    session and local storage caches when it starts. Confirm the leads and
    pipeline are empty, submit a new public inquiry, and verify it receives the
    next available counselor. Record the new lead ID and its timeline entry.
+
+## Payments and accounting (Python, no Docker)
+
+The CMS Payments workspace now uses `app/modules/payments` in this FastAPI backend.
+It shares the existing PostgreSQL credentials and CMS sign-in, and keeps its records
+in the separate `payments` schema. Node.js is not required by the backend.
+
+To create the schema **and keep the existing dummy ledger**:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\apply_payments_migration.py --demo
+```
+
+Restart the API and CMS, then open **Payments → Connected ledger**. Changes now
+persist. **Open original demo** preserves the original in-memory demonstration.
+
+Read [PAYMENTS_SETUP.md](PAYMENTS_SETUP.md) for the full setup, permissions,
+PayHere sandbox testing, scheduled jobs, and the later move to real data.

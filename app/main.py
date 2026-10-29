@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +23,18 @@ from app.modules.crm.public_router import router as crm_public_router
 from app.modules.lms.router import router as lms_router
 from app.modules.site_assistant.router import router as site_assistant_router
 from app.modules.user_management.router import router as user_management_router
+from app.modules.payments.router import router as payments_router, public_router as payments_public_router
+from app.modules.payments.db import close_pool as close_payments_pool
 
-app = FastAPI(title=settings.APP_NAME)
+@asynccontextmanager
+async def lifespan(app):
+    try:
+        yield
+    finally:
+        await close_payments_pool()
+
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,4 +72,6 @@ app.include_router(crm_router, prefix="/api/v1/cms")
 app.include_router(crm_public_router)
 app.include_router(crm_integration_router)
 app.include_router(site_assistant_router)
+app.include_router(payments_router)
+app.include_router(payments_public_router)
 

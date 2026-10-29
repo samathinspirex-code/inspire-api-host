@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.config import settings
 from app.core.public_form_email import form_email_html, send_public_form_email
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
@@ -719,17 +719,60 @@ def _crm_created_at_utc(value: datetime) -> datetime:
     return created_at
 
 
+def _normalized_lead_phone(value: Optional[str]) -> str:
+    digits = "".join(character for character in (value or "") if character.isdigit())
+    if digits.startswith("0094") and len(digits) == 13:
+        return digits[2:]
+    if digits.startswith("94") and len(digits) == 11:
+        return digits
+    if digits.startswith("0") and len(digits) == 10:
+        return "94" + digits[1:]
+    if len(digits) == 9:
+        return "94" + digits
+    return digits[2:] if digits.startswith("00") else digits
+
+
+async def _reject_duplicate_manual_phone(db: AsyncSession, phone: Optional[str]) -> None:
+    normalized = _normalized_lead_phone(phone)
+    if len(normalized) < 7:
+        return
+    # Serialize manual submissions for the same number until the lead insert commits.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:phone))"), {"phone": normalized})
+    suffix = normalized[-9:]
+    candidates = (await db.execute(
+        select(CrmLead, User.full_name.label("assigned_user_name"))
+        .outerjoin(User, User.user_id == CrmLead.assigned_counsellor_id)
+        .where(func.right(func.regexp_replace(CrmLead.phone, "[^0-9]", "", "g"), len(suffix)) == suffix)
+        .order_by(CrmLead.is_archived.asc(), CrmLead.lead_id.desc())
+    )).all()
+    for lead, assigned_user_name in candidates:
+        if _normalized_lead_phone(lead.phone) != normalized:
+            continue
+        assigned_to = lead.counsellor_name or assigned_user_name or (
+            f"Counsellor #{lead.assigned_counsellor_id}" if lead.assigned_counsellor_id else "Unassigned"
+        )
+        archived = " (archived)" if lead.is_archived else ""
+        raise ConflictError(
+            f"Phone {phone.strip()} matches lead #{lead.lead_id} ({lead.full_name}){archived} "
+            f"with phone {lead.phone}, "
+            f"assigned to {assigned_to}. Open the existing lead instead of adding another."
+        )
+
+
 async def create_lead(
     db: AsyncSession,
     payload: CrmLeadCreate,
     counsellor_id: Optional[int] = None,
     counsellor_name: Optional[str] = None,
     assign_to_creator: bool = False,
+    reject_duplicate_phone: bool = False,
 ) -> CrmLeadOut:
     await _ensure_awarding_body_column(db)
     await _ensure_counsellor_status_table(db)
     repo = CrmLeadRepository(db)
     data = payload.model_dump()
+    if reject_duplicate_phone:
+        await _reject_duplicate_manual_phone(db, data.get("phone"))
     if data.get("stage") not in PIPELINE_STAGES:
         raise ValidationError("Unsupported lead status")
     _validate_lead_state(CrmLead(full_name=data["full_name"], stage="new_lead", email=data.get("email")), data)

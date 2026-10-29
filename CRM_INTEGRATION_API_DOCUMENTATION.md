@@ -203,6 +203,8 @@ For a reversible removal from normal list views, use `PUT /leads/{lead_id}` with
 
 **Stage values:** `new_lead`, `uncontactable`, `contacted`, `future_prospect`, `not_interested`, `lost_to_competitor`, `cant_afford`, `enrolled`. For `not_interested` or `lost_to_competitor`, supply a valid `status_reason`; for `cant_afford`, supply an `affordability_reason`; for `future_prospect`, supply a `delay_reason`. If a reason is `Other`, supply `status_remarks`. `enrolled` requires a valid email and may trigger an enrollment email.
 
+**TikTok and call sources:** use `tiktok_chat` for TikTok conversations, `tiktok_lead_forms` for TikTok lead form submissions, and `hotline_call` for Direct Calls. The generic `tiktok` source is retired from the CMS entry form.
+
 | Field | Valid values when required |
 | --- | --- |
 | `status_reason` for `not_interested` or `lost_to_competitor` | `Fees Beyond Expectations`; `Programme Not Available`; `Joined Another Institute`; `Entry Requirements Issue`; `Prefers Physical Classes`; `Prefers Another Study Mode`; `Programme Duration Not Suitable`; `Schedule Not Suitable`; `Qualification / Recognition Concern`; `Parent or Guardian Not Interested`; `Decided to Postpone Studies`; `No Longer Interested in Higher Education`; `Other` |
