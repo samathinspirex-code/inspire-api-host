@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -77,8 +77,12 @@ async def admission_draft(payload: AdmissionDraftCreate, db: AsyncSession = Depe
 
 
 @public_router.post("/contact-inquiries", response_model=ContactInquiryResponse, status_code=201)
-async def contact_inquiry(payload: ContactInquiryCreate, db: AsyncSession = Depends(get_db)):
-    return await service.send_contact_inquiry(db, payload)
+async def contact_inquiry(payload: ContactInquiryCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    return await service.send_contact_inquiry(
+        db, payload,
+        visitor_ip=request.headers.get("X-Contact-Visitor-IP"),
+        peer_ip=request.client.host if request.client else None,
+    )
 
 
 @cms_router.get("/{resource}", response_model=AcademicResponse)
