@@ -202,6 +202,7 @@ async def create_lead(
         counsellor_id=current_user.user_id,
         counsellor_name=counsellor_name,
         assign_to_creator=_counsellor_only(current_user),
+        reject_duplicate_phone=True,
     )
 
 

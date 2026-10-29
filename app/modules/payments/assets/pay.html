@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Inspire College · Pay your fees</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+:root{--bg:#f5f5f7;--surface:#fff;--sunk:#f0f0f4;--line:#e4e4ea;--fg:#1d1d1f;--muted:#6e6e78;--accent:#5b2bd6;--accent-2:#7a4cf0;--good:#1a8f50;--good-soft:#e3f5ea;--bad:#d1243c;--bad-soft:#fde6e9;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0a0c;--surface:#141418;--sunk:#1c1c22;--line:#26262e;--fg:#f5f5f7;--muted:#9b9ba6;--accent:#a98bff;--accent-2:#8f6dff;--good:#3ddc84;--good-soft:#12301f;--bad:#ff5c72;--bad-soft:#3a141b;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);font:15px/1.5 "Geist",-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:440px;margin:0 auto;padding:24px 16px 40px;display:flex;flex-direction:column;gap:16px}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-weight:700;font-size:14px}
+.brand b{display:block;font-size:16px}.brand span{font-size:12px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:20px}
+.amount{font-size:38px;font-weight:650;letter-spacing:-.035em;font-variant-numeric:tabular-nums;line-height:1.1;margin:4px 0}
+.muted{color:var(--muted);font-size:13px}
+.ln{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.ln:last-child{border-bottom:0}.ln span:first-child{color:var(--muted)}.ln span:last-child{font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+button{width:100%;min-height:54px;border:0;border-radius:14px;background:var(--accent);color:var(--surface);font:inherit;font-size:16px;font-weight:600;cursor:pointer}
+button:hover{background:var(--accent-2)}button:disabled{opacity:.5;cursor:wait}
+button:focus-visible{outline:2px solid var(--accent-2);outline-offset:3px}
+.note{display:flex;gap:8px;align-items:center;justify-content:center;font-size:12px;color:var(--muted);text-align:center}
+.state{text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+.ok{width:54px;height:54px;border-radius:999px;background:var(--good-soft);display:grid;place-items:center}
+.err{background:var(--bad-soft);color:var(--bad);border-radius:12px;padding:10px 12px;font-size:14px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><div class="mark" aria-hidden="true">IC</div><div><b>Inspire College</b><span>Secure fee payment</span></div></div>
+  <div class="card" id="loading">Loading your payment…</div>
+  <div class="card" id="details" hidden>
+    <div class="muted" id="purpose"></div>
+    <div class="amount" id="amount"></div>
+    <div class="muted" id="due"></div>
+    <div style="margin-top:14px" id="lines"></div>
+  </div>
+  <div class="card state" id="done" hidden>
+    <div class="ok"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--good)" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+    <b style="font-size:18px" id="doneTitle">Payment received</b>
+    <span class="muted" id="doneText">Thank you. A receipt will be emailed to you shortly.</span>
+  </div>
+  <p class="err" id="error" role="alert" hidden></p>
+  <button id="payBtn" hidden>Pay securely</button>
+  <div class="note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Processed by PayHere. Your card details never reach Inspire College.</span></div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var token = location.pathname.split('/').filter(Boolean).pop();
+  var status = new URLSearchParams(location.search).get('status');
+  var $ = function (id) { return document.getElementById(id); };
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var fd = function (d) { var p = d.split('-').map(Number); return p[2] + ' ' + MON[p[1] - 1] + ' ' + p[0]; };
+  var lkr = function (n) { return 'LKR ' + Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 }); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  function fail(msg) { $('error').textContent = msg; $('error').hidden = false; }
+  fetch('/api/v1/payments/public/pay/' + encodeURIComponent(token)).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d.error && d.error.message) || 'This link is not valid.'); return d; }); }).then(function (d) {
+    $('loading').hidden = true;
+    if (d.status === 'paid' || status === 'return') {
+      $('done').hidden = false;
+      if (d.status !== 'paid') { $('doneTitle').textContent = 'Payment submitted'; $('doneText').textContent = 'PayHere is confirming your payment. You will receive a receipt once it is confirmed.'; }
+      return;
+    }
+    $('details').hidden = false;
+    $('purpose').textContent = d.purpose + (d.programme ? ' · ' + d.programme : '');
+    $('amount').textContent = lkr(d.amount);
+    $('due').textContent = 'Due ' + fd(d.due_date) + ' · ' + d.code;
+    var rows = [['Learner', d.first_name + ' ' + d.last_name + ' · ' + d.learner_no], ['Invoice', d.invoice_number]];
+    if (d.total_fee) { rows.push(['Paid so far', lkr(d.paid_to_date)]); rows.push(['Balance after this', lkr(Math.max(0, d.total_fee - d.paid_to_date - d.amount))]); }
+    $('lines').innerHTML = rows.map(function (x) { return '<div class="ln"><span>' + esc(x[0]) + '</span><span>' + esc(x[1]) + '</span></div>'; }).join('');
+    if (status === 'cancelled') fail('The payment was cancelled. You can try again.');
+    if (d.status !== 'sent') { fail(d.status === 'expired' ? 'This link has expired. Please contact Inspire College for a new one.' : 'This link is no longer active.'); return; }
+    $('payBtn').textContent = 'Pay ' + lkr(d.amount) + ' securely';
+    $('payBtn').hidden = false;
+  }).catch(function (e) { $('loading').hidden = true; fail(e.message); });
+
+  $('payBtn').onclick = function () {
+    var b = $('payBtn'); b.disabled = true; b.textContent = 'Opening PayHere…';
+    fetch('/api/v1/payments/public/pay/' + encodeURIComponent(token) + '/checkout', { method: 'POST' }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d.error && d.error.message) || 'Could not start the payment.'); return d; }); }).then(function (d) {
+      var f = document.createElement('form'); f.method = 'post'; f.action = d.action;
+      Object.keys(d.fields).forEach(function (k) { var i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = d.fields[k]; f.appendChild(i); });
+      document.body.appendChild(f); f.submit();
+    }).catch(function (e) { b.disabled = false; b.textContent = 'Try again'; fail(e.message); });
+  };
+})();
+</script>
+</body>
+</html>
