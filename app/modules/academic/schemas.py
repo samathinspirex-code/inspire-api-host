@@ -113,6 +113,7 @@ class ContactInquiryCreate(BaseModel):
     email: EmailStr
     phone: str | None = Field(None, min_length=5, max_length=50)
     message: str = Field(..., min_length=1, max_length=5000)
+    captcha_token: str | None = Field(None, max_length=4096)
 
 
 class ContactInquiryResponse(BaseModel):

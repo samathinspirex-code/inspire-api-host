@@ -1562,6 +1562,12 @@ async def export_leads_csv(
             "cant_afford": "Can't Afford",
             "enrolled": "Enrolled",
         }
+        source_display = {
+            "meta": "Meta Ads",
+            "meta_lead_forms": "Meta Lead Forms",
+            "whatsapp": "WhatsApp Bot",
+            "facebook_chat": "Facebook Chat",
+        }
         for lead in leads:
             closing_date = (
                 lead.followup_date.strftime("%Y-%m-%d") if lead.followup_date else ""
@@ -1580,7 +1586,7 @@ async def export_leads_csv(
                     stage_display.get(lead.stage, lead.stage.replace("_", " ").title()),
                     "",
                     prob,
-                    lead.source.replace("_", " ").title(),
+                    source_display.get(lead.source, lead.source.replace("_", " ").title()),
                     "",
                     lead.counsellor_name or "Admissions Staff",
                     "",
