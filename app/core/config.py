@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     PUBLIC_FORM_FROM_EMAIL: str = "enrol@inspire.college"
     PUBLIC_FORM_FROM_NAME: str = "Inspire College"
     PUBLIC_FORM_RECIPIENT_EMAIL: str = "enrol@inspire.college"
+    CONTACT_BLOCKED_IPS: str = "185.225.69.203"
+    CONTACT_RECAPTCHA_ENABLED: bool = False
+    CONTACT_RECAPTCHA_SECRET_KEY: str = ""
+    CONTACT_RECAPTCHA_ALLOWED_HOSTNAMES: str = "inspirecollege.lk,www.inspirecollege.lk"
     CRM_REGISTRATION_FORM_URL: str = "https://docs.google.com/forms/d/1hz96j-mr0xfSK1gGjB8TmD6-XkKY_KCSagSTCeRGwfw/viewform?edit_requested=true"
     CRM_OFFER_LETTER_PATH: str = "app/modules/crm/assets/offer-letter-template.docx"
     CRM_INTEGRATION_API_TOKEN: str = ""

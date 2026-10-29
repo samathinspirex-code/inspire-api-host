@@ -243,14 +243,13 @@ async def submit_meta_lead(
     """
     Ready webhook intake for Meta Lead Ads (Facebook & Instagram).
     """
-    source_name = "instagram" if payload.platform == "instagram" else "meta"
     create_payload = CrmLeadCreate(
         full_name=payload.full_name.strip(),
         email=payload.email.strip().lower() if payload.email else None,
         phone=payload.phone.strip(),
         city=payload.city,
         interested_programme=payload.interested_programme,
-        source=source_name,
+        source="meta_lead_forms",
         stage="new_lead",
         priority="medium",
         social_lead_id=payload.lead_id,
@@ -260,7 +259,7 @@ async def submit_meta_lead(
         db,
         create_payload,
         counsellor_id=None,
-        counsellor_name=f"Meta Ads ({payload.platform})",
+        counsellor_name=f"Meta Lead Forms ({payload.platform})",
     )
     return {
         "status": "success",

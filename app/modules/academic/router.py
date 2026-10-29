@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.academic import service
+from app.modules.academic.contact_protection import check_contact_submission
 from app.modules.academic.schemas import AdmissionDraftCreate
 from app.modules.academic.wtc_event import WtcRegistrationCreate, WtcRegistrationResponse, register_wtc_visitor
 from app.modules.academic.schemas import (
@@ -78,10 +79,13 @@ async def admission_draft(payload: AdmissionDraftCreate, db: AsyncSession = Depe
 
 @public_router.post("/contact-inquiries", response_model=ContactInquiryResponse, status_code=201)
 async def contact_inquiry(payload: ContactInquiryCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    visitor_ip = request.headers.get("X-Contact-Visitor-IP")
+    peer_ip = request.client.host if request.client else None
+    await check_contact_submission(payload.captcha_token, visitor_ip, peer_ip)
     return await service.send_contact_inquiry(
         db, payload,
-        visitor_ip=request.headers.get("X-Contact-Visitor-IP"),
-        peer_ip=request.client.host if request.client else None,
+        visitor_ip=visitor_ip,
+        peer_ip=peer_ip,
     )
 
 
