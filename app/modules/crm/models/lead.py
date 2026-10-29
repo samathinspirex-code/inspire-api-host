@@ -27,6 +27,8 @@ class CrmLead(Base):
     interested_course: Mapped[Optional[str]] = mapped_column(String(255))
     awarding_body: Mapped[Optional[str]] = mapped_column(String(100))
     message: Mapped[Optional[str]] = mapped_column(Text)
+    contact_visitor_ip: Mapped[Optional[str]] = mapped_column(String(45))
+    contact_peer_ip: Mapped[Optional[str]] = mapped_column(String(45))
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
     stage: Mapped[str] = mapped_column(String(50), nullable=False, default="new_lead")
     status_reason: Mapped[Optional[str]] = mapped_column(String(150))

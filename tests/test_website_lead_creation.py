@@ -39,7 +39,9 @@ async def _contact_submission_keeps_crm_lead_when_alert_email_fails():
         patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
         patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
     ):
-        response = await service.send_contact_inquiry(db, payload)
+        response = await service.send_contact_inquiry(
+            db, payload, visitor_ip="2001:0db8::1", peer_ip="198.51.100.10",
+        )
 
     assert response["sent"] is True
     assert sender.await_count == 2
@@ -47,6 +49,14 @@ async def _contact_submission_keeps_crm_lead_when_alert_email_fails():
     db.commit.assert_awaited_once()
     db.rollback.assert_not_awaited()
     assert db.execute.await_args_list[0].args[1]["phone"] == "+94 77 123 4567"
+    assert db.execute.await_args_list[0].args[1]["visitor_ip"] == "2001:db8::1"
+    assert db.execute.await_args_list[0].args[1]["peer_ip"] == "198.51.100.10"
+
+
+def test_contact_ip_rejects_untrusted_header_text():
+    assert service._canonical_ip("198.51.100.2, 203.0.113.4") is None
+    assert service._canonical_ip("not-an-ip") is None
+    assert service._canonical_ip(" 203.0.113.4 ") == "203.0.113.4"
 
 
 def test_contact_submission_keeps_crm_lead_when_alert_email_fails():

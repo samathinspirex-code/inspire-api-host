@@ -132,6 +132,8 @@ class CrmLeadOut(BaseModel):
     interested_course: Optional[str] = None
     awarding_body: Optional[str] = None
     message: Optional[str] = None
+    contact_visitor_ip: Optional[str] = None
+    contact_peer_ip: Optional[str] = None
     source: str
     stage: str
     status_reason: Optional[str] = None

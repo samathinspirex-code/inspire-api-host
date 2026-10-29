@@ -308,16 +308,33 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     return {"lead_id": lead_id, "status": "new_lead", "message": "Your application was received. An advisor will contact you within one business day."}
 
 
-async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
+def _canonical_ip(value: str | None) -> str | None:
+    """Store only a valid single IPv4/IPv6 address, never an arbitrary header."""
+    from ipaddress import ip_address
+
+    try:
+        return str(ip_address(value.strip())) if value else None
+    except ValueError:
+        return None
+
+
+async def send_contact_inquiry(
+    db: AsyncSession, payload: ContactInquiryCreate,
+    *, visitor_ip: str | None = None, peer_ip: str | None = None,
+):
     phone = payload.phone.strip() if payload.phone else "Not provided"
+    peer_address = _canonical_ip(peer_ip)
+    visitor_address = _canonical_ip(visitor_ip) or peer_address
 
     # Mirror into modern CRM leads pipeline
     try:
         lead_row = (await db.execute(text("""
             INSERT INTO crm_leads
-              (full_name, email, phone, message, source, stage, priority, notes, is_archived)
+              (full_name, email, phone, message, source, stage, priority, notes, is_archived,
+               contact_visitor_ip, contact_peer_ip)
             VALUES
-              (:full_name, :email, :phone, :message, 'website_contact', 'new_lead', 'medium', :notes, FALSE)
+              (:full_name, :email, :phone, :message, 'website_contact', 'new_lead', 'medium', :notes, FALSE,
+               :visitor_ip, :peer_ip)
             RETURNING lead_id
         """), {
             "full_name": payload.full_name.strip(),
@@ -325,6 +342,8 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
             "phone": phone,
             "message": payload.message.strip(),
             "notes": f"Website Contact Message:\n{payload.message.strip()}",
+            "visitor_ip": visitor_address,
+            "peer_ip": peer_address,
         })).mappings().one()
         await db.execute(text("""
             INSERT INTO crm_activities (lead_id, activity_type, content)
@@ -351,6 +370,8 @@ async def send_contact_inquiry(db: AsyncSession, payload: ContactInquiryCreate):
         ("Email", str(payload.email)),
         ("Phone", phone),
     ]
+    if visitor_address:
+        rows.append(("Visitor IP (reported by website)", visitor_address))
     text_body = "New website contact enquiry\n\n" + "\n".join(f"{label}: {value}" for label, value in rows) + f"\n\nMessage:\n{payload.message.strip()}"
     result = await send_public_form_email(
         subject=f"New website enquiry — {payload.full_name.strip()}",
