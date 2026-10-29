@@ -213,7 +213,7 @@ class CrmLeadRepository:
             select(
                 CrmLead,
                 func.row_number()
-                .over(partition_by=CrmLead.stage, order_by=CrmLead.updated_at.desc())
+                .over(partition_by=CrmLead.stage, order_by=(CrmLead.updated_at.desc(), CrmLead.lead_id.desc()))
                 .label("rn"),
                 func.count().over(partition_by=CrmLead.stage).label("stage_total"),
             )
