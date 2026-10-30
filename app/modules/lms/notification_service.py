@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
+from app.modules.cms import media_service
+from app.modules.cms.models import MediaAsset
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.lms.models import (
     ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LmsAnnouncement, LmsClass,
@@ -15,6 +17,7 @@ from app.modules.lms.models import (
 )
 from app.modules.lms.notification_email import send_notification_email
 from app.modules.lms.schemas import AnnouncementItem, AnnouncementListResponse, NotificationDispatchSummary, NotificationItem, NotificationListResponse
+from app.modules.lms.schemas.notification import AnnouncementAttachment
 
 COLOMBO = timezone(timedelta(hours=5, minutes=30), "Asia/Colombo")
 logger = logging.getLogger(__name__)
@@ -149,15 +152,30 @@ async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notifi
 
 
 async def _announcement_item(db: AsyncSession, item: LmsAnnouncement) -> AnnouncementItem:
+    ids = item.attachment_asset_ids or []
+    assets = {asset.media_asset_id: asset for asset in (await db.execute(
+        select(MediaAsset).where(MediaAsset.media_asset_id.in_(ids), MediaAsset.status == "ready")
+    )).scalars().all()} if ids else {}
     return AnnouncementItem(announcement_id=item.announcement_id, audience_type=item.audience_type,
         audience_id=item.audience_id, audience_label=await _audience_label(db, item.audience_type, item.audience_id),
         title=item.title, message=item.message, importance=item.importance, publish_at=item.publish_at,
+        attachments=[AnnouncementAttachment(media_asset_id=asset.media_asset_id,
+            name=asset.original_filename, content_type=asset.content_type,
+            size_bytes=asset.size_bytes, url=media_service._public_url(asset.object_key))
+            for asset_id in ids if (asset := assets.get(asset_id))],
         expires_at=item.expires_at, status=item.status, email_enabled=item.email_enabled,
         created_by=item.created_by, created_at=item.created_at)
 
 
 async def create_announcement(db: AsyncSession, payload, user_id: int, role: str) -> AnnouncementItem:
     await _can_manage_audience(db, role, user_id, payload.audience_type, payload.audience_id)
+    if payload.attachment_asset_ids:
+        assets = (await db.execute(select(MediaAsset).where(MediaAsset.media_asset_id.in_(payload.attachment_asset_ids)))).scalars().all()
+        if len(assets) != len(payload.attachment_asset_ids) or any(
+            asset.created_by != user_id or asset.folder != "announcement-attachments" or asset.status != "ready"
+            for asset in assets
+        ):
+            raise ValidationError("Choose completed announcement uploads from your account")
     now = utc_now(); status = payload.status
     if status == "published" and payload.publish_at > now: status = "scheduled"
     item = LmsAnnouncement(**payload.model_dump(exclude={"status"}), status=status, created_by=user_id)
@@ -196,6 +214,32 @@ async def list_announcements(db: AsyncSession, user_id: int, role: str) -> Annou
     return AnnouncementListResponse(data=[await _announcement_item(db, item) for item in rows])
 
 
+async def get_announcement(db: AsyncSession, announcement_id: int, user_id: int, role: str) -> AnnouncementItem:
+    item = await db.get(LmsAnnouncement, announcement_id)
+    if item is None:
+        raise NotFoundError("Announcement not found")
+    if role not in {"SUPER_ADMIN", "ADMIN"} and item.created_by != user_id:
+        visible = item.status == "published" and item.publish_at <= utc_now() and (
+            item.expires_at is None or item.expires_at > utc_now()
+        )
+        recipient = await db.scalar(select(LmsNotification.notification_id).where(
+            LmsNotification.user_id == user_id,
+            LmsNotification.event_key == f"announcement:{announcement_id}",
+        )) if visible else None
+        if recipient is None:
+            raise ForbiddenError("This announcement is not available to your account")
+    return await _announcement_item(db, item)
+
+
+async def complete_announcement_upload(db: AsyncSession, asset_id: int, user_id: int):
+    asset = await db.get(MediaAsset, asset_id)
+    if asset is None:
+        raise NotFoundError("Media asset not found")
+    if asset.created_by != user_id or asset.folder != "announcement-attachments":
+        raise ForbiddenError("This upload does not belong to your account")
+    return await media_service.complete_upload(db, asset_id)
+
+
 async def update_announcement_status(db: AsyncSession, announcement_id: int, status: str, user_id: int, role: str) -> AnnouncementItem:
     item = await db.get(LmsAnnouncement, announcement_id)
     if item is None: raise NotFoundError("Announcement not found")
@@ -211,7 +255,7 @@ async def materialize_announcement(db: AsyncSession, item: LmsAnnouncement, now:
     if item.status in {"cancelled", "expired", "draft"}: return 0
     users = await _audience_user_ids(db, item.audience_type, item.audience_id)
     created = await _enqueue(db, users, f"announcement:{item.announcement_id}", "announcement", item.title,
-        item.message, f"{settings.LMS_UI_URL.rstrip('/')}?view=notifications", item.importance,
+        item.message, f"{settings.LMS_UI_URL.rstrip('/')}?view=announcements&announcement_id={item.announcement_id}", item.importance,
         item.publish_at, item.email_enabled)
     item.status = "published"; await db.commit()
     return created
@@ -264,7 +308,9 @@ async def list_notifications(db: AsyncSession, user_id: int) -> NotificationList
     now = utc_now()
     rows = list((await db.execute(select(LmsNotification).where(LmsNotification.user_id == user_id, LmsNotification.scheduled_for <= now).order_by(LmsNotification.created_at.desc()).limit(200))).scalars().all())
     return NotificationListResponse(unread_count=sum(item.read_at is None for item in rows), data=[NotificationItem(
-        notification_id=item.notification_id, notification_type=item.notification_type, title=item.title,
+        notification_id=item.notification_id,
+        announcement_id=int(item.event_key.split(":", 1)[1]) if item.notification_type == "announcement" and item.event_key.startswith("announcement:") and item.event_key.split(":", 1)[1].isdigit() else None,
+        notification_type=item.notification_type, title=item.title,
         message=item.message, action_url=item.action_url, importance=item.importance,
         scheduled_for=item.scheduled_for, read_at=item.read_at, email_status=item.email_status,
         created_at=item.created_at) for item in rows])

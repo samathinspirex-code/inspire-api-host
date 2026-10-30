@@ -1,12 +1,17 @@
 import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 
 from app.modules.lms.notification_email import build_notification_payload
-from app.modules.lms.notification_service import _audience_label, local_time, reminder_due
+from app.modules.lms.notification_service import _audience_label, get_announcement, local_time, reminder_due
+from app.core.errors import ForbiddenError
 from app.modules.lms.schemas import AnnouncementCreate
+from app.modules.cms.media_service import allowed_upload_type
+from app.modules.cms.schemas.media_asset import MediaUploadRequest
 
 
 class NotificationTests(unittest.TestCase):
@@ -92,6 +97,30 @@ class NotificationTests(unittest.TestCase):
     def test_admin_audience_labels_are_clear(self):
         self.assertEqual(asyncio.run(_audience_label(None, "admin", None)), "LMS Admins")
         self.assertEqual(asyncio.run(_audience_label(None, "super_admin", None)), "LMS Super Admins")
+
+    def test_announcement_attachment_ids_must_be_unique(self):
+        with self.assertRaises(ValidationError):
+            AnnouncementCreate(audience_type="all", title="Files", message="Please review",
+                publish_at=datetime.now(timezone.utc), attachment_asset_ids=[5, 5])
+
+    def test_announcement_uploads_accept_video_and_documents(self):
+        for filename, content_type, expected in (
+            ("notice.mp4", "video/mp4", ("video", ".mp4")),
+            ("notice.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ("document", ".docx")),
+        ):
+            request = MediaUploadRequest(filename=filename, name=f"notice-{filename}",
+                content_type=content_type, size_bytes=100, folder="announcement-attachments")
+            self.assertEqual(allowed_upload_type(request), expected)
+
+    def test_student_can_open_only_delivered_announcements(self):
+        item = SimpleNamespace(status="published", publish_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            expires_at=None, created_by=12)
+        db = SimpleNamespace(get=AsyncMock(return_value=item), scalar=AsyncMock(return_value=None))
+        with self.assertRaises(ForbiddenError):
+            asyncio.run(get_announcement(db, 4, 30, "STUDENT"))
+        db.scalar.return_value = 77
+        with patch("app.modules.lms.notification_service._announcement_item", new_callable=AsyncMock, return_value="visible"):
+            self.assertEqual(asyncio.run(get_announcement(db, 4, 30, "STUDENT")), "visible")
 
 
 if __name__ == "__main__":

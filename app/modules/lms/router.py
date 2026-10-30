@@ -851,6 +851,33 @@ async def create_announcement(
     return await notification_service.create_announcement(db, payload, current_user.user_id, service.resolve_role(current_user.access) or "")
 
 
+@router.post("/announcements/media/uploads", response_model=MediaUploadTicket, status_code=201)
+async def request_announcement_upload(
+    payload: MediaUploadRequest,
+    current_user: CurrentUser = Depends(announcement_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaUploadTicket:
+    return await media_service.request_upload(db, payload.model_copy(update={"folder": "announcement-attachments"}), current_user.user_id)
+
+
+@router.post("/announcements/media/{asset_id}/complete", response_model=MediaAssetResponse)
+async def complete_announcement_upload(
+    asset_id: int,
+    current_user: CurrentUser = Depends(announcement_manage_access),
+    db: AsyncSession = Depends(get_db),
+) -> MediaAssetResponse:
+    return await notification_service.complete_announcement_upload(db, asset_id, current_user.user_id)
+
+
+@router.get("/announcements/{announcement_id}", response_model=AnnouncementItem)
+async def get_announcement(
+    announcement_id: int,
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> AnnouncementItem:
+    return await notification_service.get_announcement(db, announcement_id, current_user.user_id, service.resolve_role(current_user.access) or "")
+
+
 @router.patch("/announcements/{announcement_id}/status", response_model=AnnouncementItem)
 async def update_announcement_status(
     announcement_id: int,

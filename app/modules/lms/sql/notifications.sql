@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS lms_announcements (
     audience_id BIGINT,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
+    attachment_asset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     importance VARCHAR(20) NOT NULL DEFAULT 'normal' CHECK (importance IN ('normal', 'important', 'urgent')),
     publish_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ,

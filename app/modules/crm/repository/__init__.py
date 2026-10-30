@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import re
 from typing import Any, Optional
 
 from sqlalchemy import and_, case, func, or_, select, union_all
@@ -7,6 +8,27 @@ from sqlalchemy.orm import load_only, selectinload
 
 from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
+
+
+def _phone_search_digits(value: str) -> str:
+    """Use the local part for Sri Lankan numbers, with or without +94 or 0."""
+    digits = re.sub(r"\D", "", value)
+    if digits.startswith("94") and len(digits) > 2:
+        return digits[2:]
+    if digits.startswith("0") and len(digits) > 1:
+        return digits[1:]
+    return digits
+
+
+def _searchable_phone(column: Any) -> Any:
+    digits = column
+    for character in ("+", " ", "-", "(", ")", ".", "/"):
+        digits = func.replace(digits, character, "")
+    return case(
+        (digits.like("94%"), func.substr(digits, 3)),
+        (digits.like("0%"), func.substr(digits, 2)),
+        else_=digits,
+    )
 
 
 class CrmLeadRepository:
@@ -49,18 +71,20 @@ class CrmLeadRepository:
             )
         if search:
             pattern = f"%{search}%"
-            filters.append(
-                or_(
-                    CrmLead.full_name.ilike(pattern),
-                    CrmLead.email.ilike(pattern),
-                    CrmLead.phone.ilike(pattern),
-                    CrmLead.city.ilike(pattern),
-                    CrmLead.interested_programme.ilike(pattern),
-                    CrmLead.interested_course.ilike(pattern),
-                    CrmLead.awarding_body.ilike(pattern),
-                    CrmLead.counsellor_name.ilike(pattern),
-                )
-            )
+            matches = [
+                CrmLead.full_name.ilike(pattern),
+                CrmLead.email.ilike(pattern),
+                CrmLead.phone.ilike(pattern),
+                CrmLead.city.ilike(pattern),
+                CrmLead.interested_programme.ilike(pattern),
+                CrmLead.interested_course.ilike(pattern),
+                CrmLead.awarding_body.ilike(pattern),
+                CrmLead.counsellor_name.ilike(pattern),
+            ]
+            phone_digits = _phone_search_digits(search)
+            if len(phone_digits) >= 3 and not re.search(r"[A-Za-z]", search):
+                matches.append(_searchable_phone(CrmLead.phone).like(f"%{phone_digits}%"))
+            filters.append(or_(*matches))
         if created_from or created_to:
             # Imported workbook timestamps are Sri Lanka wall-clock values;
             # CRM-created timestamps are UTC values in the same naive column.

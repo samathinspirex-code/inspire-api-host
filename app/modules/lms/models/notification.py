@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -15,6 +16,7 @@ class LmsAnnouncement(Base):
     audience_id: Mapped[int | None] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_asset_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
     importance: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
     publish_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

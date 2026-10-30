@@ -197,6 +197,13 @@ must stay server-side and must never be exposed through a `VITE_` variable.
    adapter while keeping the provider replaceable if production volume later
    makes Amazon SES or another provider more economical.
 
+### LMS announcement attachments
+
+LMS announcement attachments use the managed media bucket. Existing databases
+need `python scripts/apply_announcement_attachments_migration.py` before the
+updated API starts. The LMS sends email links to announcements; files are viewed
+or downloaded from the announcement in the LMS.
+
 ### Bulk student CSV import
 
 LMS admins and super admins can open **Students → Import Excel / CSV** to download
