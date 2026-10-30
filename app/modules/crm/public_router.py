@@ -59,6 +59,7 @@ class PublicAdmissionSubmission(BaseModel):
     parents_occupation: Optional[str] = None
     parents_email: Optional[str] = None
     notes: Optional[str] = None
+    ref: Optional[str] = None
 
 
 class PublicContactSubmission(BaseModel):
@@ -70,6 +71,7 @@ class PublicContactSubmission(BaseModel):
     location_lng: Optional[float] = None
     interested_programme: Optional[str] = None
     message: str
+    ref: Optional[str] = None
 
 
 class WhatsAppBotLeadSubmission(BaseModel):
@@ -134,6 +136,7 @@ async def submit_website_admission(
         stage="new_lead",
         priority="high" if payload.highest_qualification in ("A/L", "Degree", "Diploma") else "medium",
         notes=payload.notes,
+        referral_code=(payload.ref or "").strip() or None,
     )
     lead = await service.create_lead(
         db,
@@ -178,6 +181,7 @@ async def submit_website_contact(
         source="website_contact",
         stage="new_lead",
         priority="medium",
+        referral_code=(payload.ref or "").strip() or None,
     )
     lead = await service.create_lead(
         db,

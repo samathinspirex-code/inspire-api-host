@@ -1,7 +1,8 @@
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -33,7 +34,12 @@ from app.modules.crm.schemas import (
 )
 
 
-def require_crm_staff(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+def require_crm_staff(request: Request, current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    path = request.url.path.rstrip("/")
+    if path.endswith("/crm/arena") or path.endswith("/crm/arena/claim"):
+        if any(role in current_user.access for role in ("CMS_ADMIN", "COUNSELLOR", "CRM", "ADMIN", "SUPER_ADMIN")):
+            return current_user
+        raise ForbiddenError("Requires CMS Admin access")
     allowed = {"CRM", "COUNSELLOR", "SUPER_ADMIN", "ADMIN"}
     if not any(role in current_user.access for role in allowed):
         raise ForbiddenError("Requires 'CRM' or administrative access")
@@ -42,7 +48,7 @@ def require_crm_staff(current_user: CurrentUser = Depends(get_current_user)) -> 
 
 def _counsellor_only(user: CurrentUser) -> bool:
     return "COUNSELLOR" in user.access and not any(
-        role in user.access for role in ("CRM", "ADMIN", "SUPER_ADMIN")
+        role in user.access for role in ("CRM", "ADMIN", "SUPER_ADMIN", "CMS_ADMIN")
     )
 
 
@@ -426,3 +432,27 @@ async def retry_enrollment_email(
 ) -> CrmLeadOut:
     await _check_lead_access(db, lead_id, current_user)
     return await service._send_enrollment_email(db, lead_id)
+
+
+class ArenaClaimIn(BaseModel):
+    quest_id: str
+
+
+@router.get("/arena")
+async def arena(
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm.arena_service import arena as build_arena
+    focus = current_user.user_id if _counsellor_only(current_user) else None
+    return await build_arena(db, current_user.user_id, focus)
+
+
+@router.post("/arena/claim")
+async def arena_claim(
+    payload: ArenaClaimIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm.arena_service import claim
+    return await claim(db, current_user.user_id, payload.quest_id)

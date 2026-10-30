@@ -266,6 +266,7 @@ class CrmLeadCreate(BaseModel):
     country: Optional[str] = None
     social_lead_id: Optional[str] = None
     external_record_id: Optional[str] = None
+    referral_code: Optional[str] = None
     assigned_counsellor_id: Optional[int] = None
 
 
