@@ -46,7 +46,7 @@ from app.modules.auth.security import (
 
 
 _DUMMY_PASSWORD_HASH = hash_password("invalid-password-timing-value")
-CMS_ACCESS_KEYS = {"CMS", "USER_MANAGEMENT", "CRM", "COUNSELLOR"}
+CMS_ACCESS_KEYS = {"CMS", "CMS_ADMIN", "USER_MANAGEMENT", "CRM", "COUNSELLOR"}
 
 
 def _user_access_keys(user: User) -> list[str]:

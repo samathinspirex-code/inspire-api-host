@@ -10,13 +10,12 @@ import re
 import time
 from collections import defaultdict
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import openai_client
 from app.core.config import settings
 from app.core.errors import APIError
 from app.modules.academic import service as academic_service
-from app.modules.lms.assistant_service import _download_ssl_context
 from app.modules.site_assistant.schemas import SiteAssistantChatRequest
 
 logger = logging.getLogger(__name__)
@@ -158,36 +157,12 @@ async def build_context(db: AsyncSession, payload: SiteAssistantChatRequest) -> 
 async def _openai_reply(context: str, payload: SiteAssistantChatRequest) -> str | None:
     conversation = [{"role": turn.role, "content": turn.content} for turn in payload.history[-10:]]
     conversation.append({"role": "user", "content": payload.message})
-    request = {
-        "model": settings.OPENAI_MODEL,
-        "instructions": f"{INSTRUCTIONS}\n\n{context}",
-        "input": conversation,
-        "max_output_tokens": settings.SITE_ASSISTANT_MAX_OUTPUT_TOKENS,
-        "reasoning": {"effort": "low"},
-        "text": {"verbosity": "low"},
-        "store": False,
-    }
-    try:
-        async with httpx.AsyncClient(verify=_download_ssl_context(), timeout=settings.OPENAI_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/responses",
-                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"},
-                json=request,
-            )
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.warning("Site assistant OpenAI request failed with HTTP %s", exc.response.status_code)
-        return None
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Site assistant OpenAI request failed: %s", type(exc).__name__)
-        return None
-    texts = [
-        content.get("text", "")
-        for output in data.get("output", []) if output.get("type") == "message"
-        for content in output.get("content", []) if content.get("type") == "output_text"
-    ]
-    return "\n".join(text.strip() for text in texts if text.strip()).strip() or None
+    return await openai_client.respond(
+        f"{INSTRUCTIONS}\n\n{context}",
+        conversation,
+        max_output_tokens=settings.SITE_ASSISTANT_MAX_OUTPUT_TOKENS,
+        tag="Site assistant OpenAI",
+    )
 
 
 async def chat(db: AsyncSession, payload: SiteAssistantChatRequest) -> dict:

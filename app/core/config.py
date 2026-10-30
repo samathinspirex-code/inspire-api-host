@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     SITE_ASSISTANT_MAX_OUTPUT_TOKENS: int = 500
     SITE_ASSISTANT_RATE_LIMIT_PER_HOUR: int = 40
     SITE_ASSISTANT_GLOBAL_LIMIT_PER_HOUR: int = 2000
+    COPILOT_MAX_OUTPUT_TOKENS: int = 900
+    COPILOT_RATE_LIMIT_PER_HOUR: int = 120
+
+    # Admissions Studio enrolment mission (Command Centre / Dashboard hero)
+    MISSION_TARGET_ENROLMENTS: int = 1000
+    MISSION_START_DATE: str = "2026-11-01"
+    MISSION_END_DATE: str = "2027-06-30"
+    PUBLIC_API_BASE_URL: str = "http://localhost:8000"
 
     MEDIA_BUCKET: str = ""
     MEDIA_REGION: str = "ap-northeast-1"
