@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr, Field
 AccessKey = Literal[
     "USER_MANAGEMENT",
     "CMS",
+    "CMS_ADMIN",
     "FINANCE",
     "CRM",
     "COUNSELLOR",
