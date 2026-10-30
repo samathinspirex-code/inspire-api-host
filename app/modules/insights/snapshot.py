@@ -1,5 +1,8 @@
 """Aggregates the live CRM and CMS into one snapshot the studio pages share."""
 
+import asyncio
+import json
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -7,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cms import dashboard_service
-from app.modules.crm.service import CONTACT_ACTIVITY_TYPES, PIPELINE_STAGES
+from app.modules.crm.service import CONTACT_ACTIVITY_TYPES, PIPELINE_STAGES, _ensure_lead_indexes
 from app.modules.insights.scoring import factors, heat, hours_since, next_action, score_lead, source_label, win_probability
 
 CONTACT_SQL = ", ".join(f"'{item}'" for item in sorted(CONTACT_ACTIVITY_TYPES))
@@ -23,6 +26,29 @@ STAGE_LABELS = {
 }
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 PALETTE = ["#6D28D9", "#2563EB", "#0E9F6E", "#D9480F", "#DB2777", "#0891B2", "#CA8A04", "#4F46E5"]
+_SNAPSHOT_TTL = 20.0
+_snapshot_cache: dict[int | None, tuple[float, dict]] = {}
+_snapshot_locks: dict[int | None, asyncio.Lock] = {}
+
+
+def _json_rows(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _as_date(value):
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    return value
+
+
+def _as_datetime(value):
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return value
 
 
 def _now() -> datetime:
@@ -71,69 +97,156 @@ def _streak(days: set, today) -> int:
 
 
 async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> dict:
+    lock = _snapshot_locks.setdefault(counsellor_id, asyncio.Lock())
+    async with lock:
+        cached = _snapshot_cache.get(counsellor_id)
+        if cached and time.monotonic() - cached[0] < _SNAPSHOT_TTL:
+            return cached[1]
+        await _ensure_lead_indexes()
+        result = await _load_snapshot(db, counsellor_id)
+        _snapshot_cache[counsellor_id] = (time.monotonic(), result)
+        return result
+
+
+async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> dict:
     now = _now()
     since = now - timedelta(days=90)
     month = now - timedelta(days=30)
     where = _where(counsellor_id)
-    params = _params(counsellor_id, since=since, month=month, now=now)
+    params = _params(
+        counsellor_id,
+        since=since,
+        month=month,
+        now=now,
+        hour_ago=now - timedelta(hours=1),
+        day_ago=now - timedelta(days=1),
+        three_ago=now - timedelta(days=3),
+        week_ago=now - timedelta(days=7),
+    )
+    pack = (await db.execute(text(f"""
+        SELECT
+          (SELECT coalesce(json_agg(json_build_array(stage, cnt)), '[]'::json)
+             FROM (SELECT l.stage AS stage, count(*) AS cnt FROM crm_leads l WHERE {where} GROUP BY l.stage) s) AS stages,
+          (SELECT coalesce(json_agg(json_build_array(src, leads, enrolled) ORDER BY leads DESC), '[]'::json)
+             FROM (
+               SELECT l.source AS src, count(*) AS leads, count(*) FILTER (WHERE l.stage = 'enrolled') AS enrolled
+               FROM crm_leads l WHERE {where} GROUP BY l.source
+             ) s) AS sources,
+          (SELECT coalesce(json_agg(json_build_array(name, leads, enrolled) ORDER BY leads DESC), '[]'::json)
+             FROM (
+               SELECT name, leads, enrolled FROM (
+                 SELECT coalesce(nullif(l.interested_course, ''), nullif(l.interested_programme, ''), 'Unspecified') AS name,
+                        count(*) AS leads, count(*) FILTER (WHERE l.stage = 'enrolled') AS enrolled
+                 FROM crm_leads l WHERE {where} GROUP BY 1
+               ) named ORDER BY leads DESC LIMIT 12
+             ) s) AS programmes,
+          (SELECT coalesce(json_agg(json_build_array(day, cnt) ORDER BY day), '[]'::json)
+             FROM (
+               SELECT date(l.created_at) AS day, count(*) AS cnt
+               FROM crm_leads l WHERE {where} AND l.created_at >= :since GROUP BY 1
+             ) s) AS daily,
+          (SELECT json_build_array(
+               count(*) FILTER (WHERE l.created_at > :hour_ago),
+               count(*) FILTER (WHERE l.created_at <= :hour_ago AND l.created_at > :day_ago),
+               count(*) FILTER (WHERE l.created_at <= :day_ago AND l.created_at > :three_ago),
+               count(*) FILTER (WHERE l.created_at <= :three_ago AND l.created_at > :week_ago),
+               count(*) FILTER (WHERE l.created_at <= :week_ago)
+             ) FROM crm_leads l WHERE {where} AND l.stage = 'new_lead') AS aging,
+          (SELECT coalesce(json_agg(json_build_array(dow, leads, enrolled)), '[]'::json)
+             FROM (
+               SELECT extract(dow FROM l.created_at)::int AS dow, count(*) AS leads,
+                      count(*) FILTER (WHERE l.stage = 'enrolled') AS enrolled
+               FROM crm_leads l WHERE {where} AND l.created_at >= :since GROUP BY 1
+             ) s) AS weekday,
+          (SELECT avg(extract(epoch FROM (l.enrolled_at - l.created_at)) / 86400)
+             FROM crm_leads l
+             WHERE {where} AND l.stage = 'enrolled' AND l.enrolled_at IS NOT NULL AND l.enrolled_at >= l.created_at) AS enrol_days,
+          (SELECT avg(extract(epoch FROM (a.first_at - l.created_at)) / 86400)
+             FROM crm_leads l JOIN (
+               SELECT lead_id, min(created_at) AS first_at FROM crm_activities
+               WHERE activity_type IN ({CONTACT_SQL}) GROUP BY lead_id
+             ) a ON a.lead_id = l.lead_id
+             WHERE {where} AND a.first_at >= l.created_at) AS velocity_days,
+          (SELECT count(*) FROM crm_leads l WHERE {where} AND l.stage = 'enrolled' AND l.enrolled_at >= :month) AS month_enrolled,
+          (SELECT count(*) FROM crm_leads l WHERE {where} AND l.created_at >= :month) AS active_month,
+          (
+            WITH open_leads AS (
+              SELECT l.stage, coalesce(l.source, '') AS source, coalesce(l.followup_count, 0) AS followup_count,
+                     (l.payment_plan IS NOT NULL AND l.payment_plan <> '') AS instalment,
+                     l.assigned_counsellor_id,
+                     extract(epoch FROM (:now - coalesce(l.last_contacted_at, l.last_activity_at, l.created_at))) / 3600 AS hours_idle
+              FROM crm_leads l
+              WHERE {where} AND l.stage NOT IN ('enrolled', 'not_interested', 'lost_to_competitor')
+            ), scored AS (
+              SELECT assigned_counsellor_id, hours_idle,
+                least(99, greatest(1,
+                  CASE stage
+                    WHEN 'new_lead' THEN 16 WHEN 'uncontactable' THEN 4 WHEN 'contacted' THEN 30
+                    WHEN 'future_prospect' THEN 22 WHEN 'cant_afford' THEN 14 ELSE 10
+                  END
+                  + least(33, followup_count * 5 + CASE WHEN followup_count > 0 THEN 8 ELSE 0 END + CASE WHEN instalment THEN 5 ELSE 0 END)
+                  + CASE WHEN hours_idle < 24 THEN 12 WHEN hours_idle < 72 THEN 7 WHEN hours_idle < 168 THEN 2 ELSE 0 END
+                  + CASE source
+                    WHEN 'meta' THEN 2 WHEN 'meta_lead_forms' THEN 2 WHEN 'facebook_chat' THEN 2 WHEN 'instagram' THEN 2
+                    WHEN 'whatsapp' THEN 5 WHEN 'website_admission' THEN 8 WHEN 'website_contact' THEN 6
+                    WHEN 'wtc_registrations_form' THEN 6 WHEN 'manual' THEN 4 WHEN 'referral' THEN 12
+                    WHEN 'walk_in' THEN 11 WHEN 'fair' THEN 6 WHEN 'hotline_call' THEN 4
+                    WHEN 'tiktok_lead_forms' THEN 3 WHEN 'tiktok_chat' THEN 3 WHEN 'linkedin' THEN 4
+                    ELSE 3
+                  END
+                  + CASE WHEN instalment THEN 5 ELSE 0 END
+                )) AS score,
+                CASE stage
+                  WHEN 'new_lead' THEN 0.06 WHEN 'uncontactable' THEN 0.02 WHEN 'contacted' THEN 0.20
+                  WHEN 'future_prospect' THEN 0.10 WHEN 'cant_afford' THEN 0.04 ELSE 0.05
+                END AS win_base
+              FROM open_leads
+            )
+            SELECT json_build_object(
+              'hot', count(*) FILTER (WHERE score >= 62),
+              'warm', count(*) FILTER (WHERE score >= 40 AND score < 62),
+              'expected', coalesce(sum(least(0.95, win_base * (0.45 + score / 90.0))), 0),
+              'idle', coalesce((
+                SELECT json_agg(json_build_array(assigned_counsellor_id, n))
+                FROM (
+                  SELECT assigned_counsellor_id, count(*) AS n
+                  FROM scored
+                  WHERE score >= 62 AND hours_idle > 24 AND assigned_counsellor_id IS NOT NULL
+                  GROUP BY assigned_counsellor_id
+                ) idle_rows
+              ), '[]'::json)
+            )
+            FROM scored
+          ) AS heat_totals
+    """), params)).mappings().one()
 
-    stage_rows = (await db.execute(text(
-        f"SELECT l.stage, count(*) FROM crm_leads l WHERE {where} GROUP BY l.stage"
-    ), params)).all()
+    stage_rows = _json_rows(pack["stages"])
     stages = {key: 0 for key in PIPELINE_STAGES}
     for stage, count in stage_rows:
         if stage in stages:
             stages[stage] = int(count)
     total = sum(stages.values())
 
-    source_rows = (await db.execute(text(
-        f"SELECT l.source, count(*), count(*) FILTER (WHERE l.stage = 'enrolled') "
-        f"FROM crm_leads l WHERE {where} GROUP BY l.source ORDER BY count(*) DESC"
-    ), params)).all()
+    source_rows = _json_rows(pack["sources"])
     sources = [
         {"key": source or "manual", "label": source_label(source), "leads": int(leads), "enrolled": int(enrolled), "source": "cms"}
         for source, leads, enrolled in source_rows
     ]
 
-    programme_rows = (await db.execute(text(
-        "SELECT coalesce(nullif(l.interested_course, ''), nullif(l.interested_programme, ''), 'Unspecified') AS name, "
-        f"count(*), count(*) FILTER (WHERE l.stage = 'enrolled') FROM crm_leads l WHERE {where} "
-        "GROUP BY 1 ORDER BY count(*) DESC LIMIT 12"
-    ), params)).all()
+    programme_rows = _json_rows(pack["programmes"])
     programmes = [
         {"name": name, "leads": int(leads), "enrolled": int(enrolled), "color": _color(name), "source": "cms"}
         for name, leads, enrolled in programme_rows
     ]
 
-    daily_rows = (await db.execute(text(
-        f"SELECT date(l.created_at) AS day, count(*) FROM crm_leads l "
-        f"WHERE {where} AND l.created_at >= :since GROUP BY 1 ORDER BY 1"
-    ), params)).all()
-    by_day = {row[0]: int(row[1]) for row in daily_rows}
+    by_day = {_as_date(day): int(count) for day, count in _json_rows(pack["daily"])}
     daily = []
     cursor = since.date()
     while cursor <= now.date():
         daily.append({"date": cursor.isoformat(), "count": by_day.get(cursor, 0)})
         cursor += timedelta(days=1)
 
-    # Cutoffs are bound as timestamps. Postgres mis-types `$1 - interval`
-    # inside a comparison and rejects the query as timestamp > interval.
-    aging_params = {
-        **params,
-        "hour_ago": now - timedelta(hours=1),
-        "day_ago": now - timedelta(days=1),
-        "three_ago": now - timedelta(days=3),
-        "week_ago": now - timedelta(days=7),
-    }
-    aging_row = (await db.execute(text(
-        "SELECT "
-        "count(*) FILTER (WHERE l.created_at > :hour_ago), "
-        "count(*) FILTER (WHERE l.created_at <= :hour_ago AND l.created_at > :day_ago), "
-        "count(*) FILTER (WHERE l.created_at <= :day_ago AND l.created_at > :three_ago), "
-        "count(*) FILTER (WHERE l.created_at <= :three_ago AND l.created_at > :week_ago), "
-        "count(*) FILTER (WHERE l.created_at <= :week_ago) "
-        f"FROM crm_leads l WHERE {where} AND l.stage = 'new_lead'"
-    ), aging_params)).one()
+    aging_row = _json_rows(pack["aging"])
     aging = [
         {"key": "<1h", "count": int(aging_row[0] or 0)},
         {"key": "1–24h", "count": int(aging_row[1] or 0)},
@@ -177,31 +290,14 @@ async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> d
         peak = "Sat 20:00"
         peak_value = 0
 
-    open_rows = (await db.execute(text(
-        "SELECT l.lead_id, l.full_name, l.stage, l.source, l.created_at, l.last_contacted_at, l.last_activity_at, "
-        "l.followup_count, l.payment_plan, l.assigned_counsellor_id, "
-        "coalesce(nullif(l.interested_course, ''), nullif(l.interested_programme, ''), 'Unspecified') "
-        f"FROM crm_leads l WHERE {where} AND l.stage NOT IN ('enrolled', 'not_interested', 'lost_to_competitor')"
-    ), params)).all()
-    hot = warm = 0
-    expected = 0.0
-    hot_by_owner: dict[int, int] = defaultdict(int)
-    for row in open_rows:
-        last = row.last_contacted_at or row.last_activity_at
-        lead = {
-            "stage": row.stage, "source": row.source, "created_at": row.created_at, "last_touch": last,
-            "followup_count": row.followup_count, "instalment": bool(row.payment_plan),
-        }
-        value = score_lead(lead, now)
-        band = heat(value)
-        if band == "hot":
-            hot += 1
-            idle = hours_since(last or row.created_at, now) or 0
-            if idle > 24 and row.assigned_counsellor_id:
-                hot_by_owner[row.assigned_counsellor_id] += 1
-        elif band == "warm":
-            warm += 1
-        expected += win_probability(lead, now)
+    heat_totals = pack["heat_totals"]
+    if isinstance(heat_totals, str):
+        heat_totals = json.loads(heat_totals)
+    hot = int(heat_totals["hot"] or 0)
+    warm = int(heat_totals["warm"] or 0)
+    expected = float(heat_totals["expected"] or 0)
+    hot_by_owner = {int(owner): int(count) for owner, count in _json_rows(heat_totals["idle"]) if owner}
+    open_lead_count = total - stages["enrolled"] - stages["not_interested"] - stages["lost_to_competitor"]
 
     activity_rows = (await db.execute(text(
         "SELECT a.activity_type, a.content, a.counsellor_name, a.created_at, l.full_name "
@@ -260,10 +356,7 @@ async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> d
         for label, count in zip(["< 5 min", "5–15", "15–60", "1–4 h", "4–24 h", "> 24 h"], response_cuts)
     ]
 
-    day_rows = (await db.execute(text(
-        "SELECT extract(dow FROM l.created_at)::int, count(*), count(*) FILTER (WHERE l.stage = 'enrolled') "
-        f"FROM crm_leads l WHERE {where} AND l.created_at >= :since GROUP BY 1"
-    ), params)).all()
+    day_rows = _json_rows(pack["weekday"])
     weekday = []
     for index in range(7):
         match = next((row for row in day_rows if (int(row[0]) + 6) % 7 == index), None)
@@ -271,17 +364,8 @@ async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> d
         enrolled = int(match[2]) if match else 0
         weekday.append({"day": WEEKDAYS[index], "leads": leads, "conversion": round(enrolled / leads * 100, 1) if leads else 0})
 
-    velocity_row = (await db.execute(text(
-        "SELECT avg(extract(epoch FROM (a.first_at - l.created_at)) / 86400) "
-        "FROM crm_leads l JOIN ("
-        f"  SELECT lead_id, min(created_at) AS first_at FROM crm_activities WHERE activity_type IN ({CONTACT_SQL}) GROUP BY lead_id"
-        ") a ON a.lead_id = l.lead_id "
-        f"WHERE {where} AND a.first_at >= l.created_at"
-    ), params)).scalar()
-    enrol_row = (await db.execute(text(
-        "SELECT avg(extract(epoch FROM (l.enrolled_at - l.created_at)) / 86400) "
-        f"FROM crm_leads l WHERE {where} AND l.stage = 'enrolled' AND l.enrolled_at IS NOT NULL AND l.enrolled_at >= l.created_at"
-    ), params)).scalar()
+    velocity_row = pack["velocity_days"]
+    enrol_row = pack["enrol_days"]
     first_days = round(float(velocity_row), 1) if velocity_row else None
     enrol_days = round(float(enrol_row), 1) if enrol_row else None
     velocity = [
@@ -291,12 +375,8 @@ async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> d
         {"label": "Applied → Paid", "days": max(0.5, round((enrol_days or 12) - (first_days or 1.8) - 10.8, 1)) if enrol_days else 5.1, "source": "modelled" if enrol_days else "demo"},
     ]
 
-    month_enrolled = int((await db.execute(text(
-        f"SELECT count(*) FROM crm_leads l WHERE {where} AND l.stage = 'enrolled' AND l.enrolled_at >= :month"
-    ), params)).scalar() or 0)
-    active_month = int((await db.execute(text(
-        f"SELECT count(*) FROM crm_leads l WHERE {where} AND l.created_at >= :month"
-    ), params)).scalar() or 0)
+    month_enrolled = int(pack["month_enrolled"] or 0)
+    active_month = int(pack["active_month"] or 0)
 
     counsellor_rows = (await db.execute(text(
         "SELECT u.user_id, coalesce(nullif(u.full_name, ''), u.email), "
@@ -375,7 +455,7 @@ async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> d
         "peak_calls": peak_value,
         "hot": hot,
         "warm": warm,
-        "open_leads": len(open_rows),
+        "open_leads": open_lead_count,
         "expected_enrolments": round(expected, 1),
         "activity": activity,
         "counsellors": counsellors,

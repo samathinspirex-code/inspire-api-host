@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.config import settings
@@ -177,6 +178,63 @@ def _apply_course_choice(data: dict, choice: dict) -> None:
 
 _counsellor_schema_ready = False
 _awarding_body_column_ready = False
+_lead_indexes_ready = False
+
+_SUMMARY_ONLY = load_only(
+    CrmLead.lead_id,
+    CrmLead.external_record_id,
+    CrmLead.full_name,
+    CrmLead.email,
+    CrmLead.phone,
+    CrmLead.city,
+    CrmLead.country,
+    CrmLead.interested_programme,
+    CrmLead.interested_course,
+    CrmLead.awarding_body,
+    CrmLead.source,
+    CrmLead.stage,
+    CrmLead.campaign,
+    CrmLead.academic_course_id,
+    CrmLead.last_contacted_at,
+    CrmLead.last_activity_at,
+    CrmLead.followup_count,
+    CrmLead.priority,
+    CrmLead.amount,
+    CrmLead.counsellor_name,
+    CrmLead.assigned_counsellor_id,
+    CrmLead.assigned_at,
+    CrmLead.followup_date,
+    CrmLead.followup_type,
+    CrmLead.created_at,
+    CrmLead.updated_at,
+)
+
+
+async def _ensure_lead_indexes() -> None:
+    """Board and dashboard queries filter archived leads and sort by recency."""
+    global _lead_indexes_ready
+    if _lead_indexes_ready:
+        return
+    from app.core.database import engine
+
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_leads_pipeline_stage "
+            "ON crm_leads (stage, updated_at DESC, lead_id DESC) WHERE is_archived = false"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_leads_active_created "
+            "ON crm_leads (created_at DESC) WHERE is_archived = false"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_activities_lead_created "
+            "ON crm_activities (lead_id, created_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_activities_recent "
+            "ON crm_activities (created_at DESC)"
+        ))
+    _lead_indexes_ready = True
 
 
 async def _crm_schema_present(db: AsyncSession) -> bool:
@@ -1001,6 +1059,7 @@ async def get_pipeline(
     created_to: Optional[datetime] = None,
 ) -> CrmPipelineResponse:
     await _ensure_awarding_body_column(db)
+    await _ensure_lead_indexes()
     limit = max(1, min(preview_per_stage, PIPELINE_PREVIEW_MAX))
     previews, counts = await CrmLeadRepository(db).pipeline_snapshot(
         PIPELINE_STAGES, limit, counsellor_id, awarding_body, programme, unassigned, created_from, created_to
@@ -1099,7 +1158,7 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, d
         CrmLeadSummary.model_validate(lead)
         for lead in (
             await db.execute(
-                select(CrmLead).where(active).order_by(CrmLead.created_at.desc()).limit(5)
+                select(CrmLead).options(_SUMMARY_ONLY).where(active).order_by(CrmLead.created_at.desc()).limit(5)
             )
         ).scalars().all()
     ]
@@ -1108,6 +1167,7 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, d
         for lead in (
             await db.execute(
                 select(CrmLead)
+                .options(_SUMMARY_ONLY)
                 .where(and_(active, CrmLead.followup_date >= today_start, CrmLead.followup_date < today_end))
                 .order_by(CrmLead.followup_date)
             )

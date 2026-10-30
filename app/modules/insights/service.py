@@ -2,11 +2,12 @@
 
 from datetime import date
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.modules.insights import demo_data
 from app.modules.insights.forecast import mission_forecast
+from app.modules.insights.mission import get_mission, milestone_plan
 from app.modules.insights.snapshot import load_snapshot
 
 TIERS = [("Rookie", 0), ("Advisor", 1500), ("Mentor", 3000), ("Pathfinder", 5000), ("Legend", 8000)]
@@ -88,40 +89,40 @@ async def dashboard(db: AsyncSession, counsellor_id: int | None) -> dict:
     }
 
 
+def _gap(snap: dict, forecast: dict) -> str:
+    if forecast["on_track"]:
+        return "On track."
+    open_stages = [item for item in snap["stages"] if item["key"] != "enrolled"]
+    biggest = max(open_stages, key=lambda item: item["count"], default=None)
+    where = f" The largest open group is {biggest['label']} ({biggest['count']})." if biggest and biggest["count"] else ""
+    return f"That's {forecast['short']} short.{where}"
+
+
 async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int) -> dict:
     snap = await load_snapshot(db, counsellor_id)
+    goal = await get_mission(db)
     today = date.today()
-    end = date.fromisoformat(settings.MISSION_END_DATE)
-    start = date.fromisoformat(settings.MISSION_START_DATE)
     monthly = snap["month_enrolled"]
-    forecast = mission_forecast(current=snap["students"], target=settings.MISSION_TARGET_ENROLMENTS, today=today, end=end, recent_monthly=monthly)
-    gap = (
-        "On track."
-        if forecast["on_track"]
-        else f"That's {forecast['short']} short. The gap sits in Uncontactable recovery."
-    )
+    forecast = mission_forecast(current=snap["students"], target=goal["target"], today=today, end=goal["end"], recent_monthly=monthly)
     sparks = [point["count"] for point in snap["daily"][-14:]]
     return {
         "generated_at": snap["generated_at"],
         "mission": {
-            "target": settings.MISSION_TARGET_ENROLMENTS,
+            "target": goal["target"],
             "current": snap["students"],
-            "start": start.isoformat(),
-            "end": end.isoformat(),
+            "start": goal["start"].isoformat(),
+            "end": goal["end"].isoformat(),
             "days_left": forecast["days_left"],
             "need_per_month": forecast["need_per_month"],
             "conversion": snap["conversion"],
             "landing": forecast["landing"],
             "on_track": forecast["on_track"],
-            "gap": gap,
+            "gap": _gap(snap, forecast),
             "uncontactable": snap["uncontactable"],
+            "month_enrolled": snap["month_enrolled"],
             "source_students": "cms",
             "source_forecast": "modelled",
-            "milestones": [
-                {"name": "Phase 1 · Dec 2026", "target": 350, "current": snap["students"]},
-                {"name": "Phase 2 · Mar 2027", "target": 650, "current": snap["students"]},
-                {"name": "Final · Jun 2027", "target": settings.MISSION_TARGET_ENROLMENTS, "current": snap["students"]},
-            ],
+            "milestones": milestone_plan(goal["start"], goal["end"], goal["target"], snap["students"]),
         },
         "kpis": [
             {"label": "CRM leads", "value": snap["total"], "detail": f"{snap['awaiting']} awaiting first contact", "tone": "brand", "spark": sparks, "source": "cms"},
@@ -147,15 +148,15 @@ async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int)
 
 async def metrics(db: AsyncSession, counsellor_id: int | None) -> dict:
     snap = await load_snapshot(db, counsellor_id)
+    goal = await get_mission(db)
     today = date.today()
-    end = date.fromisoformat(settings.MISSION_END_DATE)
-    forecast = mission_forecast(current=snap["students"], target=settings.MISSION_TARGET_ENROLMENTS, today=today, end=end, recent_monthly=snap["month_enrolled"])
+    forecast = mission_forecast(current=snap["students"], target=goal["target"], today=today, end=goal["end"], recent_monthly=snap["month_enrolled"])
     sla = round((1 - snap["past_sla"] / snap["awaiting"]) * 100) if snap["awaiting"] else 100
     contact_rate = round((snap["total"] - snap["awaiting"]) / snap["total"] * 100) if snap["total"] else 0
     meta = demo_data.META
     cpl = round(meta["spend"] / meta["leads"])
     tree = [
-        {"id": "root", "x": 400, "y": 30, "title": "Active students", "value": f"{snap['students']} / {settings.MISSION_TARGET_ENROLMENTS}", "tone": "bad", "source": "CMS"},
+        {"id": "root", "x": 400, "y": 30, "title": "Active students", "value": f"{snap['students']} / {goal['target']}", "tone": "bad", "source": "CMS"},
         {"id": "new", "x": 240, "y": 130, "title": "New students / month", "value": f"{snap['month_enrolled']} (need {forecast['need_per_month']})", "tone": "good" if snap["month_enrolled"] >= forecast["need_per_month"] else "warn", "source": "CMS", "parent": "root"},
         {"id": "ret", "x": 640, "y": 130, "title": "Retention", "value": "75% (dropout 25%)", "tone": "warn", "source": "Demo", "parent": "root"},
         {"id": "leads", "x": 100, "y": 240, "title": "Leads / month", "value": f"{snap['active_month']:,}", "tone": "good", "source": "CMS", "parent": "new"},
@@ -183,7 +184,7 @@ async def metrics(db: AsyncSession, counsellor_id: int | None) -> dict:
         {"label": "Outstanding fees", "value": "LKR 4.2M", "delta": "+0.3M", "tone": "bad", "source": "Demo", "spark": [3.4, 3.5, 3.7, 3.8, 3.9, 4, 4.1, 4.2]},
         {"label": "Payments on time", "value": "82%", "delta": "−1 pt", "tone": "warn", "source": "Demo", "spark": [85, 85, 84, 84, 83, 83, 82, 82]},
         {"label": "Dropout ratio", "value": "25%", "delta": "stated", "tone": "warn", "source": "Demo", "spark": [27, 26, 25, 25]},
-        {"label": "Active students", "value": str(snap["students"]), "delta": f"goal {settings.MISSION_TARGET_ENROLMENTS}", "tone": "bad", "source": "CMS", "spark": [snap["students"]] * 4},
+        {"label": "Active students", "value": str(snap["students"]), "delta": f"goal {goal['target']}", "tone": "bad", "source": "CMS", "spark": [snap["students"]] * 4},
     ]
     return {
         "tree": tree,
@@ -210,6 +211,7 @@ def _recommendations(snap: dict) -> list[dict]:
 
 async def brain(db: AsyncSession, counsellor_id: int | None) -> dict:
     snap = await load_snapshot(db, counsellor_id)
+    goal = await get_mission(db)
     meta = demo_data.META
     first = sum(meta["cost"][:7]) / max(1, sum(meta["daily_leads"][:7]))
     last = sum(meta["cost"][-7:]) / max(1, sum(meta["daily_leads"][-7:]))
@@ -235,7 +237,7 @@ async def brain(db: AsyncSession, counsellor_id: int | None) -> dict:
         ],
         "recommendations": _recommendations(snap),
         "predictions": [
-            {"label": "Active students by 30 Jun 2027", "value": str(mission_forecast(current=snap["students"], target=settings.MISSION_TARGET_ENROLMENTS, today=date.today(), end=date.fromisoformat(settings.MISSION_END_DATE), recent_monthly=snap["month_enrolled"])["landing"]), "note": f"goal {settings.MISSION_TARGET_ENROLMENTS}", "pct": min(1, snap["students"] / settings.MISSION_TARGET_ENROLMENTS), "source": "modelled"},
+            {"label": f"Active students by {goal['end'].strftime('%d %b %Y')}", "value": str(mission_forecast(current=snap["students"], target=goal["target"], today=date.today(), end=goal["end"], recent_monthly=snap["month_enrolled"])["landing"]), "note": f"goal {goal['target']}", "pct": min(1, snap["students"] / goal["target"]) if goal["target"] else 0, "source": "modelled"},
             {"label": "Enrolments next 30 days", "value": str(round(snap["expected_enrolments"])), "note": "from open pipeline", "pct": 0.5, "source": "modelled"},
             {"label": "Dropout risk this term", "value": "25%", "note": "stated, not measured yet", "pct": 0.25, "source": "demo"},
             {"label": "Payments collected on time", "value": "82%", "note": "demo until PayHere is connected", "pct": 0.82, "source": "demo"},
@@ -245,14 +247,15 @@ async def brain(db: AsyncSession, counsellor_id: int | None) -> dict:
 
 async def context_text(db: AsyncSession, counsellor_id: int | None) -> str:
     snap = await load_snapshot(db, counsellor_id)
+    goal = await get_mission(db)
     stages = ", ".join(f"{item['label']} {item['count']}" for item in snap["stages"])
     team = "\n".join(
         f"{person['name']}: {person['assigned']} assigned, {person['contacted']} contacted, {person['enrolled']} enrolled, reply {person['median_reply_min'] or 'n/a'} min, streak {person['streak']}"
         for person in snap["counsellors"]
     ) or "No counsellors in this view."
     return (
-        f"ORGANISATION: Inspire College, Colombo. Mission: {settings.MISSION_TARGET_ENROLMENTS} active students "
-        f"by {settings.MISSION_END_DATE} (from {settings.MISSION_START_DATE}). Currently {snap['students']} LMS students.\n"
+        f"ORGANISATION: Inspire College, Colombo. Mission: {goal['target']} active students "
+        f"by {goal['end'].isoformat()} (from {goal['start'].isoformat()}). Currently {snap['students']} LMS students.\n"
         f"CRM: {snap['total']} leads, {snap['awaiting']} awaiting first contact, {snap['in_progress']} in progress, "
         f"{snap['enrolled']} enrolled ({snap['conversion']}% conversion), {snap['active_month']} new this month. "
         f"Leading interest {snap['top_interest']['name']} ({snap['top_interest']['count']}).\n"
@@ -301,11 +304,74 @@ async def studio(db: AsyncSession, tab: str, counsellor_id: int | None) -> dict:
     if tab == "visitors":
         return {"tab": tab, "visitors": demo_data.VISITORS, "pages": demo_data.PAGES}
     if tab == "tracker":
-        return {"tab": tab, "stages": snap["stages"], "total": snap["total"], "hot": snap["hot"], "warm": snap["warm"], "open": snap["open_leads"], "source": "cms"}
+        people = (await db.execute(text(
+            "SELECT lead_id, full_name, phone, stage, source, "
+            "coalesce(nullif(interested_course, ''), nullif(interested_programme, ''), 'Unspecified') AS programme "
+            "FROM crm_leads WHERE is_archived = false "
+            "ORDER BY updated_at DESC NULLS LAST, lead_id DESC LIMIT 30"
+        ))).mappings().all()
+        return {
+            "tab": tab,
+            "stages": snap["stages"],
+            "total": snap["total"],
+            "hot": snap["hot"],
+            "warm": snap["warm"],
+            "open": snap["open_leads"],
+            "source": "cms",
+            "people": [dict(row) for row in people],
+        }
     if tab == "champions":
-        return {"tab": tab, "champions": demo_data.CHAMPIONS, "source": "demo", "ladder": [{"name": name, "xp": floor} for name, floor in TIERS]}
+        referred = int(await db.scalar(text(
+            "SELECT count(*) FROM crm_leads WHERE is_archived = false AND coalesce(referral_code, '') <> ''"
+        )) or 0)
+        return {
+            "tab": tab,
+            "champions": demo_data.CHAMPIONS,
+            "source": "demo",
+            "live_referrals": referred,
+            "ladder": [{"name": name, "xp": floor} for name, floor in TIERS],
+        }
     if tab == "lab":
         return {"tab": tab, "recommendations": _recommendations(snap), "meta_campaigns": meta["campaigns"], "source": "demo"}
     if tab == "connect":
-        return {"tab": tab, "platforms": demo_data.PLATFORMS, "events": demo_data.GTM_EVENTS}
+        return {"tab": tab, "platforms": await _platform_status(db), "events": demo_data.GTM_EVENTS}
     return {"tab": "overview"}
+
+
+async def _platform_status(db: AsyncSession) -> list[dict]:
+    """Website forms already write CRM leads. A saved connector account marks that platform connected. The rest stay demo."""
+    accounts: list[dict] = []
+    lines = 0
+    try:
+        from app.modules.connectors.service import catalogue
+        async with db.begin_nested():
+            live = await catalogue(db)
+            accounts = live.get("accounts") or []
+            lines = len(live.get("whatsapp_lines") or [])
+    except Exception:
+        accounts = []
+        lines = 0
+    connected = {item.get("platform") for item in accounts}
+    platforms = []
+    for item in demo_data.PLATFORMS:
+        row = dict(item)
+        if item["id"] in connected:
+            row["status"] = "Connected"
+            row["tone"] = "good"
+            row["source"] = "cms"
+        elif item["id"] == "forms":
+            row["status"] = "Connected"
+            row["tone"] = "good"
+            row["source"] = "cms"
+        elif item["id"] == "wa" and lines:
+            row["status"] = f"{lines} numbers"
+            row["tone"] = "good"
+            row["source"] = "cms"
+        elif item["id"] == "meta":
+            row["status"] = "Demo snapshot"
+            row["tone"] = "warn"
+            row["source"] = "demo"
+        else:
+            row["source"] = "demo"
+        platforms.append(row)
+    return platforms

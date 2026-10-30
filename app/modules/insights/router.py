@@ -1,4 +1,7 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -7,6 +10,7 @@ from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import CurrentUser
 from app.modules.crm.router import _check_lead_access
 from app.modules.insights import service
+from app.modules.insights.mission import save_mission
 from app.modules.insights.snapshot import lead_journey
 
 router = APIRouter(prefix="/api/v1/cms/insights", tags=["insights"])
@@ -39,6 +43,17 @@ async def get_dashboard(counsellor_id: int | None = None, user: CurrentUser = De
 @router.get("/command-centre")
 async def get_command(range_days: int = Query(30, alias="range", ge=7, le=90), counsellor_id: int | None = None, user: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
     return await service.command_centre(db, _scope(user, counsellor_id), range_days)
+
+
+class MissionIn(BaseModel):
+    target: int = Field(ge=1, le=1_000_000)
+    start: date
+    end: date
+
+
+@router.put("/mission")
+async def put_mission(payload: MissionIn, _: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
+    return await save_mission(db, payload.target, payload.start, payload.end)
 
 
 @router.get("/metrics")

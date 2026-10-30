@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, load_only, selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
@@ -203,34 +203,66 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
-    ) -> tuple[dict[str, list[CrmLead]], dict[str, int]]:
-        """One round trip for every stage's preview cards and total count."""
+    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
+        """Stage totals plus a short card preview. Each stage is limited on its own so the board does not sort every lead column."""
         filters = self._build_filters(
             None, None, counsellor_id, None, False, awarding_body, programme, unassigned,
             created_from, created_to,
         )
-        ranked = (
-            select(
-                CrmLead,
-                func.row_number()
-                .over(partition_by=CrmLead.stage, order_by=(CrmLead.updated_at.desc(), CrmLead.lead_id.desc()))
-                .label("rn"),
-                func.count().over(partition_by=CrmLead.stage).label("stage_total"),
-            )
-            .where(*filters, CrmLead.stage.in_(stages))
-            .subquery()
-        )
-        lead = aliased(CrmLead, ranked)
-        rows = (
+        counts: dict[str, int] = {stage: 0 for stage in stages}
+        count_rows = (
             await self.db.execute(
-                select(lead, ranked.c.stage_total).where(ranked.c.rn <= limit).order_by(ranked.c.rn)
+                select(CrmLead.stage, func.count())
+                .where(*filters, CrmLead.stage.in_(stages))
+                .group_by(CrmLead.stage)
             )
         ).all()
-        previews: dict[str, list[CrmLead]] = {stage: [] for stage in stages}
-        counts: dict[str, int] = {stage: 0 for stage in stages}
-        for row_lead, stage_total in rows:
-            previews.setdefault(row_lead.stage, []).append(row_lead)
-            counts[row_lead.stage] = int(stage_total or 0)
+        for stage_name, total in count_rows:
+            if stage_name in counts:
+                counts[stage_name] = int(total or 0)
+
+        preview_columns = (
+            CrmLead.lead_id,
+            CrmLead.external_record_id,
+            CrmLead.full_name,
+            CrmLead.email,
+            CrmLead.phone,
+            CrmLead.city,
+            CrmLead.country,
+            CrmLead.interested_programme,
+            CrmLead.interested_course,
+            CrmLead.awarding_body,
+            CrmLead.source,
+            CrmLead.stage,
+            CrmLead.campaign,
+            CrmLead.academic_course_id,
+            CrmLead.last_contacted_at,
+            CrmLead.last_activity_at,
+            CrmLead.followup_count,
+            CrmLead.priority,
+            CrmLead.amount,
+            CrmLead.counsellor_name,
+            CrmLead.assigned_counsellor_id,
+            CrmLead.assigned_at,
+            CrmLead.followup_date,
+            CrmLead.followup_type,
+            CrmLead.created_at,
+            CrmLead.updated_at,
+        )
+        previews: dict[str, list[dict[str, Any]]] = {stage: [] for stage in stages}
+        if stages:
+            preview = union_all(
+                *(
+                    select(*preview_columns)
+                    .where(*filters, CrmLead.stage == stage)
+                    .order_by(CrmLead.updated_at.desc(), CrmLead.lead_id.desc())
+                    .limit(limit)
+                    for stage in stages
+                )
+            )
+            for row in (await self.db.execute(preview)).all():
+                card = dict(row._mapping)
+                previews.setdefault(card["stage"], []).append(card)
         return previews, counts
 
     async def list_pipeline_preview(self, stage: str, limit: int) -> list[CrmLead]:
