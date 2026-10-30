@@ -14,9 +14,12 @@ class AnnouncementCreate(BaseModel):
     expires_at: datetime | None = None
     status: Literal["draft", "scheduled", "published"] = "scheduled"
     email_enabled: bool = True
+    attachment_asset_ids: list[int] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def validate_announcement(self):
+        if len(self.attachment_asset_ids) != len(set(self.attachment_asset_ids)) or any(asset_id <= 0 for asset_id in self.attachment_asset_ids):
+            raise ValueError("Choose up to ten distinct uploaded files")
         if self.audience_type in {"course", "class"} and self.audience_id is None:
             raise ValueError("Choose a course or class audience")
         if self.audience_type not in {"course", "class"} and self.audience_id is not None:
@@ -26,6 +29,14 @@ class AnnouncementCreate(BaseModel):
         return self
 
 
+class AnnouncementAttachment(BaseModel):
+    media_asset_id: int
+    name: str
+    content_type: str
+    size_bytes: int | None
+    url: str
+
+
 class AnnouncementItem(BaseModel):
     announcement_id: int
     audience_type: str
@@ -33,6 +44,7 @@ class AnnouncementItem(BaseModel):
     audience_label: str
     title: str
     message: str
+    attachments: list[AnnouncementAttachment] = Field(default_factory=list)
     importance: str
     publish_at: datetime
     expires_at: datetime | None
@@ -52,6 +64,7 @@ class AnnouncementStatusUpdate(BaseModel):
 
 class NotificationItem(BaseModel):
     notification_id: int
+    announcement_id: int | None = None
     notification_type: str
     title: str
     message: str

@@ -38,7 +38,7 @@ ASSIGNMENT_DOCUMENT_TYPES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".zip": "application/zip",
 }
-ASSIGNMENT_FOLDERS = {"assignment-submissions", "assignment-materials"}
+ASSIGNMENT_FOLDERS = {"assignment-submissions", "assignment-materials", "announcement-attachments"}
 PPTX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
@@ -53,8 +53,8 @@ def allowed_upload_type(payload: MediaUploadRequest) -> tuple[str, str]:
         return "document", extension
     media = ALLOWED_MEDIA_TYPES.get(content_type)
     allowed_extension = media and (media[1] == extension or (media[1] == ".jpg" and extension == ".jpeg"))
-    if not allowed_extension or (payload.folder in ASSIGNMENT_FOLDERS and media[0] == "video"):
-        raise ValidationError("Unsupported file type. Use images, PDF, Word, Excel, PowerPoint, CSV, or ZIP")
+    if not allowed_extension or (payload.folder in {"assignment-submissions", "assignment-materials"} and media[0] == "video"):
+        raise ValidationError("Unsupported file type. Use images, PDF, Word, Excel, PowerPoint, CSV, ZIP, MP4, or WebM")
     return media
 
 
