@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.auth.models import User
-from app.modules.lms.models import ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LecturerProfile, StudentProfile
+from app.modules.lms.models import ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LecturerProfile, LmsClass, StudentProfile
 from app.modules.lms.repository import AssignmentRepository, ClassRepository, CourseRepository, PeopleRepository
 from app.modules.lms.schemas import AssignmentListResponse, AssignmentPersonItem
 from app.modules.lms.student_excel_import import parse_excel_students
@@ -403,10 +403,12 @@ async def assign_class_lecturers_bulk(db: AsyncSession, class_id: int, user_ids:
 async def remove_class_lecturer(db: AsyncSession, class_id: int, user_id: int) -> None:
     repo = AssignmentRepository(db)
     relation = await repo.get_class_lecturer(class_id, user_id)
-    if relation is None:
-        raise NotFoundError("Class lecturer assignment not found")
     class_ = await ClassRepository(db).get(class_id)
-    await repo.remove(relation)
+    # Keep removal and Course access cleanup in one transaction. A retry must
+    # also finish cleanup if an earlier request already removed the class link.
+    if relation is not None:
+        await db.delete(relation)
+        await db.flush()
     if class_ is not None:
         still_teaching_course = await db.scalar(
             select(ClassLecturer.class_id)
@@ -424,4 +426,4 @@ async def remove_class_lecturer(db: AsyncSession, class_id: int, user_id: int) -
                     CourseLecturer.lecturer_user_id == user_id,
                 )
             )
-            await db.commit()
+    await db.commit()
