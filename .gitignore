@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.payments-sandbox.local
 .pytest_cache/
 *.egg-info/
 keys/

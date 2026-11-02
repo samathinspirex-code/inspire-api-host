@@ -420,11 +420,13 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     """Store Vimeo's final thumbnail and duration when processing completes."""
     item = await db.get(LmsLearningItem, item_id)
     if item is None or item.item_type != "video":
+        await db.rollback()
         return False
     resource_url = item.resource_url
     current_thumbnail = item.thumbnail_url
     video_uri = video_uri_from_url(resource_url)
     if not video_uri:
+        await db.rollback()
         return False
     # Do not hold a scarce PostgreSQL session while Vimeo performs network I/O.
     # The fresh lookup below also protects against an item being deleted while
@@ -439,6 +441,7 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
     if (thumbnail_ready and current_thumbnail != thumbnail_url) or duration_minutes:
         item = await db.get(LmsLearningItem, item_id)
         if item is None or item.item_type != "video" or item.resource_url != resource_url:
+            await db.rollback()
             return False
         changed = False
         if thumbnail_ready and item.thumbnail_url != thumbnail_url:
@@ -449,6 +452,8 @@ async def refresh_learning_item_thumbnail(db: AsyncSession, item_id: int) -> boo
             changed = True
         if changed:
             await db.commit()
+        else:
+            await db.rollback()
     return thumbnail_ready and duration_minutes is not None
 
 

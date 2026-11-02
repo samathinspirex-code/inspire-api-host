@@ -9,6 +9,8 @@ from sqlalchemy.orm import load_only, selectinload
 from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
 
+LEGACY_NOT_INTERESTED_STAGES = ("lost_to_competitor", "cant_afford")
+
 
 def _phone_search_digits(value: str) -> str:
     """Use the local part for Sri Lankan numbers, with or without +94 or 0."""
@@ -53,7 +55,7 @@ class CrmLeadRepository:
         if not include_archived:
             filters.append(CrmLead.is_archived == False)  # noqa: E712
         if stage:
-            filters.append(CrmLead.stage == stage)
+            filters.append(CrmLead.stage.in_((stage, *LEGACY_NOT_INTERESTED_STAGES)) if stage == "not_interested" else CrmLead.stage == stage)
         if source:
             filters.append(CrmLead.source == source)
         if unassigned:
@@ -186,7 +188,12 @@ class CrmLeadRepository:
         created_to: Optional[datetime] = None,
         extra: Optional[dict[str, Any]] = None,
     ) -> tuple[list[CrmLead], int]:
-        """One round trip for a page of leads plus the unpaginated total."""
+        """One round trip for a page of leads plus the unpaginated total.
+
+        Keep the count independent of the paginated lead rows. A window count
+        forces PostgreSQL to retain every wide CRM row through the sort, which
+        spills to temporary disk on larger lead lists.
+        """
         filters = self._build_filters(
             stage, source, counsellor_id, search, include_archived, awarding_body, programme, unassigned,
             created_from, created_to, extra,
@@ -201,8 +208,15 @@ class CrmLeadRepository:
             order = (priority_order, CrmLead.created_at.desc(), CrmLead.lead_id.desc())
         else:
             order = (CrmLead.created_at.desc(), CrmLead.lead_id.desc())
+        total_query = (
+            select(func.count())
+            .select_from(CrmLead)
+            .where(*filters)
+            .correlate(None)
+            .scalar_subquery()
+        )
         stmt = (
-            select(CrmLead, func.count().over().label("total"))
+            select(CrmLead, total_query.label("total"))
             .where(*filters)
             .order_by(*order)
             .offset((page - 1) * size)
@@ -234,11 +248,12 @@ class CrmLeadRepository:
             created_from, created_to,
         )
         counts: dict[str, int] = {stage: 0 for stage in stages}
+        display_stage = case((CrmLead.stage.in_(LEGACY_NOT_INTERESTED_STAGES), "not_interested"), else_=CrmLead.stage)
         count_rows = (
             await self.db.execute(
-                select(CrmLead.stage, func.count())
-                .where(*filters, CrmLead.stage.in_(stages))
-                .group_by(CrmLead.stage)
+                select(display_stage, func.count())
+                .where(*filters, display_stage.in_(stages))
+                .group_by(display_stage)
             )
         ).all()
         for stage_name, total in count_rows:
@@ -278,7 +293,7 @@ class CrmLeadRepository:
             preview = union_all(
                 *(
                     select(*preview_columns)
-                    .where(*filters, CrmLead.stage == stage)
+                    .where(*filters, display_stage == stage)
                     .order_by(CrmLead.updated_at.desc(), CrmLead.lead_id.desc())
                     .limit(limit)
                     for stage in stages
@@ -286,6 +301,8 @@ class CrmLeadRepository:
             )
             for row in (await self.db.execute(preview)).all():
                 card = dict(row._mapping)
+                if card["stage"] in LEGACY_NOT_INTERESTED_STAGES:
+                    card["stage"] = "not_interested"
                 previews.setdefault(card["stage"], []).append(card)
         return previews, counts
 

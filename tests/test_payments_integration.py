@@ -69,7 +69,8 @@ class PaymentIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 with patch('app.modules.payments.router.transaction',local_transaction), \
                      patch.object(payhere.settings,'PAYMENTS_PAYHERE_MERCHANT_ID','1211149'), \
                      patch.object(payhere.settings,'PAYMENTS_PAYHERE_MERCHANT_SECRET','test-secret'), \
-                     patch.object(payhere.settings,'PAYMENTS_PAYHERE_MODE','sandbox'):
+                     patch.object(payhere.settings,'PAYMENTS_PAYHERE_MODE','sandbox'), \
+                     patch.object(core,'today',return_value='2026-10-28'):
                     async with httpx.AsyncClient(transport=transport,base_url='http://test') as client:
                         base='/api/v1/cms/payments'; seq=0
                         async def post(path,body):

@@ -48,23 +48,35 @@ PIPELINE_STAGES = [
     "new_lead",
     "uncontactable",
     "contacted",
+    "follow_up",
+    "potential",
     "future_prospect",
     "not_interested",
-    "lost_to_competitor",
-    "cant_afford",
     "enrolled",
 ]
 
 IN_PROGRESS_STAGES = [
-    "uncontactable", "contacted", "future_prospect",
+    "uncontactable", "contacted", "follow_up", "potential", "future_prospect",
 ]
 
 
 ACTIVE_ASSIGNED_STAGES = [
-    "new_lead", "uncontactable", "contacted", "future_prospect",
+    "new_lead", "uncontactable", "contacted", "follow_up", "potential", "future_prospect",
 ]
 
 CONTACT_ACTIVITY_TYPES = {"call", "email", "whatsapp", "counselling_session", "follow_up_completed"}
+
+
+def _legacy_outcome_details(lead: CrmLead) -> tuple[str, str]:
+    reason = "Joined Another Institute" if lead.stage == "lost_to_competitor" else "Fees Beyond Expectations"
+    details = [f"Previous CRM stage: {lead.stage}"]
+    if lead.status_reason:
+        details.append(f"previous reason: {lead.status_reason}")
+    if lead.affordability_reason:
+        details.append(f"affordability reason: {lead.affordability_reason}")
+    if lead.status_remarks:
+        details.append(f"remarks: {lead.status_remarks}")
+    return reason, "; ".join(details)
 
 
 def _validate_lead_state(lead: CrmLead, changes: dict) -> None:
@@ -928,7 +940,16 @@ async def update_lead(
     if enrolling:
         data["enrolled_at"] = datetime.utcnow()
     if "stage" in data and data["stage"] != lead.stage:
-        if data["stage"] not in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect"):
+        if data["stage"] not in PIPELINE_STAGES:
+            raise ValidationError("Unsupported lead status")
+        if lead.stage in ("lost_to_competitor", "cant_afford"):
+            legacy_reason, legacy_note = _legacy_outcome_details(lead)
+            data["notes"] = "\n".join(filter(None, (data.get("notes", lead.notes), legacy_note)))
+            if data["stage"] == "not_interested" and not data.get("status_reason"):
+                data["status_reason"] = legacy_reason
+        if data["stage"] in ("follow_up", "potential") and not (data.get("status_remarks") or "").strip():
+            raise ValidationError("Enter a note for Follow-Up or Potential")
+        if data["stage"] not in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect", "follow_up", "potential"):
             data.update(status_reason=None, status_remarks=None)
         elif data["stage"] not in ("not_interested", "lost_to_competitor"):
             data["status_reason"] = None
@@ -973,6 +994,12 @@ async def update_lead(
                 "counsellor_id": actor_id,
                 "counsellor_name": actor_name,
             }, commit=False)
+    if "stage" in changes and data["stage"] in ("follow_up", "potential"):
+        await CrmActivityRepository(db).create({
+            "lead_id": lead_id, "activity_type": "note",
+            "content": f"{data['stage'].replace('_', ' ').title()} note: {data['status_remarks'].strip()}",
+            "counsellor_id": actor_id, "counsellor_name": actor_name,
+        }, commit=False)
     if changes:
         await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
         await db.commit()
@@ -1001,11 +1028,18 @@ async def update_stage(
         raise NotFoundError(f"Lead {lead_id} not found")
 
     old_stage = lead.stage
+    if stage not in PIPELINE_STAGES:
+        raise ValidationError("Unsupported lead status")
+    legacy_note = None
+    if old_stage in ("lost_to_competitor", "cant_afford"):
+        legacy_reason, legacy_note = _legacy_outcome_details(lead)
+        if stage == "not_interested" and not status_reason:
+            status_reason = legacy_reason
     enrolling = stage == "enrolled" and old_stage != "enrolled"
     changes = {
         "stage": stage,
         "status_reason": status_reason if stage in ("not_interested", "lost_to_competitor") else None,
-        "status_remarks": status_remarks if stage in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect") else None,
+        "status_remarks": status_remarks if stage in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect", "follow_up", "potential") else None,
         "affordability_reason": affordability_reason if stage == "cant_afford" else None,
         "expected_intake": expected_intake if stage == "future_prospect" else None,
         "expected_month": expected_month if stage == "future_prospect" else None,
@@ -1013,6 +1047,8 @@ async def update_stage(
     }
     if followup_date is not None:
         changes["followup_date"] = followup_date
+    if legacy_note:
+        changes["notes"] = "\n".join(filter(None, (lead.notes, legacy_note)))
     _validate_lead_state(lead, changes)
     await repo.update(lead, changes, commit=False)
 
@@ -1022,7 +1058,7 @@ async def update_stage(
         {
             "lead_id": lead_id,
             "activity_type": "stage_change",
-            "content": f"Stage changed from '{old_stage}' to '{stage}'",
+            "content": f"Stage changed from '{old_stage}' to '{stage}'" + (f". Note: {status_remarks.strip()}" if stage in ("follow_up", "potential") else ""),
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
         },
@@ -1148,7 +1184,8 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, d
     for stage, source, programme, cnt in mix_rows:
         value = int(cnt or 0)
         if stage:
-            pipeline_counts[stage] = pipeline_counts.get(stage, 0) + value
+            display_stage = "not_interested" if stage in ("lost_to_competitor", "cant_afford") else stage
+            pipeline_counts[display_stage] = pipeline_counts.get(display_stage, 0) + value
         if source:
             by_source[source] = by_source.get(source, 0) + value
         if programme:
@@ -1274,7 +1311,7 @@ async def get_counsellor_report(
     if programme:
         lead_scope.append(or_(CrmLead.interested_programme == programme, CrmLead.interested_course == programme))
     if stage:
-        lead_scope.append(CrmLead.stage == stage)
+        lead_scope.append(CrmLead.stage.in_(("not_interested", "lost_to_competitor", "cant_afford")) if stage == "not_interested" else CrmLead.stage == stage)
     if source:
         lead_scope.append(CrmLead.source == source)
 
@@ -1287,7 +1324,7 @@ async def get_counsellor_report(
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
-    contacted_stages = CrmLead.stage.in_(("contacted", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
+    contacted_stages = CrmLead.stage.in_(("contacted", "follow_up", "potential", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
     contacted_cohort = and_(in_created, or_(in_contacted, contacted_stages))
     not_contacted_cohort = and_(in_created, ~or_(in_contacted, contacted_stages))
     metric_rows = (
@@ -1297,13 +1334,15 @@ async def get_counsellor_report(
                 func.count().filter(in_created),
                 func.count().filter(and_(in_updated, CrmLead.stage == "future_prospect")),
                 func.count().filter(and_(in_updated, CrmLead.stage == "enrolled")),
-                func.count().filter(and_(in_updated, CrmLead.stage.in_(("not_interested", "lost_to_competitor")))),
+                func.count().filter(and_(in_updated, CrmLead.stage.in_(("not_interested", "lost_to_competitor", "cant_afford")))),
                 func.count().filter(in_follow),
                 func.count(),
                 func.count().filter(contacted_cohort),
                 func.count().filter(not_contacted_cohort),
                 func.count().filter(and_(in_created, CrmLead.stage == "enrolled")),
                 func.count().filter(and_(in_created, CrmLead.stage == "future_prospect")),
+                func.count().filter(and_(in_created, CrmLead.stage == "follow_up")),
+                func.count().filter(and_(in_created, CrmLead.stage == "potential")),
                 func.count().filter(and_(in_created, CrmLead.stage == "uncontactable")),
                 func.count().filter(and_(in_created, CrmLead.stage == "not_interested")),
                 func.count().filter(and_(in_created, CrmLead.stage == "lost_to_competitor")),
@@ -1321,13 +1360,13 @@ async def get_counsellor_report(
     follow_map: dict[Optional[int], int] = {}
     current_assigned: dict[int, int] = {}
     extra_map: dict[Optional[int], tuple[int, ...]] = {}
-    for cid, new_leads, offers, enrolled, lost, followups, assigned, contacted, not_contacted, cohort_enrolled, future, uncontactable, not_interested, competitor, cant_afford, overdue in metric_rows:
+    for cid, new_leads, offers, enrolled, lost, followups, assigned, contacted, not_contacted, cohort_enrolled, future, follow_up, potential, uncontactable, not_interested, competitor, cant_afford, overdue in metric_rows:
         new_map[cid] = int(new_leads or 0)
         offers_map[cid] = int(offers or 0)
         enrolled_map[cid] = int(cohort_enrolled or 0)
         lost_map[cid] = int(lost or 0)
         follow_map[cid] = int(followups or 0)
-        extra_map[cid] = tuple(int(value or 0) for value in (contacted, not_contacted, future, uncontactable, not_interested, competitor, cant_afford, overdue))
+        extra_map[cid] = tuple(int(value or 0) for value in (contacted, not_contacted, future, follow_up, potential, uncontactable, not_interested, competitor, cant_afford, overdue))
         if cid is not None:
             current_assigned[int(cid)] = int(assigned or 0)
 
@@ -1383,7 +1422,8 @@ async def get_counsellor_report(
     for stage, source, programme_name, day, cnt in mix_rows:
         value = int(cnt or 0)
         if stage:
-            by_stage[stage] = by_stage.get(stage, 0) + value
+            display_stage = "not_interested" if stage in ("lost_to_competitor", "cant_afford") else stage
+            by_stage[display_stage] = by_stage.get(display_stage, 0) + value
         if source:
             by_source[source] = by_source.get(source, 0) + value
             if stage == "enrolled":
@@ -1436,7 +1476,7 @@ async def get_counsellor_report(
     for cid in sorted(ids, key=lambda item: names.get(item, f"Counsellor {item}")):
         new_leads = new_map.get(cid, 0)
         enrolled = enrolled_map.get(cid, 0)
-        contacted, not_contacted, future, uncontactable, not_interested, competitor, cant_afford, overdue = extra_map.get(cid, (0,) * 8)
+        contacted, not_contacted, future, follow_up, potential, uncontactable, not_interested, competitor, cant_afford, overdue = extra_map.get(cid, (0,) * 10)
         rows.append(
             CrmCounsellorReportRow(
                 counsellor_id=cid,
@@ -1447,8 +1487,10 @@ async def get_counsellor_report(
                 followups_completed=completed_map.get(cid, 0),
                 followups_overdue=overdue,
                 future_prospects=future,
+                follow_up=follow_up,
+                potential=potential,
                 uncontactable=uncontactable,
-                not_interested=not_interested,
+                not_interested=not_interested + competitor + cant_afford,
                 lost_to_competitor=competitor,
                 cant_afford=cant_afford,
                 activities=activity_map.get(cid, 0),
@@ -1470,6 +1512,8 @@ async def get_counsellor_report(
         followups_completed=sum(row.followups_completed for row in rows),
         followups_overdue=sum(row.followups_overdue for row in rows),
         future_prospects=sum(row.future_prospects for row in rows),
+        follow_up=sum(row.follow_up for row in rows),
+        potential=sum(row.potential for row in rows),
         uncontactable=sum(row.uncontactable for row in rows),
         not_interested=sum(row.not_interested for row in rows),
         lost_to_competitor=sum(row.lost_to_competitor for row in rows),
@@ -1616,10 +1660,12 @@ async def export_leads_csv(
             "new_lead": "New Lead",
             "uncontactable": "Uncontactable",
             "contacted": "Contacted",
+            "follow_up": "Follow-Up",
+            "potential": "Potential",
             "future_prospect": "Future Prospect",
             "not_interested": "Not Interested",
-            "lost_to_competitor": "Lost to Competitor",
-            "cant_afford": "Can't Afford",
+            "lost_to_competitor": "Not Interested",
+            "cant_afford": "Not Interested",
             "enrolled": "Enrolled",
         }
         source_display = {

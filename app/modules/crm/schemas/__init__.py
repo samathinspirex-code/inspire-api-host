@@ -5,8 +5,8 @@ from pydantic import BaseModel, EmailStr, TypeAdapter
 
 
 LEAD_STATUSES = (
-    "new_lead", "uncontactable", "contacted", "future_prospect",
-    "not_interested", "lost_to_competitor", "cant_afford", "enrolled",
+    "new_lead", "uncontactable", "contacted", "follow_up", "potential", "future_prospect",
+    "not_interested", "enrolled", "lost_to_competitor", "cant_afford",
 )
 LOSS_REASONS = (
     "Fees Beyond Expectations", "Programme Not Available", "Joined Another Institute",
@@ -31,6 +31,8 @@ DELAY_REASONS = (
 def validate_status_fields(values):
     if values.stage not in LEAD_STATUSES:
         raise ValueError("Unsupported lead status")
+    if values.stage in ("follow_up", "potential") and not (values.status_remarks or "").strip():
+        raise ValueError("Enter a note for Follow-Up or Potential")
     if values.stage in ("not_interested", "lost_to_competitor"):
         if values.status_reason not in LOSS_REASONS:
             raise ValueError("Select a reason for this outcome")
@@ -389,6 +391,8 @@ class CrmCounsellorReportRow(BaseModel):
     followups_completed: int = 0
     followups_overdue: int = 0
     future_prospects: int = 0
+    follow_up: int = 0
+    potential: int = 0
     uncontactable: int = 0
     not_interested: int = 0
     lost_to_competitor: int = 0

@@ -7,6 +7,8 @@ STAGE_BASE = {
     "uncontactable": 4,
     "contacted": 30,
     "future_prospect": 22,
+    "follow_up": 18,
+    "potential": 25,
     "not_interested": 3,
     "lost_to_competitor": 0,
     "cant_afford": 14,
@@ -17,6 +19,8 @@ STAGE_WIN = {
     "uncontactable": 0.02,
     "contacted": 0.20,
     "future_prospect": 0.10,
+    "follow_up": 0.08,
+    "potential": 0.14,
     "not_interested": 0.01,
     "lost_to_competitor": 0.0,
     "cant_afford": 0.04,
@@ -40,7 +44,7 @@ SOURCE_QUALITY = {
     "tiktok_chat": 3,
     "linkedin": 4,
 }
-CLOSED = {"enrolled", "not_interested", "lost_to_competitor"}
+CLOSED = {"enrolled", "not_interested", "lost_to_competitor", "cant_afford"}
 SOURCE_LABELS = {
     "website_admission": "Admission form",
     "website_contact": "Contact form",
@@ -131,10 +135,14 @@ def next_action(lead: dict, now: datetime) -> str:
         return "Retry in the 7–9 pm window, when this segment answers most."
     if stage == "contacted":
         return "Book a 20-minute counselling call and send the programme brochure."
+    if stage == "follow_up":
+        return "Review the status note and make the next contact."
+    if stage == "potential":
+        return "Review the status note and discuss the next step toward enrolment."
     if stage == "future_prospect":
         return "Add them to the next intake nurture list and follow up in 14 days with a graduate story."
     if stage == "cant_afford":
-        return "Offer the monthly instalment plan, or an employer-sponsorship letter."
+        return "Record the fee objection under Not Interested."
     if stage == "not_interested":
         return "Ask one reason-for-no question, then archive. It feeds the objection report."
     if stage == "lost_to_competitor":

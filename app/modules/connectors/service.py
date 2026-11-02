@@ -1,14 +1,41 @@
+import json
+from datetime import datetime, timezone
+
+import httpx
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, ValidationError
-from app.modules.insights.demo_data import GTM_EVENTS, PLATFORMS
+from app.core.config import settings
+from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.modules.connectors.registry import REQUIREMENTS, account_state, platforms_for, tracking_plan
+from app.modules.connectors.providers import ProviderFailure, fetch_report
+
+
+def _configured(account: dict) -> bool:
+    return bool(settings.CONNECTORS_CREDENTIALS.get(str(account["connector_id"]), {}).get("refresh_token")
+                and settings.CONNECTORS_GOOGLE_CLIENT_ID and settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
+
+
+async def reporting(db: AsyncSession) -> dict:
+    rows = (await db.execute(text(
+        "SELECT connector_id, platform, name, account_id, owner, status, created_at, last_synced_at, last_error, report "
+        "FROM connectors ORDER BY created_at DESC, connector_id DESC"
+    ))).mappings().all()
+    accounts = []
+    for row in rows:
+        account = dict(row)
+        account.update(account_state(account, _configured(account)))
+        for key in ("created_at", "last_synced_at"):
+            if account[key]:
+                account[key] = account[key].isoformat()
+        account["source"] = "connector" if account["last_synced_at"] else "unavailable"
+        accounts.append(account)
+    return {"accounts": accounts, "platforms": platforms_for(accounts), "events": tracking_plan()}
 
 
 async def catalogue(db: AsyncSession) -> dict:
-    accounts = (await db.execute(text(
-        "SELECT connector_id, platform, name, account_id, owner, status, created_at FROM connectors ORDER BY created_at DESC"
-    ))).mappings().all()
+    data = await reporting(db)
     lines = (await db.execute(text(
         "SELECT w.line_id, w.counsellor_user_id, w.phone_number, w.display_name, w.phone_number_id, "
         "coalesce(u.full_name, u.email) "
@@ -21,9 +48,7 @@ async def catalogue(db: AsyncSession) -> dict:
         "WHERE u.is_active = true ORDER BY 2"
     ))).all()
     return {
-        "platforms": PLATFORMS,
-        "events": GTM_EVENTS,
-        "accounts": [dict(row) | {"created_at": row["created_at"].isoformat() if row["created_at"] else None, "source": "cms"} for row in accounts],
+        **data,
         "whatsapp_lines": [
             {"id": row[0], "counsellor_user_id": row[1], "number": row[2], "display": row[3], "phone_number_id": row[4], "counsellor": row[5], "source": "cms"}
             for row in lines
@@ -33,15 +58,54 @@ async def catalogue(db: AsyncSession) -> dict:
 
 
 async def add_account(db: AsyncSession, payload: dict, user_id: int) -> dict:
-    known = {item["id"] for item in PLATFORMS}
+    known = set(REQUIREMENTS)
     if payload["platform"] not in known:
         raise ValidationError("Unknown platform")
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise ValidationError("Enter an account name")
     row = (await db.execute(text(
         "INSERT INTO connectors (platform, name, account_id, owner, created_by) "
         "VALUES (:platform, :name, :account, :owner, :user) RETURNING connector_id"
-    ), {**payload, "user": user_id})).one()
+    ), {"platform": payload["platform"], "name": name, "account": (payload.get("account_id") or "").strip() or None,
+        "owner": (payload.get("owner") or "").strip() or None, "user": user_id})).one()
     await db.commit()
     return {"id": row[0]}
+
+
+async def sync_account(db: AsyncSession, connector_id: int) -> dict:
+    # A transaction-scoped row lock prevents concurrent syncs and deletion races.
+    try:
+        row = (await db.execute(text("SELECT * FROM connectors WHERE connector_id = :id FOR UPDATE NOWAIT"),
+                                {"id": connector_id})).mappings().first()
+    except DBAPIError as exc:
+        await db.rollback()
+        if getattr(exc.orig, "sqlstate", None) == "55P03":
+            raise ConflictError("This account is already syncing. Try again shortly.") from None
+        raise
+    if not row:
+        raise NotFoundError("Connector not found")
+    account = dict(row)
+    try:
+        report = await fetch_report(account["platform"], account["account_id"],
+                                    settings.CONNECTORS_CREDENTIALS.get(str(connector_id), {}),
+                                    settings.CONNECTORS_GOOGLE_CLIENT_ID, settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
+    except ValidationError:
+        await db.rollback()
+        raise
+    except (ProviderFailure, httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
+        # Never persist provider bodies, URLs or exception strings containing credentials.
+        message = str(exc) if isinstance(exc, ProviderFailure) else "Reporting failed. Check provider availability and account configuration."
+        await db.execute(text("UPDATE connectors SET status = 'sync_error', last_error = :error WHERE connector_id = :id"),
+                         {"id": connector_id, "error": message})
+        await db.commit()
+        raise ConflictError(message)
+    synced = datetime.now(timezone.utc)
+    await db.execute(text("UPDATE connectors SET status = 'connected', last_error = NULL, last_synced_at = :synced, "
+                          "report = CAST(:report AS jsonb) WHERE connector_id = :id"),
+                     {"id": connector_id, "synced": synced, "report": json.dumps(report, allow_nan=False)})
+    await db.commit()
+    return {"id": connector_id, "last_synced_at": synced.isoformat(), "report": report}
 
 
 async def delete_account(db: AsyncSession, connector_id: int) -> None:
