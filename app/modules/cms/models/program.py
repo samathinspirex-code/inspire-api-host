@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Text, Integer
+from sqlalchemy import String, Text, Integer, Boolean, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -16,6 +16,8 @@ class Program(Base):
     program_id: Mapped[int] = mapped_column(primary_key=True)
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    subtitle_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    subtitle: Mapped[Optional[str]] = mapped_column(String(255))
     level: Mapped[str] = mapped_column(String(100), nullable=False)
     school: Mapped[str] = mapped_column(String(100), nullable=False)
     awarding_body: Mapped[str] = mapped_column(String(100), nullable=False)

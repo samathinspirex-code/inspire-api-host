@@ -10,6 +10,8 @@ from app.modules.cms.schemas.outcome import OutcomeEmbedded
 class ProgramCreate(BaseModel):
     slug: str = Field(..., min_length=1, max_length=255)
     title: str = Field(..., min_length=1, max_length=255)
+    subtitle_enabled: bool = False
+    subtitle: Optional[str] = Field(None, max_length=255)
     level: str = Field(..., min_length=1, max_length=100)
     school: str = Field(..., min_length=1, max_length=100)
     awarding_body: str = Field(..., min_length=1, max_length=100)
@@ -34,6 +36,8 @@ class ProgramListItem(BaseModel):
     program_id: int
     slug: str
     title: str
+    subtitle_enabled: bool = False
+    subtitle: Optional[str] = None
     level: str
     school: str
     awarding_body: str
