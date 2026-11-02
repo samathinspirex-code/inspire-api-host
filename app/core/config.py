@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "Inspire API"
     ENVIRONMENT: str = "development"
 
+    # Per saved connector ID. Never returned by the CMS API.
+    CONNECTORS_CREDENTIALS: dict[str, dict[str, str]] = {}
+    CONNECTORS_GOOGLE_CLIENT_ID: str = ""
+    CONNECTORS_GOOGLE_CLIENT_SECRET: str = ""
+
     PAYMENTS_DATABASE_POOL_SIZE: int = 3
     PAYMENTS_PUBLIC_BASE_URL: str = "http://localhost:8001"
     PAYMENTS_PAYHERE_MODE: str = "sandbox"
@@ -37,10 +42,11 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
-    # Hosted session poolers commonly have small hard limits. Keep each API or
-    # worker process bounded so one process cannot consume every DB session.
-    DATABASE_POOL_SIZE: int = 3
-    DATABASE_MAX_OVERFLOW: int = 0
+    # The API serves many simultaneous CMS/LMS requests. Keep this bounded per
+    # process, but leave enough headroom that a few slow operations do not make
+    # unrelated requests wait for the full pool timeout.
+    DATABASE_POOL_SIZE: int = 6
+    DATABASE_MAX_OVERFLOW: int = 2
     DATABASE_POOL_TIMEOUT_SECONDS: int = 20
     DATABASE_POOL_RECYCLE_SECONDS: int = 300
 

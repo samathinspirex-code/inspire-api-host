@@ -66,6 +66,7 @@ ROLE_NAVIGATION = {
         ("reports", "Reports & Exports", "chart"),
         ("announcements", "Announcements", "megaphone"),
         ("settings", "Settings", "settings"),
+        ("zoom-cleanup", "Recording Cleanup", "video"),
     ],
     "ADMIN": [
         ("students", "Students", "users"),

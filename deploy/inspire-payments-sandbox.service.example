@@ -1,0 +1,19 @@
+[Unit]
+Description=Inspire PayHere sandbox only
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inspire-payments-sandbox
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python -m uvicorn payments_sandbox:app --host 127.0.0.1 --port 8002 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -488,6 +488,10 @@ async def update_learning_item(db: AsyncSession, item_id: int, payload: Learning
 
         video_uri = vimeo_service.video_uri_from_url(item.resource_url)
         if video_uri and vimeo_service.is_configured():
+            # Release the request's database connection before Vimeo network I/O.
+            # This is a read-only transaction so far; expire_on_commit=False
+            # keeps the item snapshot available for the update below.
+            await db.commit()
             async with vimeo_service.VimeoClient() as vimeo:
                 await vimeo.update_video(video_uri, data["title"], data["description"])
                 video = await vimeo.get_video(video_uri)

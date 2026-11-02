@@ -35,6 +35,16 @@ async def platforms(_: CurrentUser = Depends(require_growth), db: AsyncSession =
     return {"platforms": data["platforms"], "events": data["events"]}
 
 
+@router.get("/data")
+async def connector_data(_: CurrentUser = Depends(require_growth), db: AsyncSession = Depends(get_db)):
+    return await service.reporting(db)
+
+
+@router.post("/{connector_id}/sync")
+async def sync_connector(connector_id: int, _: CurrentUser = Depends(require_growth), db: AsyncSession = Depends(get_db)):
+    return await service.sync_account(db, connector_id)
+
+
 @router.post("", status_code=201)
 async def create_connector(payload: AccountIn, user: CurrentUser = Depends(require_growth), db: AsyncSession = Depends(get_db)):
     return await service.add_account(db, payload.model_dump(), user.user_id)

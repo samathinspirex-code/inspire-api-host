@@ -18,10 +18,10 @@ STAGE_LABELS = {
     "new_lead": "New Lead",
     "uncontactable": "Uncontactable",
     "contacted": "Contacted",
+    "follow_up": "Follow-Up",
+    "potential": "Potential",
     "future_prospect": "Future Prospect",
     "not_interested": "Not Interested",
-    "lost_to_competitor": "Lost to Competitor",
-    "cant_afford": "Can't Afford",
     "enrolled": "Enrolled",
 }
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -176,13 +176,14 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
                      l.assigned_counsellor_id,
                      extract(epoch FROM (:now - coalesce(l.last_contacted_at, l.last_activity_at, l.created_at))) / 3600 AS hours_idle
               FROM crm_leads l
-              WHERE {where} AND l.stage NOT IN ('enrolled', 'not_interested', 'lost_to_competitor')
+              WHERE {where} AND l.stage NOT IN ('enrolled', 'not_interested', 'lost_to_competitor', 'cant_afford')
             ), scored AS (
               SELECT assigned_counsellor_id, hours_idle,
                 least(99, greatest(1,
                   CASE stage
                     WHEN 'new_lead' THEN 16 WHEN 'uncontactable' THEN 4 WHEN 'contacted' THEN 30
-                    WHEN 'future_prospect' THEN 22 WHEN 'cant_afford' THEN 14 ELSE 10
+                    WHEN 'follow_up' THEN 18 WHEN 'potential' THEN 25
+                    WHEN 'future_prospect' THEN 22 ELSE 10
                   END
                   + least(33, followup_count * 5 + CASE WHEN followup_count > 0 THEN 8 ELSE 0 END + CASE WHEN instalment THEN 5 ELSE 0 END)
                   + CASE WHEN hours_idle < 24 THEN 12 WHEN hours_idle < 72 THEN 7 WHEN hours_idle < 168 THEN 2 ELSE 0 END
@@ -198,7 +199,8 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
                 )) AS score,
                 CASE stage
                   WHEN 'new_lead' THEN 0.06 WHEN 'uncontactable' THEN 0.02 WHEN 'contacted' THEN 0.20
-                  WHEN 'future_prospect' THEN 0.10 WHEN 'cant_afford' THEN 0.04 ELSE 0.05
+                  WHEN 'follow_up' THEN 0.08 WHEN 'potential' THEN 0.14
+                  WHEN 'future_prospect' THEN 0.10 ELSE 0.05
                 END AS win_base
               FROM open_leads
             )
@@ -223,8 +225,10 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
     stage_rows = _json_rows(pack["stages"])
     stages = {key: 0 for key in PIPELINE_STAGES}
     for stage, count in stage_rows:
+        if stage in ("lost_to_competitor", "cant_afford"):
+            stage = "not_interested"
         if stage in stages:
-            stages[stage] = int(count)
+            stages[stage] += int(count)
     total = sum(stages.values())
 
     source_rows = _json_rows(pack["sources"])
@@ -297,7 +301,7 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
     warm = int(heat_totals["warm"] or 0)
     expected = float(heat_totals["expected"] or 0)
     hot_by_owner = {int(owner): int(count) for owner, count in _json_rows(heat_totals["idle"]) if owner}
-    open_lead_count = total - stages["enrolled"] - stages["not_interested"] - stages["lost_to_competitor"]
+    open_lead_count = total - stages["enrolled"] - stages["not_interested"]
 
     activity_rows = (await db.execute(text(
         "SELECT a.activity_type, a.content, a.counsellor_name, a.created_at, l.full_name "
@@ -437,11 +441,11 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
         "stage_map": stages,
         "total": total,
         "awaiting": stages["new_lead"],
-        "in_progress": stages["uncontactable"] + stages["contacted"] + stages["future_prospect"],
+        "in_progress": sum(stages[key] for key in ("uncontactable", "contacted", "follow_up", "potential", "future_prospect")),
         "enrolled": stages["enrolled"],
         "uncontactable": stages["uncontactable"],
         "contacted": stages["contacted"],
-        "cant_afford": stages["cant_afford"],
+        "cant_afford": 0,
         "active_month": active_month,
         "month_enrolled": month_enrolled,
         "sources": sources,

@@ -35,6 +35,7 @@ from app.modules.lms import analytics_service
 from app.modules.lms import dashboard_service
 from app.modules.lms import vimeo_service
 from app.modules.lms import zoom_service
+from app.modules.lms import zoom_cleanup_service
 from app.modules.lms.schemas.dashboard import AdminDashboardResponse, StudentPopulationResponse
 from app.modules.cms import media_service
 from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
@@ -902,6 +903,33 @@ async def get_zoom_integration(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     return await zoom_service.get_settings(db)
+
+
+@router.get("/integrations/zoom/cleanup")
+async def get_zoom_cleanup(
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_cleanup_service.dashboard(db)
+
+
+@router.post("/integrations/zoom/cleanup/{recording_id}/delete")
+async def delete_zoom_recording_early(
+    recording_id: int,
+    payload: dict,
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_cleanup_service.delete_early(db, recording_id, payload.get("confirmed") is True)
+
+
+@router.get("/integrations/zoom/cleanup/{recording_id}/check")
+async def check_zoom_recording_early_delete(
+    recording_id: int,
+    _current_user: CurrentUser = Depends(super_admin_access),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await zoom_cleanup_service.check_early_delete(db, recording_id)
 
 
 @router.put("/integrations/zoom")

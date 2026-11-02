@@ -12,6 +12,7 @@ class FakeDatabase:
             item_type="video",
             resource_url="https://vimeo.com/12345",
             thumbnail_url="https://images.example/old.jpg",
+            duration_minutes=1,
         )
 
     async def get(self, _model, _item_id):
@@ -37,7 +38,7 @@ class FakeVimeoClient:
 
     async def get_video(self, _video_uri):
         self.events.append("vimeo_get")
-        return {"pictures": {"sizes": [{"width": 640, "link": "https://images.example/final.jpg"}]}}
+        return {"duration": 120, "pictures": {"sizes": [{"width": 640, "link": "https://images.example/final.jpg"}]}}
 
 
 class VimeoConnectionSafetyTests(unittest.IsolatedAsyncioTestCase):

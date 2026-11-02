@@ -1206,7 +1206,10 @@ async def purge_expired_cloud_recordings(db: AsyncSession, now: datetime, limit:
     settings_row=(await db.execute(text("SELECT cloud_retention_days FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     retention_days=int((settings_row or {}).get("cloud_retention_days") or 2)
     cutoff=now-timedelta(days=retention_days)
-    rows=(await db.execute(text("""SELECT zr.recording_id,zr.zoom_recording_file_id,m.provider_meeting_uuid,m.provider_meeting_id,m.zoom_host_connection_id
+    from app.modules.lms import zoom_cleanup_service
+    rows=(await db.execute(text("""SELECT zr.recording_id,zr.meeting_id,zr.zoom_recording_file_id,zr.recording_type,
+      zr.status,zr.vimeo_video_uri,zr.resource_url,zr.zoom_published_at,m.class_id,
+      m.provider_meeting_uuid,m.provider_meeting_id,m.zoom_host_connection_id
       FROM lms_zoom_recordings zr JOIN lms_online_meetings m ON m.meeting_id=zr.meeting_id
       WHERE zr.status='published' AND zr.zoom_cloud_deleted_at IS NULL
         AND zr.zoom_published_at IS NOT NULL AND zr.zoom_published_at <= :cutoff
@@ -1214,21 +1217,9 @@ async def purge_expired_cloud_recordings(db: AsyncSession, now: datetime, limit:
     deleted=0
     for row in rows:
         try:
-            host=(await db.execute(text("SELECT * FROM lms_zoom_host_connections WHERE connection_id=:id"),{"id":row["zoom_host_connection_id"]})).mappings().first()
-            if not host:
-                raise ValidationError("The Zoom host account for this recording is no longer connected")
-            token=await _access_token(db,dict(host))
-            meeting_ref=_recording_api_ref(row["provider_meeting_uuid"] or row["provider_meeting_id"])
-            async with httpx.AsyncClient(timeout=30) as client:
-                response=await client.delete(
-                    f"{ZOOM_API}/meetings/{meeting_ref}/recordings/{row['zoom_recording_file_id']}",
-                    params={"action":"delete"},headers={"Authorization":f"Bearer {token}"})
-            # 404 means Zoom already removed the file, which satisfies the goal.
-            if response.is_error and response.status_code != 404:
-                raise ValidationError(f"Zoom refused the recording delete (HTTP {response.status_code})")
-            await db.execute(text("""UPDATE lms_zoom_recordings
-              SET zoom_cloud_deleted_at=now(),zoom_cloud_delete_error=NULL,updated_at=now() WHERE recording_id=:id"""),{"id":row["recording_id"]})
-            await db.commit(); deleted+=1
+            await zoom_cleanup_service.ensure_safe_to_delete(db, dict(row))
+            await zoom_cleanup_service.delete_zoom_file(db, dict(row))
+            deleted+=1
         except Exception as exc:
             await db.rollback()
             await db.execute(text("""UPDATE lms_zoom_recordings
