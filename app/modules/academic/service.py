@@ -706,16 +706,16 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
     if course_id is None:
         row = (await db.execute(text("""
             INSERT INTO academic_courses
-                (programme_id, level_id, school_id, slug, code, title, awarding_body, entry_requirements, progression_route, blurb, image_url, status)
+                (programme_id, level_id, school_id, slug, code, title, subtitle_enabled, subtitle, awarding_body, entry_requirements, progression_route, blurb, image_url, status)
             VALUES
-                (:programme_id, NULL, :school_id, :slug, :code, :title, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status)
+                (:programme_id, NULL, :school_id, :slug, :code, :title, :subtitle_enabled, :subtitle, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status)
             RETURNING course_id
         """), values)).mappings().one()
         course_id = row["course_id"]
     else:
         changed = await db.execute(text("""
             UPDATE academic_courses SET programme_id=:programme_id, level_id=NULL, school_id=:school_id,
-                slug=:slug, code=:code, title=:title, awarding_body=:awarding_body,
+                slug=:slug, code=:code, title=:title, subtitle_enabled=:subtitle_enabled, subtitle=:subtitle, awarding_body=:awarding_body,
                 entry_requirements=:entry_requirements, progression_route=:progression_route, blurb=:blurb,
                 image_url=:image_url, status=:status, updated_at=now()
             WHERE course_id=:course_id RETURNING course_id
@@ -732,6 +732,7 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         JOIN academic_schools s ON s.school_id=c.school_id WHERE c.course_id=:id
     """), {"id": course_id})).mappings().one()
     legacy_values = {
+        "subtitle_enabled": course["subtitle_enabled"], "subtitle": course["subtitle"],
         "slug": course["slug"], "title": course["title"], "level": course["programme_name"][:100],
         "school": course["school_name"][:100], "awarding_body": course["awarding_body"],
         "code": course["code"], "duration": course["duration"], "price_from": course["price_from"],
@@ -740,14 +741,14 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
     }
     if course["legacy_program_id"] is None:
         legacy_id = await db.scalar(text("""
-            INSERT INTO programs (slug,title,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity)
-            VALUES (:slug,:title,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity)
+            INSERT INTO programs (slug,title,subtitle_enabled,subtitle,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity)
+            VALUES (:slug,:title,:subtitle_enabled,:subtitle,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity)
             RETURNING program_id
         """), legacy_values)
         await db.execute(text("UPDATE academic_courses SET legacy_program_id=:legacy_id WHERE course_id=:course_id"), {"legacy_id": legacy_id, "course_id": course_id})
     else:
         await db.execute(text("""
-            UPDATE programs SET slug=:slug,title=:title,level=:level,school=:school,
+            UPDATE programs SET slug=:slug,title=:title,subtitle_enabled=:subtitle_enabled,subtitle=:subtitle,level=:level,school=:school,
               awarding_body=:awarding_body,code=:code,duration=:duration,price_from=:price_from,
               image_label=:image_label,image_url=:image_url,blurb=:blurb,popularity=:popularity
             WHERE program_id=:legacy_id

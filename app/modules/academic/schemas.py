@@ -39,6 +39,8 @@ class CourseCreate(BaseModel):
     slug: str = Field(..., min_length=1, max_length=255)
     code: str = Field(..., min_length=1, max_length=100)
     title: str = Field(..., min_length=1, max_length=255)
+    subtitle_enabled: bool = False
+    subtitle: str | None = Field(None, max_length=255)
     awarding_body: str = Field(..., min_length=1, max_length=100)
     entry_requirements: str = Field(..., min_length=1, max_length=5000)
     progression_route: str = Field(..., min_length=1, max_length=5000)
