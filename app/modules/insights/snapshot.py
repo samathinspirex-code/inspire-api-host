@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cms import dashboard_service
-from app.modules.crm.service import CONTACT_ACTIVITY_TYPES, PIPELINE_STAGES, _ensure_lead_indexes
+from app.modules.crm.service import CONTACT_ACTIVITY_TYPES, PIPELINE_STAGES, REACHED_ACTIVITY_SQL, _ensure_lead_indexes
 from app.modules.insights.scoring import factors, heat, hours_since, next_action, score_lead, source_label, win_probability
 
 CONTACT_SQL = ", ".join(f"'{item}'" for item in sorted(CONTACT_ACTIVITY_TYPES))
@@ -171,10 +171,10 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
           (SELECT count(*) FROM crm_leads l WHERE {where} AND l.created_at >= :month) AS active_month,
           (
             WITH open_leads AS (
-              SELECT l.stage, coalesce(l.source, '') AS source, coalesce(l.followup_count, 0) AS followup_count,
+              SELECT l.stage, coalesce(l.source, '') AS source, coalesce(l.followup_count, 0) AS followup_count, coalesce(l.unanswered_calls, 0) AS unanswered_calls,
                      (l.payment_plan IS NOT NULL AND l.payment_plan <> '') AS instalment,
                      l.assigned_counsellor_id,
-                     extract(epoch FROM (:now - coalesce(l.last_contacted_at, l.last_activity_at, l.created_at))) / 3600 AS hours_idle
+                     extract(epoch FROM (:now - coalesce(l.last_contacted_at, l.created_at))) / 3600 AS hours_idle
               FROM crm_leads l
               WHERE {where} AND l.stage NOT IN ('enrolled', 'not_interested', 'lost_to_competitor', 'cant_afford')
             ), scored AS (
@@ -196,6 +196,7 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
                     ELSE 3
                   END
                   + CASE WHEN instalment THEN 5 ELSE 0 END
+                  - least(12, unanswered_calls * 3)
                 )) AS score,
                 CASE stage
                   WHEN 'new_lead' THEN 0.06 WHEN 'uncontactable' THEN 0.02 WHEN 'contacted' THEN 0.20
@@ -205,15 +206,15 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
               FROM open_leads
             )
             SELECT json_build_object(
-              'hot', count(*) FILTER (WHERE score >= 62),
-              'warm', count(*) FILTER (WHERE score >= 40 AND score < 62),
+              'hot', count(*) FILTER (WHERE score >= 60),
+              'warm', count(*) FILTER (WHERE score >= 35 AND score < 60),
               'expected', coalesce(sum(least(0.95, win_base * (0.45 + score / 90.0))), 0),
               'idle', coalesce((
                 SELECT json_agg(json_build_array(assigned_counsellor_id, n))
                 FROM (
                   SELECT assigned_counsellor_id, count(*) AS n
                   FROM scored
-                  WHERE score >= 62 AND hours_idle > 24 AND assigned_counsellor_id IS NOT NULL
+                  WHERE score >= 60 AND hours_idle > 24 AND assigned_counsellor_id IS NOT NULL
                   GROUP BY assigned_counsellor_id
                 ) idle_rows
               ), '[]'::json)
@@ -396,7 +397,7 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
     ), params)).all()
     contact_rows = (await db.execute(text(
         "SELECT a.counsellor_id, count(DISTINCT a.lead_id) FROM crm_activities a "
-        f"WHERE a.created_at >= :month AND a.activity_type IN ({CONTACT_SQL}) AND a.counsellor_id IS NOT NULL "
+        f"WHERE a.created_at >= :month AND a.activity_type IN ({CONTACT_SQL}) AND {REACHED_ACTIVITY_SQL} AND a.counsellor_id IS NOT NULL "
         "GROUP BY a.counsellor_id"
     ), {"month": month})).all()
     contacted = {int(owner): int(count) for owner, count in contact_rows if owner}
@@ -483,14 +484,14 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
 async def lead_journey(db: AsyncSession, lead_id: int) -> dict | None:
     row = (await db.execute(text(
         "SELECT lead_id, full_name, phone, stage, source, created_at, last_contacted_at, last_activity_at, "
-        "followup_count, payment_plan, interested_course, interested_programme, assigned_counsellor_id, counsellor_name, notes "
+        "followup_count, unanswered_calls, payment_plan, interested_course, interested_programme, assigned_counsellor_id, counsellor_name, notes "
         "FROM crm_leads WHERE lead_id = :id"
     ), {"id": lead_id})).mappings().first()
     if not row:
         return None
     now = _now()
     lead = dict(row)
-    lead["last_touch"] = lead.get("last_contacted_at") or lead.get("last_activity_at")
+    lead["last_touch"] = lead.get("last_contacted_at")
     lead["instalment"] = bool(lead.get("payment_plan"))
     activities = (await db.execute(text(
         "SELECT activity_type, content, counsellor_name, created_at FROM crm_activities "

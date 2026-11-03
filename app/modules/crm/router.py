@@ -1,5 +1,5 @@
 from datetime import date, datetime, time, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from app.core.errors import APIError, ForbiddenError
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import CurrentUser
 from app.modules.crm import service
+from app.modules.crm.arena_schemas import ArenaAwardIn, ArenaDecisionIn, ArenaRewardCodesIn, ArenaRewardIn
 from app.modules.crm.schemas import (
     CrmActivityCreate,
     CrmActivityOut,
@@ -30,13 +31,14 @@ from app.modules.crm.schemas import (
     CrmLeadSummary,
     CrmLeadUpdate,
     CrmPipelineResponse,
+    CrmPriorityQueueResponse,
     CrmStageUpdate,
 )
 
 
 def require_crm_staff(request: Request, current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     path = request.url.path.rstrip("/")
-    if path.endswith("/crm/arena") or path.endswith("/crm/arena/claim"):
+    if path.endswith("/crm/arena") or "/crm/arena/" in path:
         if any(role in current_user.access for role in ("CMS_ADMIN", "COUNSELLOR", "CRM", "ADMIN", "SUPER_ADMIN")):
             return current_user
         raise ForbiddenError("Requires CMS Admin access")
@@ -62,6 +64,16 @@ async def _check_lead_access(db: AsyncSession, lead_id: int, user: CurrentUser) 
 def _require_management(user: CurrentUser) -> None:
     if _counsellor_only(user):
         raise ForbiddenError("CRM management access required")
+
+
+def _require_arena_player(user: CurrentUser) -> None:
+    if "COUNSELLOR" not in user.access:
+        raise ForbiddenError("Only counsellors can claim Arena rewards")
+
+
+def _require_arena_admin(user: CurrentUser) -> None:
+    if not any(role in user.access for role in ("CRM", "ADMIN", "SUPER_ADMIN", "CMS_ADMIN")):
+        raise ForbiddenError("Requires Arena admin access")
 
 
 router = APIRouter(
@@ -209,6 +221,7 @@ async def create_lead(
         counsellor_name=counsellor_name,
         assign_to_creator=_counsellor_only(current_user),
         reject_duplicate_phone=True,
+        lock_priority=payload.priority != "medium",
     )
 
 
@@ -221,6 +234,7 @@ async def get_pipeline(
     unassigned: bool = Query(False),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    priority: Optional[Literal["high", "medium", "low"]] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmPipelineResponse:
@@ -237,7 +251,26 @@ async def get_pipeline(
         unassigned,
         created_from,
         created_to,
+        priority,
     )
+
+
+@router.get("/leads/priority-queue", response_model=CrmPriorityQueueResponse)
+async def get_priority_queue(
+    counsellor_id: Optional[int] = Query(None),
+    awarding_body: Optional[str] = Query(None),
+    programme: Optional[str] = Query(None),
+    unassigned: bool = Query(False),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_crm_staff),
+) -> CrmPriorityQueueResponse:
+    if _counsellor_only(current_user):
+        counsellor_id, unassigned = current_user.user_id, False
+    created_from = datetime.combine(date_from, time.min) if date_from else None
+    created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
+    return await service.get_priority_queue(db, counsellor_id, awarding_body, programme, unassigned, created_from, created_to)
 
 
 @router.get("/leads/dashboard", response_model=CrmDashboardResponse)
@@ -436,16 +469,21 @@ async def retry_enrollment_email(
 
 class ArenaClaimIn(BaseModel):
     quest_id: str
+    level: int = 1
 
 
 @router.get("/arena")
 async def arena(
+    counsellor_id: Optional[int] = Query(None),
+    mine: bool = Query(False),
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ):
     from app.modules.crm.arena_service import arena as build_arena
-    focus = current_user.user_id if _counsellor_only(current_user) else None
-    return await build_arena(db, current_user.user_id, focus)
+    locked_to_self = _counsellor_only(current_user)
+    can_claim = "COUNSELLOR" in current_user.access
+    focus = current_user.user_id if locked_to_self or (mine and can_claim) else counsellor_id
+    return await build_arena(db, current_user.user_id, can_claim, focus, full_detail=not locked_to_self)
 
 
 @router.post("/arena/claim")
@@ -455,4 +493,128 @@ async def arena_claim(
     db: AsyncSession = Depends(get_db),
 ):
     from app.modules.crm.arena_service import claim
-    return await claim(db, current_user.user_id, payload.quest_id)
+    _require_arena_player(current_user)
+    return await claim(db, current_user.user_id, payload.quest_id, payload.level)
+
+
+@router.get("/arena/rewards/mine")
+async def arena_my_rewards(
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_player(current_user)
+    return await arena_rewards.my_rewards(db, current_user.user_id)
+
+
+@router.post("/arena/rewards/{reward_id}/collect", status_code=201)
+async def arena_collect_reward(
+    reward_id: int,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_player(current_user)
+    return await arena_rewards.collect(db, current_user.user_id, reward_id)
+
+
+@router.get("/arena/rewards")
+async def arena_list_rewards(
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.list_rewards(db)
+
+
+@router.post("/arena/rewards", status_code=201)
+async def arena_create_reward(
+    payload: ArenaRewardIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.create_reward(db, payload, current_user.user_id)
+
+
+@router.put("/arena/rewards/{reward_id}")
+async def arena_update_reward(
+    reward_id: int,
+    payload: ArenaRewardIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.update_reward(db, reward_id, payload)
+
+
+@router.post("/arena/rewards/{reward_id}/codes", status_code=201)
+async def arena_add_reward_codes(
+    reward_id: int,
+    payload: ArenaRewardCodesIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.add_codes(db, reward_id, payload, current_user.user_id)
+
+
+@router.delete("/arena/reward-codes/{code_id}", status_code=204)
+async def arena_void_reward_code(
+    code_id: int,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    await arena_rewards.void_code(db, code_id)
+
+
+@router.post("/arena/rewards/{reward_id}/award", status_code=201)
+async def arena_award_reward(
+    reward_id: int,
+    payload: ArenaAwardIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.award(db, reward_id, payload, current_user.user_id)
+
+
+@router.get("/arena/reward-collections")
+async def arena_reward_collections(
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.list_collections(db)
+
+
+@router.post("/arena/reward-collections/{collection_id}/distribute")
+async def arena_distribute_reward(
+    collection_id: int,
+    payload: ArenaDecisionIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.distribute(db, collection_id, payload, current_user.user_id)
+
+
+@router.post("/arena/reward-collections/{collection_id}/decline")
+async def arena_decline_reward(
+    collection_id: int,
+    payload: ArenaDecisionIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm import arena_rewards
+    _require_arena_admin(current_user)
+    return await arena_rewards.decline(db, collection_id, payload, current_user.user_id)

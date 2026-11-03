@@ -241,11 +241,12 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
+        priority: Optional[str] = None,
     ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
         """Stage totals plus a short card preview. Each stage is limited on its own so the board does not sort every lead column."""
         filters = self._build_filters(
             None, None, counsellor_id, None, False, awarding_body, programme, unassigned,
-            created_from, created_to,
+            created_from, created_to, {"priority": priority},
         )
         counts: dict[str, int] = {stage: 0 for stage in stages}
         display_stage = case((CrmLead.stage.in_(LEGACY_NOT_INTERESTED_STAGES), "not_interested"), else_=CrmLead.stage)
@@ -260,7 +261,31 @@ class CrmLeadRepository:
             if stage_name in counts:
                 counts[stage_name] = int(total or 0)
 
-        preview_columns = (
+        preview_columns = self._pipeline_card_columns()
+        previews: dict[str, list[dict[str, Any]]] = {stage: [] for stage in stages}
+        if stages:
+            preview = union_all(
+                *(
+                    select(*preview_columns)
+                    .where(*filters, display_stage == stage)
+                    .order_by(CrmLead.updated_at.desc(), CrmLead.lead_id.desc())
+                    .limit(limit)
+                    for stage in stages
+                )
+            )
+            for row in (await self.db.execute(preview)).all():
+                card = dict(row._mapping)
+                if card["stage"] in LEGACY_NOT_INTERESTED_STAGES:
+                    card["stage"] = "not_interested"
+                previews.setdefault(card["stage"], []).append(card)
+        return previews, counts
+
+    @staticmethod
+    def _pipeline_card_columns() -> tuple:
+        return (
+            CrmLead.stage.label("raw_stage"),
+            CrmLead.payment_plan,
+            CrmLead.unanswered_calls,
             CrmLead.lead_id,
             CrmLead.external_record_id,
             CrmLead.full_name,
@@ -288,23 +313,50 @@ class CrmLeadRepository:
             CrmLead.created_at,
             CrmLead.updated_at,
         )
-        previews: dict[str, list[dict[str, Any]]] = {stage: [] for stage in stages}
-        if stages:
-            preview = union_all(
-                *(
-                    select(*preview_columns)
-                    .where(*filters, display_stage == stage)
-                    .order_by(CrmLead.updated_at.desc(), CrmLead.lead_id.desc())
-                    .limit(limit)
-                    for stage in stages
-                )
-            )
-            for row in (await self.db.execute(preview)).all():
-                card = dict(row._mapping)
-                if card["stage"] in LEGACY_NOT_INTERESTED_STAGES:
-                    card["stage"] = "not_interested"
-                previews.setdefault(card["stage"], []).append(card)
-        return previews, counts
+
+    async def pipeline_scoring_rows(
+        self,
+        stages: list[str],
+        counsellor_id: Optional[int] = None,
+        awarding_body: Optional[str] = None,
+        programme: Optional[str] = None,
+        unassigned: bool = False,
+        created_from: Optional[datetime] = None,
+        created_to: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """Just what the lead score needs, for every lead the board's filters match."""
+        filters = self._build_filters(
+            None, None, counsellor_id, None, False, awarding_body, programme, unassigned,
+            created_from, created_to,
+        )
+        display_stage = case((CrmLead.stage.in_(LEGACY_NOT_INTERESTED_STAGES), "not_interested"), else_=CrmLead.stage)
+        rows = await self.db.execute(
+            select(
+                CrmLead.lead_id,
+                CrmLead.stage.label("raw_stage"),
+                display_stage.label("stage"),
+                CrmLead.source,
+                CrmLead.followup_count,
+                CrmLead.unanswered_calls,
+                CrmLead.payment_plan,
+                CrmLead.priority,
+                CrmLead.last_contacted_at,
+                CrmLead.created_at,
+            ).where(*filters, display_stage.in_(stages))
+        )
+        return [dict(row._mapping) for row in rows.all()]
+
+    async def pipeline_cards(self, lead_ids: list[int]) -> list[dict[str, Any]]:
+        if not lead_ids:
+            return []
+        rows = await self.db.execute(select(*self._pipeline_card_columns()).where(CrmLead.lead_id.in_(lead_ids)))
+        cards = []
+        for row in rows.all():
+            card = dict(row._mapping)
+            if card["stage"] in LEGACY_NOT_INTERESTED_STAGES:
+                card["stage"] = "not_interested"
+            cards.append(card)
+        return cards
 
     async def list_pipeline_preview(self, stage: str, limit: int) -> list[CrmLead]:
         stmt = (

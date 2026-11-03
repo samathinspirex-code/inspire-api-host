@@ -10,6 +10,7 @@ def validate(key,value):
         return isinstance(v,int) and not isinstance(v,bool) and low<=v<=high
     valid=False
     if key=='college_name': valid=isinstance(value,str) and 1<=len(value.strip())<=200
+    elif key=='display_currency': valid=isinstance(value,str) and value in {'LKR','USD','GBP','EUR','AUD'}
     elif key=='fy_start_month': valid=integer(value,1,12)
     elif key in {'invoice_lead_days','link_expiry_days'}: valid=integer(value,0 if key=='invoice_lead_days' else 1,365)
     elif key=='registration_fee':

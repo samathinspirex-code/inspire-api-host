@@ -20,7 +20,7 @@ CF = {
     'other_operating': ('Other operating items', 'operating'), 'capex': ('Purchase of equipment', 'investing'),
     'loans': ('Directors’ loans received / (repaid)', 'financing'), 'capital': ('Capital introduced', 'financing'),
 }
-DEFAULTS = dict(college_name='Inspire College', fy_start_month=4, registration_fee=5000, invoice_lead_days=5,
+DEFAULTS = dict(college_name='Inspire College', display_currency='LKR', fy_start_month=4, registration_fee=5000, invoice_lead_days=5,
                 reminders=dict(before_days=3, on_due=True, after_days=7), late_fee=dict(enabled=False, amount=1000, after_days=7),
                 link_expiry_days=30, ecl_rates=dict(current=.02, d30=.1, d60=.25, d90=.5, d90p=.9),
                 payment_methods=['payhere', 'bank_transfer', 'cash'])

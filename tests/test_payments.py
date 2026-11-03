@@ -65,6 +65,8 @@ class AccountingTests(unittest.TestCase):
         with self.assertRaises(ValidationError): validate('fy_start_month',13)
         with self.assertRaises(ValidationError): validate('ecl_rates',dict(current=2,d30=0,d60=0,d90=0,d90p=0))
         self.assertEqual(validate('registration_fee',5000),5000)
+        self.assertEqual(validate('display_currency','USD'),'USD')
+        with self.assertRaises(ValidationError): validate('display_currency','<script>')
 
 
 class PaymentSecurityTests(unittest.IsolatedAsyncioTestCase):

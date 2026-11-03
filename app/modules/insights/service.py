@@ -27,10 +27,6 @@ def _tier(xp: int) -> dict:
     return {"name": name, "index": index, "floor": floor, "next": nxt[0] if nxt else None, "next_xp": nxt[1] if nxt else None, "progress": round(progress, 3)}
 
 
-def _xp(person: dict) -> int:
-    return person["assigned"] * 5 + person["contacted"] * 40 + person["enrolled"] * 500 + person["streak"] * 15
-
-
 def _cumulative(daily: list[dict], days: int) -> dict:
     window = daily[-days:] if days else daily
     running = []

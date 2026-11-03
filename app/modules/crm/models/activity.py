@@ -19,6 +19,7 @@ class CrmActivity(Base):
     )
     activity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    call_outcome: Mapped[Optional[str]] = mapped_column(String(30))
     counsellor_id: Mapped[Optional[int]] = mapped_column(Integer)
     counsellor_name: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

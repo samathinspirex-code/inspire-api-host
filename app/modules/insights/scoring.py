@@ -45,6 +45,11 @@ SOURCE_QUALITY = {
     "linkedin": 4,
 }
 CLOSED = {"enrolled", "not_interested", "lost_to_competitor", "cant_afford"}
+HIGH_SCORE = 60
+MEDIUM_SCORE = 35
+HIGH_QUALITY_SOURCE = 8
+UNANSWERED_POINTS = 3
+UNANSWERED_MAX = 12
 SOURCE_LABELS = {
     "website_admission": "Admission form",
     "website_contact": "Contact form",
@@ -90,12 +95,14 @@ def factors(lead: dict, now: datetime) -> list[dict]:
     recency = 12 if last < 24 else 7 if last < 72 else 2 if last < 168 else 0
     quality = SOURCE_QUALITY.get(lead.get("source") or "", 3)
     instalment = 5 if lead.get("instalment") else 0
+    unanswered = min(UNANSWERED_MAX, int(lead.get("unanswered_calls") or 0) * UNANSWERED_POINTS)
     return [
         {"name": "Stage signal", "value": base, "max": 40},
         {"name": "Engagement", "value": engagement, "max": 33},
         {"name": "Recency of last touch", "value": recency, "max": 12},
         {"name": f"Source quality · {source_label(lead.get('source'))}", "value": quality, "max": 12},
         {"name": "Can pay by instalment", "value": instalment, "max": 5},
+        {"name": "Unanswered calls", "value": -unanswered, "max": 0},
     ]
 
 
@@ -118,13 +125,24 @@ def win_probability(lead: dict, now: datetime) -> float:
 
 
 def heat(score: int) -> str:
-    return "hot" if score >= 62 else "warm" if score >= 40 else "cold"
+    return "hot" if score >= HIGH_SCORE else "warm" if score >= MEDIUM_SCORE else "cold"
+
+
+def auto_priority(lead: dict, now: datetime) -> str:
+    """The priority a lead should carry after a call or a stage change."""
+    stage = lead.get("stage") or "new_lead"
+    if stage in CLOSED or stage == "uncontactable":
+        return "low"
+    if stage == "new_lead":
+        return "high" if SOURCE_QUALITY.get(lead.get("source") or "", 3) >= HIGH_QUALITY_SOURCE else "medium"
+    score = score_lead(lead, now)
+    return "high" if score >= HIGH_SCORE else "medium" if score >= MEDIUM_SCORE else "low"
 
 
 def next_action(lead: dict, now: datetime) -> str:
     stage = lead.get("stage") or "new_lead"
     last = hours_since(lead.get("last_touch") or lead.get("created_at"), now) or 0
-    attempts = int(lead.get("followup_count") or 0)
+    attempts = int(lead.get("unanswered_calls") or 0)
     if stage == "new_lead":
         if last > 1:
             return "Call now. This lead has been waiting and new enquiries cool quickly after 24 hours."

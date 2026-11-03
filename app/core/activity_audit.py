@@ -62,6 +62,22 @@ def _describe_change(method: str, path: str) -> tuple[str, str, bool] | None:
         return "Updated lead assignment settings", "CRM", False
     if re.fullmatch(r"/api/v1/cms/crm/counsellors/\d+", lower_path):
         return "Updated counsellor", "CRM", False
+    if lower_path == "/api/v1/cms/crm/arena/claim":
+        return "Claimed Arena quest", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/rewards/\d+/collect", lower_path):
+        return "Requested Arena reward", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/rewards(/\d+)?", lower_path):
+        return "Saved Arena reward", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/rewards/\d+/codes", lower_path):
+        return "Added Arena reward codes", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/reward-codes/\d+", lower_path):
+        return "Voided Arena reward code", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/rewards/\d+/award", lower_path):
+        return "Gave Arena reward", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/reward-collections/\d+/distribute", lower_path):
+        return "Distributed Arena reward", "CRM", False
+    if re.fullmatch(r"/api/v1/cms/crm/arena/reward-collections/\d+/decline", lower_path):
+        return "Declined Arena reward", "CRM", False
     if re.fullmatch(r"/api/v1/lms/exams/\d+/questions/import", lower_path):
         return "Imported exam questions", "Exams", False
     if re.fullmatch(r"/api/v1/lms/exams/\d+/schedule", lower_path):

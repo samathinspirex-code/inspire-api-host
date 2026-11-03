@@ -63,6 +63,7 @@ button:focus-visible{outline:2px solid var(--accent-2);outline-offset:3px}
   function fail(msg) { $('error').textContent = msg; $('error').hidden = false; }
   fetch('/api/v1/payments/public/pay/' + encodeURIComponent(token)).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error((d.error && d.error.message) || 'This link is not valid.'); return d; }); }).then(function (d) {
     $('loading').hidden = true;
+    if (d.status !== 'sent' && d.status !== 'paid') { fail(d.status === 'expired' ? 'This link has expired. Please contact Inspire College for a new one.' : 'This link is no longer active.'); return; }
     if (d.status === 'paid' || status === 'return') {
       $('done').hidden = false;
       if (d.status !== 'paid') { $('doneTitle').textContent = 'Payment submitted'; $('doneText').textContent = 'PayHere is confirming your payment. You will receive a receipt once it is confirmed.'; }

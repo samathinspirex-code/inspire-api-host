@@ -119,7 +119,7 @@ async def tracked_people(db: AsyncSession, counsellor_id: int | None, query: str
         params["q"] = f"%{query.strip()}%"
     rows = (await db.execute(text(f"""
         SELECT l.lead_id, l.full_name, l.phone, l.stage, l.source, l.counsellor_name, l.created_at, l.last_contacted_at, l.last_activity_at,
-               l.followup_count, l.payment_plan,
+               l.followup_count, l.unanswered_calls, l.payment_plan,
                coalesce(nullif(l.interested_course, ''), nullif(l.interested_programme, ''), 'Unspecified') AS programme
         FROM crm_leads l WHERE l.is_archived = false{scope}{search}
         ORDER BY l.last_activity_at DESC NULLS LAST, l.lead_id DESC LIMIT 200
@@ -128,7 +128,7 @@ async def tracked_people(db: AsyncSession, counsellor_id: int | None, query: str
     people = []
     for row in rows:
         lead = dict(row)
-        lead["last_touch"] = lead.get("last_contacted_at") or lead.get("last_activity_at")
+        lead["last_touch"] = lead.get("last_contacted_at")
         lead["instalment"] = bool(lead.get("payment_plan"))
         value = score_lead(lead, now)
         idle = hours_since(lead["last_touch"], now)
