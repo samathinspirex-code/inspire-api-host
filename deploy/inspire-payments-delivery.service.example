@@ -1,0 +1,14 @@
+[Unit]
+Description=Inspire Payments message delivery pass
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inspire-api-host
+EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_payments_worker.py --send
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

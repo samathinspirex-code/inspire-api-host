@@ -48,7 +48,7 @@ CHANNELS = [
     {"name": "LinkedIn Ads", "color": "#AC8E68", "spend": 85000, "leads": 41, "enrolled": 2, "source": "demo", "trend": [4, 5, 5, 6, 5, 6, 6, 6]},
     {"name": "Email & SMS", "color": "#FF9F0A", "spend": 22000, "leads": 63, "enrolled": 2, "source": "demo", "trend": [6, 7, 8, 8, 9, 8, 9, 9]},
     {"name": "Referral & Champions", "color": "#FFD60A", "spend": 30000, "leads": 48, "enrolled": 6, "source": "demo", "trend": [3, 4, 5, 5, 6, 7, 8, 9]},
-    {"name": "Walk-in & events", "color": "#8E8E93", "spend": 12000, "leads": 37, "enrolled": 4, "source": "demo", "trend": [3, 3, 4, 4, 4, 5, 5, 5]},
+    {"name": "Events & walk-in", "color": "#8E8E93", "spend": 65000, "leads": 72, "enrolled": 4, "source": "demo", "trend": [3, 3, 4, 4, 4, 5, 5, 5]},
 ]
 
 PAGES = [
@@ -70,7 +70,7 @@ PLATFORMS = [
     {"id": "gads", "name": "Google Ads", "kind": "Search and YouTube ads", "color": "#30D158", "glyph": "A", "detail": "Spend, keywords, clicks and conversions", "status": "Not connected", "tone": ""},
     {"id": "gsc", "name": "Search Console", "kind": "Organic search", "color": "#30D158", "glyph": "S", "detail": "Search terms people use to find Inspire College", "status": "Not connected", "tone": ""},
     {"id": "tiktok", "name": "TikTok Ads & Analytics", "kind": "Paid and organic TikTok", "color": "#FF375F", "glyph": "K", "detail": "Ad spend, video views and lead forms", "status": "Not connected", "tone": ""},
-    {"id": "wa", "name": "WhatsApp Business Platform", "kind": "One number per counsellor", "color": "#30D158", "glyph": "W", "detail": "Conversations, reply times and templates", "status": "Not connected", "tone": ""},
+    {"id": "wa", "name": "WhatsApp Business Platform", "kind": "Multiple numbers, one per counsellor", "color": "#30D158", "glyph": "W", "detail": "Bot handovers, chat timelines and logged reply times", "status": "Not connected", "tone": ""},
     {"id": "ig", "name": "Instagram Insights", "kind": "Organic reach and DMs", "color": "#BF5AF2", "glyph": "I", "detail": "Reels, story and DM performance", "status": "Not connected", "tone": ""},
     {"id": "li", "name": "LinkedIn Ads", "kind": "Professional audiences", "color": "#AC8E68", "glyph": "L", "detail": "CPD and postgraduate lead forms", "status": "Not connected", "tone": ""},
     {"id": "yt", "name": "YouTube", "kind": "Video channel", "color": "#FF453A", "glyph": "Y", "detail": "Views and watch time for programme videos", "status": "Not connected", "tone": ""},
@@ -83,14 +83,14 @@ PLATFORMS = [
 
 GTM_EVENTS = [
     {"event": "page_view", "where": "All pages", "destinations": "GA4 · Meta · TikTok", "status": "Live"},
-    {"event": "view_programme", "where": "Programme pages", "destinations": "GA4 · Meta", "status": "Live"},
-    {"event": "fee_calculator_used", "where": "Fees page calculator", "destinations": "GA4", "status": "Planned"},
-    {"event": "brochure_download", "where": "PDF link click", "destinations": "GA4 · Meta", "status": "Live"},
-    {"event": "whatsapp_click", "where": "WhatsApp button", "destinations": "GA4 · Meta · TikTok", "status": "Planned"},
-    {"event": "apply_start", "where": "Apply form opened", "destinations": "GA4 · Meta · Google Ads", "status": "Live"},
-    {"event": "generate_lead", "where": "Enquiry submitted", "destinations": "GA4 · Meta · Google Ads · TikTok", "status": "Missing"},
-    {"event": "webinar_register", "where": "Webinar sign-up", "destinations": "GA4 · Meta", "status": "Planned"},
-    {"event": "payment_complete", "where": "PayHere success page", "destinations": "GA4 · Meta CAPI · Google Ads", "status": "Planned"},
+    {"event": "view_programme", "where": "Programme pages", "destinations": "GA4", "status": "Live"},
+    {"event": "fee_calculator_used", "where": "No fee calculator on the website yet", "destinations": "GA4", "status": "Planned"},
+    {"event": "brochure_download", "where": "Download brochure link", "destinations": "GA4", "status": "Live"},
+    {"event": "whatsapp_click", "where": "Any WhatsApp link or button", "destinations": "GA4", "status": "Live"},
+    {"event": "apply_start", "where": "Admissions page opened", "destinations": "GA4", "status": "Live"},
+    {"event": "generate_lead", "where": "Contact, application or event form submitted", "destinations": "GA4", "status": "Live"},
+    {"event": "webinar_register", "where": "Event registration form", "destinations": "GA4", "status": "Live"},
+    {"event": "payment_complete", "where": "Not built. Must come from the verified PayHere notification", "destinations": "GA4", "status": "Planned"},
     {"event": "scroll_75", "where": "75% scroll on programme pages", "destinations": "GA4", "status": "Live"},
 ]
 
@@ -109,12 +109,32 @@ VISITORS = {
     "overseas": 18,
     "mobile": 78,
     "peak": "7–10 pm",
-    "personas": [{"name": "Students", "value": 46}, {"name": "Parents", "value": 27}, {"name": "Professionals", "value": 27}],
-    "sources": [
-        {"name": "Meta", "value": 44}, {"name": "Google", "value": 18}, {"name": "Direct", "value": 14},
-        {"name": "WhatsApp", "value": 9}, {"name": "Instagram", "value": 6}, {"name": "TikTok", "value": 5},
+    "avg_engagement": "1:48",
+    "devices": [{"name": "Mobile", "value": 78}, {"name": "Desktop", "value": 19}, {"name": "Tablet", "value": 3}],
+    "visitor_types": [{"name": "New visitors", "value": 71}, {"name": "Returning", "value": 29}],
+    "intent": [{"name": "Browsing", "value": 58}, {"name": "Comparing programmes", "value": 24}, {"name": "Checking fees", "value": 12}, {"name": "Ready to apply", "value": 6}],
+    "hours": [52, 44, 41, 40, 41, 43, 47, 52, 61, 72, 92, 128, 153, 162, 134, 96, 71, 62, 77, 128, 178, 214, 186, 118],
+    "cities": [
+        {"city": "Colombo", "country": "Sri Lanka", "users": 4120, "lat": 6.93, "lon": 79.85, "s": 1566, "p": 906, "w": 1648},
+        {"city": "Gampaha", "country": "Sri Lanka", "users": 1460, "lat": 7.09, "lon": 79.99, "s": 701, "p": 350, "w": 409},
+        {"city": "Kandy", "country": "Sri Lanka", "users": 980, "lat": 7.29, "lon": 80.63, "s": 539, "p": 245, "w": 196},
+        {"city": "Kurunegala", "country": "Sri Lanka", "users": 640, "lat": 7.49, "lon": 80.36, "s": 333, "p": 179, "w": 128},
+        {"city": "Negombo", "country": "Sri Lanka", "users": 610, "lat": 7.21, "lon": 79.84, "s": 281, "p": 146, "w": 183},
+        {"city": "Dubai", "country": "United Arab Emirates", "users": 540, "lat": None, "lon": None, "s": 65, "p": 367, "w": 108},
+        {"city": "Galle", "country": "Sri Lanka", "users": 420, "lat": 6.05, "lon": 80.22, "s": 210, "p": 118, "w": 92},
+        {"city": "Doha", "country": "Qatar", "users": 290, "lat": None, "lon": None, "s": 35, "p": 197, "w": 58},
+        {"city": "Matara", "country": "Sri Lanka", "users": 260, "lat": 5.95, "lon": 80.55, "s": 135, "p": 78, "w": 47},
+        {"city": "London", "country": "United Kingdom", "users": 260, "lat": None, "lon": None, "s": 31, "p": 177, "w": 52},
+        {"city": "Ratnapura", "country": "Sri Lanka", "users": 210, "lat": 6.69, "lon": 80.40, "s": 109, "p": 63, "w": 38},
+        {"city": "Jaffna", "country": "Sri Lanka", "users": 180, "lat": 9.66, "lon": 80.02, "s": 90, "p": 63, "w": 27},
     ],
-    "countries": [["Sri Lanka", 82], ["UAE", 6], ["Qatar", 4], ["UK", 3], ["Australia", 2], ["Other", 3]],
+    "personas": [{"name": "Students", "value": 46}, {"name": "Parents & guardians", "value": 27}, {"name": "Working professionals", "value": 27}],
+    "sources": [
+        {"name": "Meta (paid social)", "value": 44}, {"name": "Google organic", "value": 18}, {"name": "Direct", "value": 14},
+        {"name": "WhatsApp", "value": 9}, {"name": "Instagram", "value": 6}, {"name": "TikTok", "value": 5}, {"name": "Referral", "value": 4},
+    ],
+    "countries": [{"name": "Sri Lanka", "value": 82}, {"name": "UAE", "value": 6}, {"name": "Qatar", "value": 3}, {"name": "United Kingdom", "value": 3}, {"name": "Australia", "value": 2}, {"name": "Other", "value": 4}],
+    "country_rows": [{"name": "Sri Lanka", "value": 82}, {"name": "United Arab Emirates", "value": 6}, {"name": "Qatar", "value": 3}, {"name": "United Kingdom", "value": 3}, {"name": "Australia", "value": 2}],
 }
 
 PARTNER_TYPES = ["Influencer", "Tutor", "Partner agent", "School", "Alumni", "Student champion", "Corporate partner"]
@@ -150,3 +170,25 @@ def meta_summary() -> str:
     camps = "; ".join(f"{item['name']} {round(item['spend'])}/{item['leads']} leads" for item in META["campaigns"])
     ages = ", ".join(f"{age} {META['men_leads'][i]}/{META['women_leads'][i]}" for i, age in enumerate(META["ages"]))
     return f"Meta Ads {META['range']} (demo snapshot): spend LKR {spend:,.0f}, {leads} leads, CPL {spend / leads:,.0f}. Campaigns: {camps}. Leads by age (men/women): {ages}."
+
+
+UNIT_ECONOMICS = [
+    {"name": "HND Computing & AI", "cpl": 1957, "cac": 108717, "ltv": 262500},
+    {"name": "HND Data Analytics", "cpl": 1957, "cac": 108717, "ltv": 262500},
+    {"name": "HND Business Mgmt", "cpl": 1957, "cac": 108717, "ltv": 262500},
+    {"name": "HND Accounting", "cpl": 1957, "cac": 108717, "ltv": 262500},
+    {"name": "Finance Literacy", "cpl": 1374, "cac": 39267, "ltv": 42500},
+    {"name": "AI for HR", "cpl": 1374, "cac": 39267, "ltv": 42500},
+    {"name": "Digital Marketing", "cpl": 1374, "cac": 39267, "ltv": 42500},
+]
+
+ATTRIBUTION = {
+    "models": ["First touch", "Last touch", "Linear", "Time decay"],
+    "channels": [
+        {"name": "Meta Ads", "values": [46, 31, 38, 36]},
+        {"name": "Website / Google", "values": [14, 27, 22, 23]},
+        {"name": "WhatsApp", "values": [12, 18, 16, 17]},
+        {"name": "Referral", "values": [18, 12, 13, 14]},
+        {"name": "Walk-in & events", "values": [10, 12, 11, 10]},
+    ],
+}

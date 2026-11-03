@@ -1,8 +1,10 @@
+from secrets import compare_digest
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.modules.crm import service
 from app.modules.crm.schemas import CrmLeadCreate
@@ -203,10 +205,15 @@ async def submit_whatsapp_lead(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Webhook intake for WhatsApp Bot System.
-    When a student chats with the bot and expresses interest in a programme,
-    the bot submits the lead into Inspire CRM.
+    Legacy webhook intake for the WhatsApp bot.
+    The bot now uses POST /api/v1/integrations/crm/whatsapp-bot/leads.
+    This route previously accepted unauthenticated posts; it now requires
+    X-Webhook-Secret to equal CRM_INTEGRATION_API_TOKEN, and it never runs the
+    round robin (WhatsApp bot leads keep the bot's own assignment).
     """
+    configured = settings.CRM_INTEGRATION_API_TOKEN
+    if not x_webhook_secret or len(configured) < 32 or not compare_digest(x_webhook_secret, configured):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
     notes_parts = []
     if payload.bot_session_id:
         notes_parts.append(f"WhatsApp Session: {payload.bot_session_id}")
@@ -231,6 +238,7 @@ async def submit_whatsapp_lead(
         create_payload,
         counsellor_id=None,
         counsellor_name="WhatsApp Bot",
+        auto_assign=False,
     )
     return {
         "status": "success",

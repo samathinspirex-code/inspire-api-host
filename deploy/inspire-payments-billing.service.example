@@ -1,0 +1,14 @@
+[Unit]
+Description=Inspire Payments daily billing and reminder pass
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inspire-api-host
+EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_payments_worker.py --daily
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

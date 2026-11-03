@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 from pydantic import ValidationError
 
 from app.modules.lms.notification_email import build_notification_payload
-from app.modules.lms.notification_service import _audience_label, get_announcement, local_time, reminder_due
+from app.modules.lms.notification_service import _audience_label, deliver_pending_emails, get_announcement, local_time, reminder_due
+from app.modules.auth.invitation_email import EmailDeliveryResult
 from app.core.errors import ForbiddenError
 from app.modules.lms.schemas import AnnouncementCreate
 from app.modules.cms.media_service import allowed_upload_type
@@ -31,6 +32,28 @@ class NotificationTests(unittest.TestCase):
         summer = datetime(2026, 7, 1, 0, 30, tzinfo=timezone.utc)
         self.assertIn("31 December 2025 at 07:30 PM", local_time(winter, "America/New_York"))
         self.assertIn("30 June 2026 at 08:30 PM", local_time(summer, "America/New_York"))
+
+    def test_meeting_email_uses_student_timezone_saved_after_notification_was_queued(self):
+        start = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
+        old_message = f"Cyber Security starts on {local_time(start)}. Use the LMS Join class button to enter."
+        item = SimpleNamespace(user_id=7, event_key="meeting:42:start:2026-01-01T00:30:00+00:00:30",
+            notification_type="class_reminder", title="Online class in 30 minutes: Cyber Security",
+            message=old_message, action_url="https://lms.example.com/?view=meetings",
+            email_attempts=0, email_status="pending", email_sent_at=None,
+            email_provider_id=None, email_error=None)
+        user = SimpleNamespace(email="student@example.com", full_name="Student")
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            SimpleNamespace(all=lambda: [(item, user)]),
+            SimpleNamespace(all=lambda: [(42, start)]),
+            SimpleNamespace(all=lambda: [(7, "America/Toronto")]),
+        ]), commit=AsyncMock())
+        with patch("app.modules.lms.notification_service.send_notification_email", new_callable=AsyncMock,
+                   return_value=EmailDeliveryResult(True)) as send_email:
+            sent, failed = asyncio.run(deliver_pending_emails(db, now=start - timedelta(minutes=30)))
+        self.assertEqual((sent, failed), (1, 0))
+        self.assertIn("31 December 2025 at 07:30 PM (America/Toronto)", send_email.await_args.args[3])
+        self.assertNotIn("Asia/Colombo", send_email.await_args.args[3])
+        self.assertEqual(item.message, send_email.await_args.args[3])
 
     def test_mailjet_payload_escapes_notification_content(self):
         payload = build_notification_payload(

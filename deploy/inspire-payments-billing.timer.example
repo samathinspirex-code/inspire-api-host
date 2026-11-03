@@ -1,0 +1,10 @@
+[Unit]
+Description=Prepare Inspire Payments invoices and reminders at 07:00 Sri Lanka time
+
+[Timer]
+OnCalendar=*-*-* 07:00:00 Asia/Colombo
+Persistent=true
+Unit=inspire-payments-billing.service
+
+[Install]
+WantedBy=timers.target

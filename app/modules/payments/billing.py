@@ -102,6 +102,20 @@ async def receipt(c, b, actor):
         if status == 'paid':
             await c.execute("UPDATE instalments SET status='paid' WHERE invoice_id=$1", inv['id'])
             await c.execute("UPDATE payment_links SET status='paid',paid_at=now() WHERE invoice_id=$1 AND status='sent'", inv['id'])
+    # PayHere queues its acknowledgement after its verified callback is logged.
+    # Manual receipts use the same outbox; provider delivery is worker-only.
+    if method in {'cash','bank_transfer'}:
+        learner=await one(c,'SELECT first_name,email FROM learners WHERE id=$1',learner_id)
+        if learner and learner['email']:
+            lines=[f"Hi {learner['first_name']},",'',
+                f"We received LKR {amount:,.2f} by {'cash' if method=='cash' else 'bank transfer'}.",
+                f"Receipt reference: {j['number']}",f"Received date: {received}"]
+            if inv:
+                lines.extend([f"Invoice: {inv['number']}",f"Applied to this invoice: LKR {applied:,.2f}",
+                    f"Remaining on this invoice: LKR {inv['amount']-inv['amount_paid']-applied:,.2f}"])
+            if excess: lines.append(f"Learner advance credited: LKR {excess:,.2f}")
+            lines.extend(['','Thank you, Inspire College Accounts'])
+            await enqueue(c,'email',learner['email'],'\n'.join(lines),'Payment received — Inspire College')
     return dict(payment=pay, journal=j, applied=applied, excess=excess)
 
 
@@ -135,14 +149,22 @@ async def learners(c, as_of=None):
         paid=sum((i['amount_paid'] for i in invoices if e and i['enrolment_id']==e['id'] and i['kind'] in {'course','instalment'}), core.ZERO)
         open_invs=[i for i in invoices if i['status']=='open']; overdue=[i for i in open_invs if i['due_date']<as_of]
         open_total=sum((i['amount']-i['amount_paid'] for i in open_invs),core.ZERO)
-        balance=(open_total if e['status']=='withdrawn' else e['total_fee']-paid) if e else core.ZERO
+        # The plan already includes its invoiced tuition. Add every other open
+        # invoice (registration, late fees and standalone charges) exactly once.
+        balance=open_total
+        if e and e['status']!='withdrawn':
+            billed_tuition=sum((i['amount']-i['amount_paid'] for i in open_invs
+                if i['enrolment_id']==e['id'] and i['kind'] in {'course','instalment'}),core.ZERO)
+            balance=max(core.ZERO,e['total_fee']-paid)+open_total-billed_tuition
         d=max((core.days(i['due_date'],as_of) for i in overdue),default=0)
         ip=sum(i['status']=='paid' for i in instalments); nxt=next((i for i in instalments if i['status'] in {'scheduled','invoiced'}),None)
         status='withdrawn' if e and e['status']=='withdrawn' else 'paid' if balance<=0 else 'at_risk' if d>60 else 'overdue' if d else 'new' if not ip else 'current'
+        next_invoice=min(open_invs,key=lambda i:i['due_date']) if open_invs else None
+        next_item=next_invoice if next_invoice and (not nxt or next_invoice['due_date']<=nxt['due_date']) else nxt
         result.append(dict(l,name=l['first_name']+' '+l['last_name'], enrolment_id=e['id'] if e else None,enrolment_status=e['status'] if e else None,
             programme=e['programme'] if e else None,total_fee=e['total_fee'] if e else None,instalments=e['instalments'] if e else None,
-            counsellor=e['counsellor'] if e else None,paid=paid,balance=balance,instalments_paid=ip,next_due=nxt['due_date'] if nxt else None,
-            next_amount=nxt['amount'] if nxt else None,days_overdue=d,status=status,open_invoiced=open_total,
+            counsellor=e['counsellor'] if e else None,paid=paid,balance=balance,instalments_paid=ip,next_due=next_item['due_date'] if next_item else None,
+            next_amount=(next_invoice['amount']-next_invoice['amount_paid'] if next_item is next_invoice else nxt['amount']) if next_item else None,days_overdue=d,status=status,open_invoiced=open_total,
             overdue_amount=sum((i['amount']-i['amount_paid'] for i in overdue),core.ZERO)))
     return result
 

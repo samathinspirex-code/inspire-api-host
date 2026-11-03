@@ -73,6 +73,9 @@ def test_provider_reports_use_refresh_token_and_correct_aggregate_queries(platfo
             return httpx.Response(200, json={"access_token": "private-access"})
         assert request.headers["Authorization"] == "Bearer private-access"
         assert "private-access" not in str(request.url)
+        if request.url.path.endswith(":batchRunReports"):
+            asked = json.loads(request.content)["requests"]
+            return httpx.Response(200, json={"reports": [{"metricHeaders": item["metrics"]} for item in asked]})
         return httpx.Response(200, json=body)
     report = run(providers.fetch_report(platform, account_id, {"refresh_token": "private-refresh"}, "client", "secret", transport=httpx.MockTransport(handle)))
     assert report["metrics"] == expected
@@ -121,7 +124,8 @@ def test_credentials_are_account_specific_and_never_returned():
     result = MagicMock()
     result.mappings.return_value.all.return_value = [row]
     db = SimpleNamespace(execute=AsyncMock(return_value=result))
-    with patch.object(service.settings, "CONNECTORS_CREDENTIALS", {"2": {"refresh_token": "private-refresh"}}), patch.object(service.settings, "CONNECTORS_GOOGLE_CLIENT_ID", "client"), patch.object(service.settings, "CONNECTORS_GOOGLE_CLIENT_SECRET", "private-secret"):
+    bot = AsyncMock(return_value={"receiving": False, "total": 0})
+    with patch.object(service, "load_whatsapp", bot), patch.object(service.settings, "CONNECTORS_CREDENTIALS", {"2": {"refresh_token": "private-refresh"}}), patch.object(service.settings, "CONNECTORS_GOOGLE_CLIENT_ID", "client"), patch.object(service.settings, "CONNECTORS_GOOGLE_CLIENT_SECRET", "private-secret"):
         data = run(service.reporting(db))
     assert not data["accounts"][0]["can_sync"]
     assert "private" not in json.dumps(data)
@@ -182,6 +186,7 @@ def test_copilot_context_includes_connected_reports():
             "enrolled": 0, "conversion": 0, "active_month": 2, "top_interest": {"name": "Course", "count": 2},
             "referral_rate": 0, "meta_rate": 0, "peak": "10am", "past_sla": 0, "expected_enrolments": 0}
     goal = {"target": 1000, "start": datetime(2026, 1, 1), "end": datetime(2027, 6, 30)}
-    with patch.object(insights, "load_snapshot", AsyncMock(return_value=snap)), patch.object(insights, "get_mission", AsyncMock(return_value=goal)), patch.object(insights, "dataset_summary", AsyncMock(return_value=("Connected reporting", "Actual sessions: 25; stale"))):
+    bot = {"total": 0, "month": 0, "new_leads": 0, "merged": 0, "enrolled": 0, "conversion": 0, "unassigned": 0, "waiting": 0, "median_reply_min": None, "reply_sample": 0}
+    with patch.object(insights, "load_whatsapp", AsyncMock(return_value=bot)), patch.object(insights, "load_snapshot", AsyncMock(return_value=snap)), patch.object(insights, "get_mission", AsyncMock(return_value=goal)), patch.object(insights, "dataset_summary", AsyncMock(return_value=("Connected reporting", "Actual sessions: 25; stale"))):
         context = run(insights.context_text(None, None))
     assert "Actual sessions: 25; stale" in context

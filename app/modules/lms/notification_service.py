@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 ASSIGNMENT_REMINDERS = (1440, 60)
 # 1 day, 30 minutes, 15 minutes before, and at start time.
 MEETING_REMINDERS = (1440, 30, 15, 0)
+MEETING_TIME_PATTERN = re.compile(r"\b\d{2} [A-Za-z]+ \d{4} at \d{2}:\d{2} [AP]M \([^)]+\)")
 
 
 def utc_now() -> datetime:
@@ -43,6 +45,16 @@ def local_time(value: datetime, time_zone: str = "Asia/Colombo") -> str:
 def reminder_due(event_time: datetime, offset_minutes: int, now: datetime, grace_minutes: int = 10) -> bool:
     scheduled = event_time - timedelta(minutes=offset_minutes)
     return scheduled <= now <= scheduled + timedelta(minutes=grace_minutes)
+
+
+def _meeting_id(event_key: str) -> int | None:
+    parts = event_key.split(":", 2)
+    return int(parts[1]) if len(parts) > 1 and parts[0] == "meeting" and parts[1].isdigit() else None
+
+
+def _meeting_message_at_delivery(message: str, start_time: datetime, time_zone: str | None) -> str:
+    # A student may change their time zone after a meeting email was queued.
+    return MEETING_TIME_PATTERN.sub(local_time(start_time, time_zone or "Asia/Colombo"), message, count=1)
 
 
 async def _audience_user_ids(db: AsyncSession, audience_type: str, audience_id: int | None) -> list[int]:
@@ -429,7 +441,7 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
         users.add(meeting.lecturer_user_id)
         for offset in MEETING_REMINDERS:
             if reminder_due(meeting.start_time, offset, now):
-                label = "now" if offset == 0 else ("24 hours" if offset == 1440 else "15 minutes")
+                label = "now" if offset == 0 else ("24 hours" if offset == 1440 else f"{offset} minutes")
                 title = f"Join online class now: {meeting.title}" if offset == 0 else f"Online class in {label}: {meeting.title}"
                 key = f"meeting:{meeting.meeting_id}:start:{meeting.start_time.isoformat()}:{offset}"
                 audience = getattr(meeting, "audience_label", None) or f"{course.code} · {class_.name}"
@@ -441,12 +453,22 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
 async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, limit: int = 100) -> tuple[int, int]:
     now = now or utc_now(); sent = failed = 0
     rows = (await db.execute(select(LmsNotification, User).join(User, User.user_id == LmsNotification.user_id).where(LmsNotification.email_enabled.is_(True), LmsNotification.email_status.in_(("pending", "failed")), LmsNotification.email_attempts < 3, LmsNotification.scheduled_for <= now).order_by(LmsNotification.scheduled_for).limit(limit))).all()
+    meeting_rows = [(item, user) for item, user in rows if item.notification_type in {"class_schedule", "class_reminder"} and _meeting_id(item.event_key) is not None]
+    meeting_ids = {_meeting_id(item.event_key) for item, _ in meeting_rows}
+    meeting_times = dict((await db.execute(select(OnlineMeeting.meeting_id, OnlineMeeting.start_time).where(OnlineMeeting.meeting_id.in_(meeting_ids)))).all()) if meeting_ids else {}
+    student_ids = {item.user_id for item, _ in meeting_rows}
+    student_zones = dict((await db.execute(select(StudentProfile.user_id, StudentProfile.time_zone).where(StudentProfile.user_id.in_(student_ids)))).all()) if student_ids else {}
     for item, user in rows:
+        message = item.message
+        start_time = meeting_times.get(_meeting_id(item.event_key)) if item.notification_type in {"class_schedule", "class_reminder"} else None
+        if start_time:
+            message = _meeting_message_at_delivery(message, start_time, student_zones.get(item.user_id))
+            item.message = message
         result = await send_notification_email(
             user.email,
             user.full_name or user.email,
             item.title,
-            item.message,
+            message,
             item.action_url,
             item.event_key,
             notification_type=item.notification_type,
