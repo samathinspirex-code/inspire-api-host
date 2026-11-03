@@ -26,11 +26,11 @@ frame += '<script>const api=IBLiveApi.create({channel:'+json.dumps(channel)+'});
 html = '''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payments sandbox console</title><style>body{margin:0;font:14px system-ui;background:#f5f5f7}header{padding:12px 20px;background:#fff0bf;color:#352800}iframe{display:block;width:100%;height:calc(100dvh - 64px);border:0}</style></head><body><header><b>PAYMENTS SANDBOX</b> — Separate test ledger · PayHere sandbox · Messages disabled<br>Manual receipts require confirmation. Use fictional learners only.</header><iframe id="console" title="Sandbox payments" sandbox="allow-scripts allow-downloads allow-forms allow-modals"></iframe><script>
 const frame=document.getElementById('console');
 frame.srcdoc=__FRAME__;
-const allowed=/^\\/(me|dashboard|accounts|journals|programmes|learners|learner-enrolments|enrolments|invoices|receipts|payment-links|banking|suppliers|bills|fixed-assets|reports|posting-rules|close|settings|audit|gateway-events|messages)(\\/|\\?|$)/;
+__REQUEST_POLICY__
 window.addEventListener('message',async event=>{
  const m=event.data;
  if(event.source!==frame.contentWindow||m?.type!=='cms-payments-request'||m.channel!=='__PAYMENTS_CHANNEL__')return;
- if(typeof m.id!=='string'||typeof m.path!=='string'||!allowed.test(m.path)||/\\.\\.|[\\\\#]/.test(m.path)||!['GET','POST','PUT','PATCH'].includes(m.method))return;
+ if(typeof m.id!=='string'||!isPaymentPath(m.path)||m.path.startsWith('/sample-data')||!['GET','POST','PUT','PATCH'].includes(m.method))return;
  try{
   const headers={'X-Sandbox-CSRF':'__SANDBOX_CSRF__'};
   if(m.method!=='GET')headers['Idempotency-Key']=m.id;
@@ -44,6 +44,7 @@ window.addEventListener('message',async event=>{
 });
 </script></body></html>'''
 html = html.replace('__FRAME__', json.dumps(frame).replace('</','<\\/'))
+html = html.replace('__REQUEST_POLICY__', text(UI/'request-policy.js').replace('export function ', 'function '))
 (OUT/'sandbox-console.html').write_text(html,encoding='utf-8')
 for name in ['payments_sandbox.py','sandbox_console.py','configure_sandbox_console.py']:
     (OUT/name).write_text(text(Path(__file__).with_name(name)),encoding='utf-8')

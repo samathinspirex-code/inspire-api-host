@@ -28,7 +28,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from app.core.errors import APIError, api_error_handler, request_validation_handler
 from app.modules.payments import db, setup
-from app.modules.payments.router import public_router
+from app.modules.payments.router import public_router, PUBLIC_PAGE_HEADERS
 
 PREFIX = '/sandbox-payments'
 
@@ -53,7 +53,7 @@ async def payment_page(token: str):
     html = (setup.ROOT / 'assets' / 'pay.html').read_text(encoding='utf-8')
     html = html.replace("fetch('/api/v1/payments/", "fetch('/sandbox-payments/api/v1/payments/")
     html = html.replace('Secure fee payment', 'SANDBOX TEST — no real payment')
-    return HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff'})
+    return HTMLResponse(html, headers=PUBLIC_PAGE_HEADERS)
 
 # Only student checkout and signed gateway callback routes are exposed.
 # No user management, private finance APIs or authentication bypass is mounted.

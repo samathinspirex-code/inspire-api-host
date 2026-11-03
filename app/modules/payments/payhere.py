@@ -34,6 +34,7 @@ async def public_view(c,token):
     if not r: raise NotFoundError('Payment link not found')
     expiry=r.pop('expires_at')
     if r['status']=='sent' and expiry and expiry<datetime.now(timezone.utc): r['status']='expired'
+    if r['status']!='sent': return dict(code=r['code'],status=r['status'])
     return r
 
 

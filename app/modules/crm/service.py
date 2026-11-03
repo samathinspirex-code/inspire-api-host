@@ -6,6 +6,7 @@ import zipfile
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,10 @@ from app.modules.crm.models.activity import CrmActivity
 from app.modules.crm.models.counsellor_status import CrmCounsellorStatus
 from app.modules.crm.models.assignment_settings import CrmAssignmentSettings
 from app.modules.crm.repository import CrmActivityRepository, CrmLeadRepository
+from app.modules.insights.scoring import auto_priority, hours_since, next_action, score_lead, win_probability
 from app.modules.crm.schemas import (
+    CALL_OUTCOME_LABELS,
+    UNREACHED_CALL_OUTCOMES,
     CrmActivityCreate,
     CrmActivityOut,
     CrmCounsellorLeadPreview,
@@ -39,6 +43,8 @@ from app.modules.crm.schemas import (
     CrmLeadUpdate,
     CrmPipelineResponse,
     CrmPipelineStage,
+    CrmPriorityLead,
+    CrmPriorityQueueResponse,
     CrmReportDailyPoint,
     validate_status_fields,
 )
@@ -65,6 +71,11 @@ ACTIVE_ASSIGNED_STAGES = [
 ]
 
 CONTACT_ACTIVITY_TYPES = {"call", "email", "whatsapp", "counselling_session", "follow_up_completed"}
+_CONTACT_SQL = ", ".join(f"'{item}'" for item in sorted(CONTACT_ACTIVITY_TYPES))
+COLOMBO = ZoneInfo("Asia/Colombo")
+_UNREACHED_SQL = ", ".join(f"'{item}'" for item in UNREACHED_CALL_OUTCOMES)
+# Extra SQL condition on crm_activities (alias a) that drops calls which never reached the person.
+REACHED_ACTIVITY_SQL = f"coalesce(a.call_outcome, '') NOT IN ({_UNREACHED_SQL})"
 
 
 def _legacy_outcome_details(lead: CrmLead) -> tuple[str, str]:
@@ -755,12 +766,32 @@ async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = Non
     )
 
 
+async def _refresh_auto_priority(db: AsyncSession, lead_id: int) -> None:
+    """Recalculate priority after a call or stage change, unless someone chose it by hand."""
+    await db.flush()
+    row = (await db.execute(text(
+        "SELECT stage, source, followup_count, unanswered_calls, payment_plan, last_contacted_at, created_at "
+        "FROM crm_leads WHERE lead_id = :id AND priority_locked = false"
+    ), {"id": lead_id})).mappings().first()
+    if row is None:
+        return
+    priority = auto_priority(_scoring_input(dict(row)), datetime.now(timezone.utc).replace(tzinfo=None))
+    await db.execute(text("UPDATE crm_leads SET priority = :priority WHERE lead_id = :id"), {"priority": priority, "id": lead_id})
+
+
 async def get_lead(db: AsyncSession, lead_id: int) -> CrmLeadOut:
     repo = CrmLeadRepository(db)
     lead = await repo.get(lead_id)
     if lead is None:
         raise NotFoundError(f"Lead {lead_id} not found")
-    return CrmLeadOut.model_validate(lead)
+    out = CrmLeadOut.model_validate(lead)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    out.score = score_lead(_scoring_input({
+        "stage": lead.stage, "source": lead.source, "followup_count": lead.followup_count,
+        "unanswered_calls": lead.unanswered_calls, "payment_plan": lead.payment_plan,
+        "last_contacted_at": lead.last_contacted_at, "created_at": lead.created_at,
+    }), now)
+    return out
 
 
 async def was_manual_lead_created_by(db: AsyncSession, lead_id: int, user_id: int) -> bool:
@@ -837,6 +868,7 @@ async def create_lead(
     assign_to_creator: bool = False,
     reject_duplicate_phone: bool = False,
     auto_assign: bool = True,
+    lock_priority: bool = False,
 ) -> CrmLeadOut:
     await _ensure_awarding_body_column(db)
     await _ensure_counsellor_status_table(db)
@@ -872,7 +904,9 @@ async def create_lead(
     else:
         data["assigned_counsellor_id"] = None
         data["counsellor_name"] = None
+    data["priority_locked"] = lock_priority
     lead = await repo.create(data, commit=False)
+    await _refresh_auto_priority(db, lead.lead_id)
 
     if explicit_id is None and not assign_to_creator and not auto_assign:
         assignment_note = " Round robin skipped for this source."
@@ -933,6 +967,8 @@ async def update_lead(
         )
         if lead.assigned_at and abs(lead.assigned_at - lead.created_at) <= timedelta(minutes=2):
             data["assigned_at"] = data["created_at"]
+    if data.get("priority") and data["priority"] != lead.priority:
+        data["priority_locked"] = True
     enrolling = data.get("stage") == "enrolled" and lead.stage != "enrolled"
     legacy_email_added = (
         lead.stage == "enrolled"
@@ -1005,6 +1041,8 @@ async def update_lead(
         }, commit=False)
     if changes:
         await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
+        if changes.keys() & {"stage", "source", "payment_plan", "priority_locked"}:
+            await _refresh_auto_priority(db, lead_id)
         await db.commit()
         if enrolling or legacy_email_added:
             await _send_enrollment_email(db, lead_id)
@@ -1070,6 +1108,7 @@ async def update_stage(
     await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
     if enrolling:
         await db.execute(text("UPDATE crm_leads SET enrolled_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    await _refresh_auto_priority(db, lead_id)
     await db.commit()
     if enrolling:
         await _send_enrollment_email(db, lead_id)
@@ -1085,6 +1124,39 @@ async def delete_lead(db: AsyncSession, lead_id: int) -> None:
 
 
 PIPELINE_PREVIEW_MAX = 20
+PRIORITY_QUEUE_SIZE = 4
+PRIORITY_RANK = {"high": 20, "low": -10}
+
+
+def _scoring_input(row: dict) -> dict:
+    return {
+        "stage": row.get("raw_stage") or row.get("stage"),
+        "source": row.get("source"),
+        "followup_count": row.get("followup_count"),
+        "unanswered_calls": row.get("unanswered_calls"),
+        "instalment": bool(row.get("payment_plan")),
+        "last_touch": row.get("last_contacted_at"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def _scored_card(row: dict, now: datetime) -> dict:
+    lead = _scoring_input(row)
+    score = score_lead(lead, now)
+    return {**row, "score": score, "win_probability": round(win_probability(lead, now) * 100, 1)}
+
+
+def rank_priority_rows(rows: list[dict], now: datetime, limit: int = PRIORITY_QUEUE_SIZE) -> list[dict]:
+    """Who to call next: open leads by score, lifting new leads and those going quiet."""
+    ranked = []
+    for row in rows:
+        lead = _scoring_input(row)
+        last = hours_since(lead["last_touch"] or lead["created_at"], now) or 0
+        rank = score_lead(lead, now) + (14 if row["stage"] == "new_lead" else 0) + (6 if 24 < last < 200 else 0)
+        rank += PRIORITY_RANK.get(row.get("priority"), 0)
+        ranked.append((rank, row))
+    ranked.sort(key=lambda item: (-item[0], -item[1]["lead_id"]))
+    return [row for _, row in ranked[:limit]]
 
 
 async def get_pipeline(
@@ -1096,23 +1168,52 @@ async def get_pipeline(
     unassigned: bool = False,
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
+    priority: Optional[str] = None,
 ) -> CrmPipelineResponse:
     await _ensure_awarding_body_column(db)
     await _ensure_lead_indexes()
     limit = max(1, min(preview_per_stage, PIPELINE_PREVIEW_MAX))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     previews, counts = await CrmLeadRepository(db).pipeline_snapshot(
-        PIPELINE_STAGES, limit, counsellor_id, awarding_body, programme, unassigned, created_from, created_to
+        PIPELINE_STAGES, limit, counsellor_id, awarding_body, programme, unassigned, created_from, created_to, priority
     )
     return CrmPipelineResponse(
         stages=[
             CrmPipelineStage(
                 stage=stage,
                 count=counts.get(stage, 0),
-                leads=[CrmLeadSummary.model_validate(lead) for lead in previews.get(stage, [])],
+                leads=sorted(
+                    (CrmLeadSummary.model_validate(_scored_card(lead, now)) for lead in previews.get(stage, [])),
+                    key=lambda card: -(card.score or 0),
+                ),
             )
             for stage in PIPELINE_STAGES
         ]
     )
+
+
+async def get_priority_queue(
+    db: AsyncSession,
+    counsellor_id: Optional[int] = None,
+    awarding_body: Optional[str] = None,
+    programme: Optional[str] = None,
+    unassigned: bool = False,
+    created_from: Optional[datetime] = None,
+    created_to: Optional[datetime] = None,
+) -> CrmPriorityQueueResponse:
+    await _ensure_awarding_body_column(db)
+    repo = CrmLeadRepository(db)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    open_stages = [stage for stage in PIPELINE_STAGES if stage not in ("enrolled", "not_interested")]
+    rows = await repo.pipeline_scoring_rows(open_stages, counsellor_id, awarding_body, programme, unassigned, created_from, created_to)
+    top = [row["lead_id"] for row in rank_priority_rows(rows, now)]
+    cards = {card["lead_id"]: card for card in await repo.pipeline_cards(top)}
+    leads = [
+        CrmPriorityLead.model_validate({**_scored_card(cards[lead_id], now), "next_action": next_action(_scoring_input(cards[lead_id]), now)})
+        for lead_id in top if lead_id in cards
+    ]
+    expected = sum(win_probability(_scoring_input(row), now) for row in rows)
+    return CrmPriorityQueueResponse(leads=leads, open_leads=len(rows), expected_enrolments=round(expected, 1))
 
 
 async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, date_from: Optional[date] = None, date_to: Optional[date] = None) -> CrmDashboardResponse:
@@ -1558,25 +1659,42 @@ async def add_activity(
     if lead is None:
         raise NotFoundError(f"Lead {lead_id} not found")
 
+    reached = payload.activity_type in CONTACT_ACTIVITY_TYPES and payload.call_outcome not in UNREACHED_CALL_OUTCOMES
+    reached_today = False
+    if reached:
+        # Engagement grows once a day per lead, so repeat logging can't inflate the score.
+        today = datetime.now(COLOMBO).replace(hour=0, minute=0, second=0, microsecond=0)
+        reached_today = bool((await db.execute(text(
+            f"SELECT 1 FROM crm_activities a WHERE a.lead_id = :id AND a.created_at >= :start "
+            f"AND a.activity_type IN ({_CONTACT_SQL}) AND {REACHED_ACTIVITY_SQL} LIMIT 1"
+        ), {"id": lead_id, "start": today.astimezone(timezone.utc).replace(tzinfo=None)})).scalar())
+
     activity_repo = CrmActivityRepository(db)
     activity = await activity_repo.create(
         {
             "lead_id": lead_id,
             "activity_type": payload.activity_type,
-            "content": payload.content,
+            "content": payload.content.strip() or CALL_OUTCOME_LABELS.get(payload.call_outcome, ""),
+            "call_outcome": payload.call_outcome,
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
         },
         commit=False,
     )
-    if payload.activity_type in CONTACT_ACTIVITY_TYPES:
+    if reached:
         await db.execute(text("""
-            UPDATE crm_leads SET last_contacted_at=now(), last_activity_at=now(),
-                followup_count=followup_count + CASE WHEN :followup THEN 1 ELSE 0 END
+            UPDATE crm_leads SET last_contacted_at=now(), last_activity_at=now(), unanswered_calls=0,
+                followup_count=followup_count + :touch
             WHERE lead_id=:id
-        """), {"id": lead_id, "followup": payload.activity_type == "follow_up_completed"})
+        """), {"id": lead_id, "touch": 0 if reached_today else 1})
+    elif payload.call_outcome in UNREACHED_CALL_OUTCOMES:
+        await db.execute(text(
+            "UPDATE crm_leads SET last_activity_at=now(), unanswered_calls=unanswered_calls + :missed WHERE lead_id=:id"
+        ), {"id": lead_id, "missed": 2 if payload.call_outcome == "wrong_number" else 1})
     else:
         await db.execute(text("UPDATE crm_leads SET last_activity_at=now() WHERE lead_id=:id"), {"id": lead_id})
+    if payload.activity_type in CONTACT_ACTIVITY_TYPES:
+        await _refresh_auto_priority(db, lead_id)
     await db.commit()
     return CrmActivityOut.model_validate(activity)
 

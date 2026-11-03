@@ -1,13 +1,23 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, TypeAdapter
+from pydantic import BaseModel, EmailStr, Field, TypeAdapter, model_validator
 
 
 LEAD_STATUSES = (
     "new_lead", "uncontactable", "contacted", "follow_up", "potential", "future_prospect",
     "not_interested", "enrolled", "lost_to_competitor", "cant_afford",
 )
+CallOutcome = Literal["connected", "no_answer", "busy", "wrong_number", "callback_requested"]
+CALL_OUTCOME_LABELS = {
+    "connected": "Connected",
+    "no_answer": "No answer",
+    "busy": "Busy",
+    "wrong_number": "Wrong number",
+    "callback_requested": "Callback requested",
+}
+# A call with one of these outcomes never reached the person.
+UNREACHED_CALL_OUTCOMES = ("no_answer", "busy", "wrong_number")
 LOSS_REASONS = (
     "Fees Beyond Expectations", "Programme Not Available", "Joined Another Institute",
     "Entry Requirements Issue", "Prefers Physical Classes", "Prefers Another Study Mode",
@@ -59,6 +69,7 @@ class CrmActivityOut(BaseModel):
     lead_id: int
     activity_type: str
     content: str
+    call_outcome: Optional[str] = None
     counsellor_name: Optional[str] = None
     counsellor_id: Optional[int] = None
     created_at: datetime
@@ -68,7 +79,19 @@ class CrmActivityOut(BaseModel):
 
 class CrmActivityCreate(BaseModel):
     activity_type: str
-    content: str
+    content: str = ""
+    call_outcome: Optional[CallOutcome] = None
+
+    @model_validator(mode="after")
+    def _check_call_outcome(self):
+        if self.activity_type == "call":
+            if self.call_outcome is None:
+                raise ValueError("Select a call outcome")
+        elif self.call_outcome is not None:
+            raise ValueError("Only a call can have a call outcome")
+        elif not self.content.strip():
+            raise ValueError("Enter the activity details")
+        return self
 
 
 class CrmCounsellorOut(BaseModel):
@@ -120,6 +143,8 @@ class CrmCounsellorOrderUpdate(BaseModel):
 
 
 class CrmLeadOut(BaseModel):
+    score: Optional[int] = None
+    priority_locked: bool = False
     lead_id: int
     full_name: str
     email: Optional[str] = None
@@ -219,8 +244,20 @@ class CrmLeadSummary(BaseModel):
     followup_type: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    score: Optional[int] = None
+    win_probability: Optional[float] = None
 
     model_config = {"from_attributes": True}
+
+
+class CrmPriorityLead(CrmLeadSummary):
+    next_action: str = ""
+
+
+class CrmPriorityQueueResponse(BaseModel):
+    leads: list[CrmPriorityLead]
+    open_leads: int = 0
+    expected_enrolments: float = 0
 
 
 class CrmLeadCreate(BaseModel):
@@ -301,6 +338,7 @@ class CrmLeadUpdate(BaseModel):
     intake: Optional[str] = None
     payment_plan: Optional[str] = None
     priority: Optional[str] = None
+    priority_locked: Optional[bool] = None
     assigned_counsellor_id: Optional[int] = None
     counsellor_name: Optional[str] = None
     notes: Optional[str] = None

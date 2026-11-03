@@ -1,0 +1,8 @@
+# Candidate security updates verified against PyPI/OSV on 2026-11-03.
+# Use with requirements.txt; validate in staging before production deployment.
+PyJWT==2.15.1
+certifi==2026.10.23
+dnspython==2.9.1
+pillow==13.0.0
+pypdf==6.21.4
+urllib3==2.8.0

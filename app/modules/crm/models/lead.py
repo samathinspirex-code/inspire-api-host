@@ -57,6 +57,8 @@ class CrmLead(Base):
     enrollment_email_error: Mapped[Optional[str]] = mapped_column(Text)
     enrollment_email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    priority_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    unanswered_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     assigned_counsellor_id: Mapped[Optional[int]] = mapped_column(Integer)
     assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     counsellor_name: Mapped[Optional[str]] = mapped_column(String(100))

@@ -35,6 +35,10 @@ async def database(request: Request, user=Depends(finance)):
 
 router=APIRouter(prefix='/api/v1/cms/payments',tags=['Payments'],dependencies=[Depends(finance)])
 public_router=APIRouter(tags=['Public payments'])
+PUBLIC_PAGE_HEADERS={
+    'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
+    'Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; connect-src 'self'; form-action https://www.payhere.lk https://sandbox.payhere.lk; base-uri 'none'; frame-ancestors 'none'",
+}
 
 
 async def once(c,request,user,payload,fn):
@@ -377,17 +381,19 @@ async def messages(c=Depends(database,scope="function")):
 
 @public_router.get('/pay/{token}')
 async def pay_page(token:str):
-    return FileResponse(Path(__file__).parent/'assets/pay.html',headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'})
+    return FileResponse(Path(__file__).parent/'assets/pay.html',headers=PUBLIC_PAGE_HEADERS)
 
 
 @public_router.get('/api/v1/payments/public/pay/{token}')
-async def public_pay(token:str,request:Request):
+async def public_pay(token:str,request:Request,response:Response):
+    response.headers.update({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'})
     rate_limit(request,'view',120)
     async with transaction() as c: return await payhere.public_view(c,token)
 
 
 @public_router.post('/api/v1/payments/public/pay/{token}/checkout')
-async def checkout(token:str,request:Request):
+async def checkout(token:str,request:Request,response:Response):
+    response.headers.update({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'})
     rate_limit(request,'checkout',20)
     async with transaction(write=True) as c: return await payhere.checkout(c,token)
 
@@ -401,5 +407,9 @@ async def notify(request:Request):
         parsed=parse_qs(raw.decode('utf-8'),keep_blank_values=True,max_num_fields=50)
     except (UnicodeDecodeError,ValueError): raise ValidationError('Invalid notification')
     if any(len(v)!=1 for v in parsed.values()): raise ValidationError('Duplicate notification fields')
-    async with transaction(write=True) as c: await payhere.notify(c,{k:v[0] for k,v in parsed.items()})
+    body={k:v[0] for k,v in parsed.items()}
+    # Unauthenticated traffic must not acquire the global financial write lock.
+    # notify() verifies again before posting; only valid signatures reach the DB.
+    if not payhere.verify(body): return Response('OK',media_type='text/plain')
+    async with transaction(write=True) as c: await payhere.notify(c,body)
     return Response('OK',media_type='text/plain')
