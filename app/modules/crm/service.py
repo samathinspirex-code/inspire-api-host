@@ -836,6 +836,7 @@ async def create_lead(
     counsellor_name: Optional[str] = None,
     assign_to_creator: bool = False,
     reject_duplicate_phone: bool = False,
+    auto_assign: bool = True,
 ) -> CrmLeadOut:
     await _ensure_awarding_body_column(db)
     await _ensure_counsellor_status_table(db)
@@ -873,7 +874,9 @@ async def create_lead(
         data["counsellor_name"] = None
     lead = await repo.create(data, commit=False)
 
-    if explicit_id is None and not assign_to_creator:
+    if explicit_id is None and not assign_to_creator and not auto_assign:
+        assignment_note = " Round robin skipped for this source."
+    if explicit_id is None and not assign_to_creator and auto_assign:
         picked = await apply_auto_assignment(db, lead.lead_id, commit=False)
         if picked:
             assignment_note = f" Auto-assigned to {picked.name} (daily rotation)."

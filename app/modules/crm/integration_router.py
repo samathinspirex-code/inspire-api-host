@@ -11,8 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import UnauthorizedError
-from app.modules.crm import service
-from app.modules.crm.schemas import CrmLeadCreate, CrmLeadListResponse, CrmLeadOut, CrmLeadUpdate
+from app.modules.crm import service, whatsapp_bot_service
+from app.modules.crm.schemas import (
+    CrmLeadCreate,
+    CrmLeadListResponse,
+    CrmLeadOut,
+    CrmLeadUpdate,
+    WhatsAppBotLeadSync,
+    WhatsAppBotMessageSync,
+)
 
 
 crm_api_key_header = APIKeyHeader(name="X-CRM-API-Key", auto_error=False)
@@ -89,3 +96,26 @@ async def delete_integration_lead(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await service.delete_lead(db, lead_id)
+
+
+@router.post("/whatsapp-bot/leads")
+async def sync_whatsapp_bot_lead(
+    payload: WhatsAppBotLeadSync,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Upsert a lead the WhatsApp bot has handed over to a counsellor.
+
+    Keeps the bot's counsellor (matched by email/name), never runs the round
+    robin, merges into an existing lead with the same phone, and adds the
+    handover and chat transcript to the timeline. Safe to repeat.
+    """
+    return await whatsapp_bot_service.sync_whatsapp_bot_lead(db, payload)
+
+
+@router.post("/whatsapp-bot/messages")
+async def sync_whatsapp_bot_message(
+    payload: WhatsAppBotMessageSync,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Append a post-handover WhatsApp message to the matching lead's timeline."""
+    return await whatsapp_bot_service.add_whatsapp_bot_message(db, payload)

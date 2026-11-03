@@ -66,12 +66,18 @@ async def get_brain(counsellor_id: int | None = None, user: CurrentUser = Depend
     return await service.brain(db, _scope(user, counsellor_id))
 
 
+@router.get("/visitors/now")
+async def get_visitors_now(_: CurrentUser = Depends(require_cms_admin), db: AsyncSession = Depends(get_db)):
+    from app.modules.connectors.service import website_now
+    return await website_now(db)
+
+
 @router.get("/studio/{tab}")
-async def get_studio(tab: str, counsellor_id: int | None = None, user: CurrentUser = Depends(require_cms_admin), db: AsyncSession = Depends(get_db)):
+async def get_studio(tab: str, counsellor_id: int | None = None, q: str | None = None, user: CurrentUser = Depends(require_cms_admin), db: AsyncSession = Depends(get_db)):
     allowed = {"overview", "channels", "visitors", "tracker", "champions", "lab", "connect"}
     if tab not in allowed:
         raise NotFoundError("Unknown studio tab")
-    return await service.studio(db, tab, _scope(user, counsellor_id))
+    return await service.studio(db, tab, _scope(user, counsellor_id), q)
 
 
 @router.get("/leads/{lead_id}/journey")

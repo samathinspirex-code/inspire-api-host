@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, TypeAdapter
+from pydantic import BaseModel, EmailStr, Field, TypeAdapter
 
 
 LEAD_STATUSES = (
@@ -427,3 +427,46 @@ class CrmCounsellorReportResponse(BaseModel):
     by_programme_enrolled: dict[str, int] = {}
     by_awarding_body: dict[str, int] = {}
     daily: list[CrmReportDailyPoint] = []
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp bot (insbot) sync payloads
+# ---------------------------------------------------------------------------
+class WhatsAppBotCounsellor(BaseModel):
+    name: Optional[str] = Field(None, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+
+
+class WhatsAppBotTranscriptMessage(BaseModel):
+    sender: str = Field(..., max_length=20)
+    message: str = Field(..., max_length=10000)
+    sent_at: Optional[datetime] = None
+
+
+class WhatsAppBotLeadSync(BaseModel):
+    bot_lead_id: str = Field(..., min_length=1, max_length=80)
+    bot_session_id: Optional[str] = Field(None, max_length=100)
+    phone: str = Field(..., min_length=5, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    qualification: Optional[str] = Field(None, max_length=100)
+    pathway: Optional[str] = Field(None, max_length=100)
+    field: Optional[str] = Field(None, max_length=100)
+    course_interest: Optional[str] = Field(None, max_length=255)
+    bot_status: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=5000)
+    first_contact_at: Optional[datetime] = None
+    handover_reason: Optional[str] = Field(None, max_length=500)
+    handed_over_at: Optional[datetime] = None
+    counsellor: Optional[WhatsAppBotCounsellor] = None
+    transcript: list[WhatsAppBotTranscriptMessage] = Field(default_factory=list, max_length=1000)
+
+
+class WhatsAppBotMessageSync(BaseModel):
+    bot_lead_id: Optional[str] = Field(None, max_length=80)
+    phone: str = Field(..., min_length=5, max_length=50)
+    sender: str = Field(..., max_length=20)
+    message: str = Field(..., min_length=1, max_length=10000)
+    sent_at: Optional[datetime] = None
+    counsellor_name: Optional[str] = Field(None, max_length=255)

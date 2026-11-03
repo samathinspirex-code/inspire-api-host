@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the Inspire Payments delivery queue every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+Unit=inspire-payments-delivery.service
+
+[Install]
+WantedBy=timers.target

@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -9,15 +10,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.connectors.registry import REQUIREMENTS, account_state, platforms_for, tracking_plan
-from app.modules.connectors.providers import ProviderFailure, fetch_report
+from app.modules.connectors.providers import ProviderFailure, fetch_report, ga4_realtime
+from app.modules.insights.website import latest_report
+from app.modules.insights.website import ga4_events
+from app.modules.insights.whatsapp import load_whatsapp
 
 
 def _configured(account: dict) -> bool:
+    if account["platform"] == "gtm":
+        return True  # Reads only public URLs.
     return bool(settings.CONNECTORS_CREDENTIALS.get(str(account["connector_id"]), {}).get("refresh_token")
                 and settings.CONNECTORS_GOOGLE_CLIENT_ID and settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
 
 
-async def reporting(db: AsyncSession) -> dict:
+async def saved_accounts(db: AsyncSession) -> list[dict]:
     rows = (await db.execute(text(
         "SELECT connector_id, platform, name, account_id, owner, status, created_at, last_synced_at, last_error, report "
         "FROM connectors ORDER BY created_at DESC, connector_id DESC"
@@ -31,7 +37,34 @@ async def reporting(db: AsyncSession) -> dict:
                 account[key] = account[key].isoformat()
         account["source"] = "connector" if account["last_synced_at"] else "unavailable"
         accounts.append(account)
-    return {"accounts": accounts, "platforms": platforms_for(accounts), "events": tracking_plan()}
+    return accounts
+
+
+async def reporting(db: AsyncSession) -> dict:
+    accounts = await saved_accounts(db)
+    whatsapp = await load_whatsapp(db)
+    return {"accounts": accounts, "platforms": platforms_for(accounts, whatsapp), "events": tracking_plan(ga4_events(accounts)), "whatsapp": whatsapp}
+
+
+_REALTIME_TTL = 60.0
+_realtime_cache: tuple[float, dict] | None = None
+
+
+async def website_now(db: AsyncSession) -> dict:
+    """Live GA4 totals for On the site now. Any failure simply reports it as unavailable."""
+    global _realtime_cache
+    if _realtime_cache and time.monotonic() - _realtime_cache[0] < _REALTIME_TTL:
+        return _realtime_cache[1]
+    account = latest_report(await saved_accounts(db), "ga4")
+    credentials = settings.CONNECTORS_CREDENTIALS.get(str(account["connector_id"]), {}) if account else {}
+    if not credentials.get("refresh_token") or not settings.CONNECTORS_GOOGLE_CLIENT_ID:
+        return {"available": False}
+    try:
+        result = await ga4_realtime(account["account_id"], credentials, settings.CONNECTORS_GOOGLE_CLIENT_ID, settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
+    except (ProviderFailure, ValidationError, httpx.HTTPError, ValueError, KeyError, TypeError, IndexError):
+        return {"available": False}
+    _realtime_cache = (time.monotonic(), result)
+    return result
 
 
 async def catalogue(db: AsyncSession) -> dict:

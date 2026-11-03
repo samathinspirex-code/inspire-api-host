@@ -499,6 +499,7 @@ async def lead_journey(db: AsyncSession, lead_id: int) -> dict | None:
     value = score_lead(lead, now)
     return {
         "lead_id": lead["lead_id"],
+        "created_at": lead["created_at"].isoformat() if lead.get("created_at") else None,
         "name": lead["full_name"],
         "stage": lead["stage"],
         "source": source_label(lead["source"]),
