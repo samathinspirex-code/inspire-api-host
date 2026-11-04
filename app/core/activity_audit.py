@@ -62,6 +62,8 @@ def _describe_change(method: str, path: str) -> tuple[str, str, bool] | None:
         return "Updated lead assignment settings", "CRM", False
     if re.fullmatch(r"/api/v1/cms/crm/counsellors/\d+", lower_path):
         return "Updated counsellor", "CRM", False
+    if lower_path == "/api/v1/cms/crm/arena/seasons/reset":
+        return "Started new Arena season", "CRM", False
     if lower_path == "/api/v1/cms/crm/arena/claim":
         return "Claimed Arena quest", "CRM", False
     if re.fullmatch(r"/api/v1/cms/crm/arena/rewards/\d+/collect", lower_path):

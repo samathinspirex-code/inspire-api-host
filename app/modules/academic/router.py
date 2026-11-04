@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.modules.connectors.capi import record_consent
 from app.modules.academic import service
 from app.modules.academic.contact_protection import check_contact_submission
 from app.modules.academic.schemas import AdmissionDraftCreate
@@ -69,7 +70,9 @@ async def programme_enrolment(payload: ProgrammeEnrolmentCreate, db: AsyncSessio
 
 @public_router.post("/admission-applications", response_model=AdmissionApplicationResponse, status_code=201)
 async def admission_application(payload: AdmissionApplicationCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_admission_lead(db, payload)
+    result = await service.create_admission_lead(db, payload)
+    await record_consent(db, "admission", payload.email, payload.phone, payload.ads_consent, payload.fbc, payload.fbp)
+    return result
 
 
 @public_router.post("/admission-drafts", response_model=AdmissionApplicationResponse)
@@ -82,11 +85,13 @@ async def contact_inquiry(payload: ContactInquiryCreate, request: Request, db: A
     visitor_ip = request.headers.get("X-Contact-Visitor-IP")
     peer_ip = request.client.host if request.client else None
     await check_contact_submission(payload.captcha_token, visitor_ip, peer_ip)
-    return await service.send_contact_inquiry(
+    result = await service.send_contact_inquiry(
         db, payload,
         visitor_ip=visitor_ip,
         peer_ip=peer_ip,
     )
+    await record_consent(db, "contact", payload.email, payload.phone, payload.ads_consent, payload.fbc, payload.fbp)
+    return result
 
 
 @cms_router.get("/{resource}", response_model=AcademicResponse)

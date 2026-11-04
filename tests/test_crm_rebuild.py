@@ -20,11 +20,12 @@ def test_statuses_match_the_new_workflow():
     ]
 
 
-@pytest.mark.parametrize("stage", ["follow_up", "potential"])
-def test_follow_up_and_potential_require_a_note(stage):
-    with pytest.raises(ValidationError, match="Enter a note"):
-        _validate_lead_state(_lead(), {"stage": stage, "status_remarks": "  "})
-    _validate_lead_state(_lead(), {"stage": stage, "status_remarks": "Interested after exam results"})
+def test_potential_note_is_optional():
+    _validate_lead_state(_lead(), {"stage": "potential", "status_reason": "Awaiting Salary / Funds", "status_remarks": None})
+
+
+def test_follow_up_uses_a_date_instead_of_a_note():
+    _validate_lead_state(_lead(), {"stage": "follow_up", "status_remarks": None})
 
 
 @pytest.mark.parametrize("old_stage,expected_reason", [
@@ -41,14 +42,14 @@ def test_legacy_outcomes_keep_original_details(old_stage, expected_reason):
     assert "Original remark" in note
 
 
-@pytest.mark.parametrize("stage", ["follow_up", "potential"])
-def test_stage_update_rejects_missing_note_before_saving(stage):
+@pytest.mark.parametrize("stage,message", [("follow_up", "Choose a follow-up date"), ("potential", "Select a Potential reason")])
+def test_stage_update_rejects_missing_required_detail_before_saving(stage, message):
     async def run():
         lead = CrmLead(lead_id=1, full_name="Test Student", email="student@example.com", stage="new_lead")
         repository = AsyncMock()
         repository.get.return_value = lead
         with patch.object(service, "CrmLeadRepository", return_value=repository):
-            with pytest.raises(ValidationError, match="Enter a note"):
+            with pytest.raises(ValidationError, match=message):
                 await service.update_stage(AsyncMock(), 1, stage)
         repository.update.assert_not_awaited()
 

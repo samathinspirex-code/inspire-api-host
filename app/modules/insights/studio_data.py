@@ -9,6 +9,8 @@ from app.modules.insights.scoring import heat, hours_since, score_lead, source_l
 OUTCOMES = [("Uncontactable", {"uncontactable"}), ("Future Prospect", {"future_prospect"}), ("Not interested", {"not_interested"}),
             ("In progress", {"new_lead", "contacted", "follow_up", "potential"}), ("Enrolled", {"enrolled"})]
 MAX_SOURCES = 7
+# Channels whose leads the CRM already records. Their spend is unknown until an ad account is connected.
+LIVE_CHANNELS = {"WhatsApp Business": ("whatsapp",), "Website & SEO": ("website_admission", "website_contact", "wtc_registrations_form")}
 
 
 def _scope(counsellor_id: int | None) -> tuple[str, dict]:
@@ -41,6 +43,24 @@ def build_flow(rows: list[tuple[str | None, str | None, int]]) -> dict:
         "outcomes": [{"name": name, "total": sum(values[name] for _, values in sources)} for name, _ in OUTCOMES],
         "sources": [{"name": name, "total": sum(values.values()), "flows": [values[outcome] for outcome, _ in OUTCOMES]} for name, values in sources],
     }
+
+
+async def channel_counts(db: AsyncSession, counsellor_id: int | None) -> dict[str, dict]:
+    scope, params = _scope(counsellor_id)
+    result = {}
+    for name, sources in LIVE_CHANNELS.items():
+        row = (await db.execute(text(f"""
+            SELECT count(*) FILTER (WHERE l.created_at >= now() - interval '30 days') AS leads,
+                   count(*) FILTER (WHERE l.created_at >= now() - interval '30 days' AND l.stage = 'enrolled') AS enrolled,
+                   coalesce(array_agg((now()::date - l.created_at::date) / 7) FILTER (WHERE l.created_at >= now() - interval '56 days'), '{{}}') AS weeks
+            FROM crm_leads l WHERE l.is_archived = false{scope} AND l.source = ANY(:sources)
+        """), {**params, "sources": list(sources)})).mappings().first()
+        trend = [0] * 8
+        for week in row["weeks"]:
+            if 0 <= week < 8:
+                trend[7 - week] += 1
+        result[name] = {"spend": 0, "leads": int(row["leads"]), "enrolled": int(row["enrolled"]), "source": "cms", "live": True, "trend": trend}
+    return result
 
 
 async def source_flow(db: AsyncSession, counsellor_id: int | None) -> dict:

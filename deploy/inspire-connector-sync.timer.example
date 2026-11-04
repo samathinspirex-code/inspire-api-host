@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync Inspire connector reports every Monday morning
+
+[Timer]
+OnCalendar=Mon *-*-* 06:00:00 Asia/Colombo
+Persistent=true
+RandomizedDelaySec=5min
+Unit=inspire-connector-sync.service
+
+[Install]
+WantedBy=timers.target

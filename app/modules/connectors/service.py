@@ -9,18 +9,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.modules.connectors.capi import status as capi_status
 from app.modules.connectors.registry import REQUIREMENTS, account_state, platforms_for, tracking_plan
 from app.modules.connectors.providers import ProviderFailure, fetch_report, ga4_realtime
 from app.modules.insights.website import latest_report
 from app.modules.insights.website import ga4_events
+from app.modules.insights.finance import load_finance
+from app.modules.insights.lms import load_lms
 from app.modules.insights.whatsapp import load_whatsapp
 
 
 def _configured(account: dict) -> bool:
     if account["platform"] == "gtm":
         return True  # Reads only public URLs.
+    if account["platform"] == "email":
+        return bool(settings.MAILJET_API_KEY and settings.MAILJET_SECRET_KEY)
+    if account["platform"] == "meta":
+        return bool(settings.CONNECTORS_META_TOKEN)  # One token covers every ad account assigned to it.
     return bool(settings.CONNECTORS_CREDENTIALS.get(str(account["connector_id"]), {}).get("refresh_token")
                 and settings.CONNECTORS_GOOGLE_CLIENT_ID and settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
+
+
+def _credentials(account: dict) -> dict:
+    if account["platform"] == "meta":
+        return {"token": settings.CONNECTORS_META_TOKEN}
+    if account["platform"] == "email":
+        return {"key": settings.MAILJET_API_KEY, "secret": settings.MAILJET_SECRET_KEY}
+    return settings.CONNECTORS_CREDENTIALS.get(str(account["connector_id"]), {})
 
 
 async def saved_accounts(db: AsyncSession) -> list[dict]:
@@ -43,7 +58,10 @@ async def saved_accounts(db: AsyncSession) -> list[dict]:
 async def reporting(db: AsyncSession) -> dict:
     accounts = await saved_accounts(db)
     whatsapp = await load_whatsapp(db)
-    return {"accounts": accounts, "platforms": platforms_for(accounts, whatsapp), "events": tracking_plan(ga4_events(accounts)), "whatsapp": whatsapp}
+    lms = await load_lms(db)
+    finance = await load_finance(db)
+    capi = await capi_status(db)
+    return {"accounts": accounts, "platforms": platforms_for(accounts, whatsapp, lms, finance, capi), "events": tracking_plan(ga4_events(accounts)), "whatsapp": whatsapp, "lms": lms, "finance": finance, "capi": capi}
 
 
 _REALTIME_TTL = 60.0
@@ -121,7 +139,7 @@ async def sync_account(db: AsyncSession, connector_id: int) -> dict:
     account = dict(row)
     try:
         report = await fetch_report(account["platform"], account["account_id"],
-                                    settings.CONNECTORS_CREDENTIALS.get(str(connector_id), {}),
+                                    _credentials(account),
                                     settings.CONNECTORS_GOOGLE_CLIENT_ID, settings.CONNECTORS_GOOGLE_CLIENT_SECRET)
     except ValidationError:
         await db.rollback()
@@ -139,6 +157,24 @@ async def sync_account(db: AsyncSession, connector_id: int) -> dict:
                      {"id": connector_id, "synced": synced, "report": json.dumps(report, allow_nan=False)})
     await db.commit()
     return {"id": connector_id, "last_synced_at": synced.isoformat(), "report": report}
+
+
+async def sync_all(session_factory) -> list[dict]:
+    """Each account gets its own session, so one failure cannot affect the others."""
+    async with session_factory() as db:
+        accounts = await saved_accounts(db)
+    results = []
+    for account in accounts:
+        if not account["can_sync"]:
+            continue
+        async with session_factory() as db:
+            try:
+                await sync_account(db, account["connector_id"])
+                outcome = "synced"
+            except (ConflictError, ValidationError, NotFoundError) as exc:
+                outcome = f"failed: {exc}"
+        results.append({"id": account["connector_id"], "platform": account["platform"], "outcome": outcome})
+    return results
 
 
 async def delete_account(db: AsyncSession, connector_id: int) -> None:

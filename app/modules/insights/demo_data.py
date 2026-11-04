@@ -46,7 +46,7 @@ CHANNELS = [
     {"name": "WhatsApp Business", "color": "#63E6E2", "spend": 18000, "leads": 236, "enrolled": 8, "source": "demo", "trend": [24, 26, 27, 29, 30, 31, 33, 34]},
     {"name": "Website & SEO", "color": "#5E5CE6", "spend": 45000, "leads": 154, "enrolled": 6, "source": "demo", "trend": [15, 16, 17, 18, 19, 20, 21, 22]},
     {"name": "LinkedIn Ads", "color": "#AC8E68", "spend": 85000, "leads": 41, "enrolled": 2, "source": "demo", "trend": [4, 5, 5, 6, 5, 6, 6, 6]},
-    {"name": "Email & SMS", "color": "#FF9F0A", "spend": 22000, "leads": 63, "enrolled": 2, "source": "demo", "trend": [6, 7, 8, 8, 9, 8, 9, 9]},
+    {"name": "Email", "color": "#FF9F0A", "spend": 22000, "leads": 63, "enrolled": 2, "source": "demo", "trend": [6, 7, 8, 8, 9, 8, 9, 9]},
     {"name": "Referral & Champions", "color": "#FFD60A", "spend": 30000, "leads": 48, "enrolled": 6, "source": "demo", "trend": [3, 4, 5, 5, 6, 7, 8, 9]},
     {"name": "Events & walk-in", "color": "#8E8E93", "spend": 65000, "leads": 72, "enrolled": 4, "source": "demo", "trend": [3, 3, 4, 4, 4, 5, 5, 5]},
 ]
@@ -74,9 +74,9 @@ PLATFORMS = [
     {"id": "ig", "name": "Instagram Insights", "kind": "Organic reach and DMs", "color": "#BF5AF2", "glyph": "I", "detail": "Reels, story and DM performance", "status": "Not connected", "tone": ""},
     {"id": "li", "name": "LinkedIn Ads", "kind": "Professional audiences", "color": "#AC8E68", "glyph": "L", "detail": "CPD and postgraduate lead forms", "status": "Not connected", "tone": ""},
     {"id": "yt", "name": "YouTube", "kind": "Video channel", "color": "#FF453A", "glyph": "Y", "detail": "Views and watch time for programme videos", "status": "Not connected", "tone": ""},
-    {"id": "email", "name": "Email & SMS", "kind": "Newsletters and SMS", "color": "#FF9F0A", "glyph": "E", "detail": "Sends, opens, clicks and replies", "status": "Not connected", "tone": ""},
+    {"id": "email", "name": "Email", "kind": "Mailjet delivery", "color": "#FF9F0A", "glyph": "E", "detail": "Sent, blocked, bounced, opened and clicked", "status": "Not connected", "tone": ""},
     {"id": "payhere", "name": "PayHere", "kind": "Payments and instalments", "color": "#5E5CE6", "glyph": "P", "detail": "Registration fees and monthly instalments", "status": "Not connected", "tone": ""},
-    {"id": "brain", "name": "Inspire Brain", "kind": "LMS and ERP", "color": "#BF5AF2", "glyph": "B", "detail": "Active students, attendance and dropout risk", "status": "Not connected", "tone": ""},
+    {"id": "brain", "name": "Inspire Brain", "kind": "LMS and ERP", "color": "#BF5AF2", "glyph": "B", "detail": "Active students, attendance and dropout", "status": "Not connected", "tone": ""},
     {"id": "forms", "name": "Website forms", "kind": "Apply and enquiry forms", "color": "#8E8E93", "glyph": "F", "detail": "Form submissions into the CRM with UTM tags", "status": "Connected", "tone": "good"},
     {"id": "calls", "name": "Call tracking", "kind": "Counsellor calls", "color": "#64D2FF", "glyph": "☎", "detail": "Call attempts, connects and durations", "status": "Not connected", "tone": ""},
 ]
@@ -153,15 +153,6 @@ PARTNER_PLATFORMS = [
 ]
 
 
-def retention_cohorts() -> list[dict]:
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]
-    rows = []
-    for index, month in enumerate(months):
-        cells = []
-        for step in range(10 - index):
-            cells.append(round(100 - step * 2.8))
-        rows.append({"intake": f"{month} 2026", "cells": cells})
-    return rows
 
 
 def meta_summary() -> str:

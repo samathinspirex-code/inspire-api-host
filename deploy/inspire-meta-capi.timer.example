@@ -1,0 +1,11 @@
+[Unit]
+Description=Send Inspire Meta Conversions API events every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5min
+Unit=inspire-meta-capi.service
+
+[Install]
+WantedBy=timers.target

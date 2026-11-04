@@ -21,6 +21,10 @@ class ArenaRewardCodesIn(BaseModel):
     expires_at: Optional[date] = None
 
 
+class ArenaSeasonResetIn(BaseModel):
+    confirm: str
+
+
 class ArenaDecisionIn(BaseModel):
     code: Optional[str] = Field(None, max_length=160)
     note: Optional[str] = None
