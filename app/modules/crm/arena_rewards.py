@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
 from app.modules.crm.arena_schemas import ArenaAwardIn, ArenaDecisionIn, ArenaRewardCodesIn, ArenaRewardIn
-from app.modules.crm.arena_service import colombo_today, season_xp
+from app.modules.crm.arena_service import colombo_today, current_season, season_xp
 from app.modules.insights.service import TIERS, _tier
 
 REWARD_COLUMNS = "reward_id, reward_type, brand, title, value_label, description, tier_index, is_active"
@@ -142,17 +142,18 @@ async def _get_reward(db: AsyncSession, reward_id: int) -> dict:
 async def my_rewards(db: AsyncSession, user_id: int) -> list[dict]:
     """A counsellor's rewards. Codes appear only here, and only on rewards already given to them."""
     tier = _tier(await season_xp(db, user_id))
+    season, _ = await current_season(db)
     rewards = (await db.execute(text(
         f"SELECT {REWARD_COLUMNS} FROM crm_arena_rewards WHERE is_active = true AND tier_index IS NOT NULL ORDER BY tier_index, title"
     ))).mappings().all()
     collections = (await db.execute(text(
-        f"SELECT c.collection_id, c.source, c.status, c.issued_code, c.note, c.requested_at, c.decided_at, "
+        f"SELECT c.collection_id, c.season_number, c.source, c.status, c.issued_code, c.note, c.requested_at, c.decided_at, "
         f"r.{REWARD_COLUMNS.replace(', ', ', r.')}, ca.expires_at "
         "FROM crm_arena_reward_collections c JOIN crm_arena_rewards r ON r.reward_id = c.reward_id "
         "LEFT JOIN crm_arena_reward_codes ca ON ca.code_id = c.code_id "
         "WHERE c.user_id = :uid ORDER BY c.requested_at DESC"
     ), {"uid": user_id})).mappings().all()
-    tier_collections = {row["reward_id"]: row for row in collections if row["source"] == "tier"}
+    tier_collections = {row["reward_id"]: row for row in collections if row["source"] == "tier" and row["season_number"] == season}
     result = []
     for reward in rewards:
         collection = tier_collections.get(reward["reward_id"])
@@ -173,11 +174,12 @@ async def collect(db: AsyncSession, user_id: int, reward_id: int) -> dict:
         raise ValidationError("This reward can't be collected")
     if _tier(await season_xp(db, user_id))["index"] < reward["tier_index"]:
         raise ValidationError(f"Reach {_tier_name(reward['tier_index'])} tier to collect this reward")
+    season, _ = await current_season(db)
     collection_id = (await db.execute(text(
-        "INSERT INTO crm_arena_reward_collections (reward_id, user_id, source, status) "
-        "VALUES (:reward, :uid, 'tier', 'requested') "
-        "ON CONFLICT (reward_id, user_id) WHERE source = 'tier' DO NOTHING RETURNING collection_id"
-    ), {"reward": reward_id, "uid": user_id})).scalar()
+        "INSERT INTO crm_arena_reward_collections (season_number, reward_id, user_id, source, status) "
+        "VALUES (:season, :reward, :uid, 'tier', 'requested') "
+        "ON CONFLICT (season_number, reward_id, user_id) WHERE source = 'tier' DO NOTHING RETURNING collection_id"
+    ), {"season": season, "reward": reward_id, "uid": user_id})).scalar()
     if collection_id is None:
         await db.rollback()
         raise ValidationError("You already collected this reward")
@@ -246,9 +248,10 @@ async def award(db: AsyncSession, reward_id: int, payload: ArenaAwardIn, admin_i
     if not counsellor:
         raise ValidationError("Choose an active counsellor")
     code_id, code = await _take_code(db, reward, _clean(payload.code))
+    season, _ = await current_season(db)
     collection_id = (await db.execute(text(
-        "INSERT INTO crm_arena_reward_collections (reward_id, user_id, source, status, code_id, issued_code, note, decided_by, decided_at) "
-        "VALUES (:reward, :uid, 'admin_award', 'given', :code_id, :code, :note, :admin, now()) RETURNING collection_id"
-    ), {"reward": reward_id, "uid": payload.user_id, "code_id": code_id, "code": code, "note": _clean(payload.note), "admin": admin_id})).scalar()
+        "INSERT INTO crm_arena_reward_collections (season_number, reward_id, user_id, source, status, code_id, issued_code, note, decided_by, decided_at) "
+        "VALUES (:season, :reward, :uid, 'admin_award', 'given', :code_id, :code, :note, :admin, now()) RETURNING collection_id"
+    ), {"season": season, "reward": reward_id, "uid": payload.user_id, "code_id": code_id, "code": code, "note": _clean(payload.note), "admin": admin_id})).scalar()
     await db.commit()
     return {"collection_id": collection_id, "status": "given", "code": code}

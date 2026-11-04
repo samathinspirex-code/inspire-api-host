@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.core.database import get_db
-from app.core.errors import APIError, ForbiddenError
+from app.core.errors import APIError, ForbiddenError, ValidationError
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import CurrentUser
 from app.modules.crm import service
-from app.modules.crm.arena_schemas import ArenaAwardIn, ArenaDecisionIn, ArenaRewardCodesIn, ArenaRewardIn
+from app.modules.crm.arena_schemas import ArenaAwardIn, ArenaDecisionIn, ArenaRewardCodesIn, ArenaRewardIn, ArenaSeasonResetIn
 from app.modules.crm.schemas import (
     CrmActivityCreate,
     CrmActivityOut,
@@ -495,6 +495,29 @@ async def arena_claim(
     from app.modules.crm.arena_service import claim
     _require_arena_player(current_user)
     return await claim(db, current_user.user_id, payload.quest_id, payload.level)
+
+
+@router.get("/arena/seasons")
+async def arena_seasons(
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm.arena_service import list_seasons
+    _require_arena_admin(current_user)
+    return await list_seasons(db)
+
+
+@router.post("/arena/seasons/reset", status_code=201)
+async def arena_reset_season(
+    payload: ArenaSeasonResetIn,
+    current_user: CurrentUser = Depends(require_crm_staff),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.crm.arena_service import reset_season
+    _require_arena_admin(current_user)
+    if payload.confirm != "RESET":
+        raise ValidationError("Type RESET to confirm")
+    return await reset_season(db, current_user.user_id)
 
 
 @router.get("/arena/rewards/mine")

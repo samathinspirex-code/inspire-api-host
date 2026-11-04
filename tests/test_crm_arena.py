@@ -269,11 +269,14 @@ def test_a_decided_request_cannot_be_distributed_again():
 
 def test_only_given_rewards_show_a_code_to_the_counsellor():
     async def run():
-        base = {"reward_id": 1, "reward_type": "voucher", "brand": "Coffee", "title": "Voucher", "value_label": None, "description": None, "tier_index": 0, "is_active": True, "source": "tier", "note": None, "requested_at": None, "decided_at": None, "expires_at": None}
+        base = {"season_number": 1, "reward_id": 1, "reward_type": "voucher", "brand": "Coffee", "title": "Voucher", "value_label": None, "description": None, "tier_index": 0, "is_active": True, "source": "tier", "note": None, "requested_at": None, "decided_at": None, "expires_at": None}
         declined = {**base, "collection_id": 1, "status": "declined", "issued_code": "SHOULD-HIDE"}
         given = {**base, "reward_id": 2, "collection_id": 2, "status": "given", "issued_code": "ABC123"}
         db = SimpleNamespace(execute=AsyncMock(side_effect=[_result(mappings_all=[]), _result(mappings_all=[declined, given])]))
-        with patch.object(arena_rewards, "season_xp", new_callable=AsyncMock, return_value=0):
+        with (
+            patch.object(arena_rewards, "season_xp", new_callable=AsyncMock, return_value=0),
+            patch.object(arena_rewards, "current_season", new_callable=AsyncMock, return_value=(1, datetime(2026, 11, 4))),
+        ):
             items = await arena_rewards.my_rewards(db, 17)
         assert {item["state"]: item["code"] for item in items} == {"declined": None, "given": "ABC123"}
         assert "SHOULD-HIDE" not in str(items)
@@ -337,7 +340,7 @@ def test_past_work_claim_pays_only_what_is_left_and_has_no_bonus():
 
 def test_nothing_left_to_claim_is_refused():
     async def run():
-        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock())
+        db = SimpleNamespace(execute=AsyncMock(return_value=_result()), commit=AsyncMock(), rollback=AsyncMock())
         with (
             patch.object(arena_service, "_lead_totals", new_callable=AsyncMock, return_value={}),
             patch.object(arena_service, "_past_work_claimed", new_callable=AsyncMock, return_value={}),
@@ -345,5 +348,22 @@ def test_nothing_left_to_claim_is_refused():
             with pytest.raises(ValidationError):
                 await arena_service.claim(db, 17, arena_service.PAST_WORK_ID)
         db.commit.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_only_arena_admins_can_reset_and_must_type_reset():
+    async def run():
+        with pytest.raises(ForbiddenError):
+            await router.arena_reset_season(router.ArenaSeasonResetIn(confirm="RESET"), current_user=COUNSELLOR, db=SimpleNamespace())
+        with pytest.raises(ForbiddenError):
+            await router.arena_seasons(current_user=COUNSELLOR, db=SimpleNamespace())
+        with patch("app.modules.crm.arena_service.reset_season", new_callable=AsyncMock) as reset:
+            with pytest.raises(ValidationError):
+                await router.arena_reset_season(router.ArenaSeasonResetIn(confirm="reset"), current_user=ADMIN, db=SimpleNamespace())
+            reset.assert_not_awaited()
+            db = SimpleNamespace()
+            await router.arena_reset_season(router.ArenaSeasonResetIn(confirm="RESET"), current_user=ADMIN, db=db)
+            reset.assert_awaited_once_with(db, 1)
 
     asyncio.run(run())

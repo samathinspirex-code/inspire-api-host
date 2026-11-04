@@ -4,6 +4,7 @@ Every day boundary here is Sri Lankan. Live CRM timestamps are stored as naive U
 so Colombo boundaries are converted to naive UTC before they reach a query.
 """
 
+import json
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -46,6 +47,14 @@ QUESTS = [
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def current_season(db: AsyncSession) -> tuple[int, datetime]:
+    """The running season's number and start. Season 1 has no row: it began at SEASON_START."""
+    row = (await db.execute(text(
+        "SELECT season_number, started_at FROM crm_arena_seasons ORDER BY season_number DESC LIMIT 1"
+    ))).first()
+    return (int(row[0]), row[1]) if row else (1, colombo_day_start(SEASON_START))
 
 
 def colombo_today(now: datetime | None = None) -> date:
@@ -150,11 +159,12 @@ async def _progress(db: AsyncSession, user_id: int, today: date) -> dict[str, in
 
 async def _season_counts(db: AsyncSession, user_id: int | None = None) -> dict[int, dict]:
     """Per-counsellor season totals. Each lead counts once, so moving it back and forth earns nothing."""
-    params = {"start": colombo_day_start(SEASON_START)}
+    number, start = await current_season(db)
+    params = {"start": start, "season": number}
     only_lead = only_actor = only_claim = ""
     if user_id is not None:
         params["uid"] = user_id
-        only_lead, only_actor, only_claim = (" AND l.assigned_counsellor_id = :uid", " AND a.counsellor_id = :uid", " WHERE user_id = :uid")
+        only_lead, only_actor, only_claim = (" AND l.assigned_counsellor_id = :uid", " AND a.counsellor_id = :uid", " AND user_id = :uid")
     rows = (await db.execute(text(f"""
         SELECT owner, kind, count(*) FROM (
           SELECT DISTINCT l.assigned_counsellor_id AS owner, 'assigned' AS kind, l.lead_id
@@ -179,7 +189,7 @@ async def _season_counts(db: AsyncSession, user_id: int | None = None) -> dict[i
     for owner, kind, count in rows:
         totals.setdefault(int(owner), {})[kind] = int(count)
     claim_rows = (await db.execute(text(
-        f"SELECT user_id, coalesce(sum(xp), 0) FROM crm_arena_claims{only_claim} GROUP BY user_id"
+        f"SELECT user_id, coalesce(sum(xp), 0) FROM crm_arena_claims WHERE season_number = :season{only_claim} GROUP BY user_id"
     ), params)).all()
     for owner, xp in claim_rows:
         totals.setdefault(int(owner), {})["claimed"] = int(xp)
@@ -207,10 +217,10 @@ async def _active_days(db: AsyncSession, today: date, user_id: int | None = None
     return days
 
 
-async def _lead_totals(db: AsyncSession, user_id: int | None = None) -> dict[int, dict]:
+async def _lead_totals(db: AsyncSession, start: datetime, user_id: int | None = None) -> dict[int, dict]:
     """All-time figures from each counsellor's leads. Stages are the real record: most history was never logged as calls."""
     only = " AND l.assigned_counsellor_id = :uid" if user_id is not None else ""
-    params = {"start": colombo_day_start(SEASON_START), **({"uid": user_id} if user_id is not None else {})}
+    params = {"start": start, **({"uid": user_id} if user_id is not None else {})}
     before_season = "coalesce(l.last_activity_at, l.created_at) < :start"
     rows = (await db.execute(text(f"""
         SELECT l.assigned_counsellor_id,
@@ -235,11 +245,11 @@ async def _lead_totals(db: AsyncSession, user_id: int | None = None) -> dict[int
     return totals
 
 
-async def _past_work_claimed(db: AsyncSession, user_id: int | None = None) -> dict[int, tuple[int, int]]:
+async def _past_work_claimed(db: AsyncSession, season: int, user_id: int | None = None) -> dict[int, tuple[int, int]]:
     only = " AND user_id = :uid" if user_id is not None else ""
     rows = (await db.execute(text(
-        f"SELECT user_id, coalesce(sum(xp), 0), count(*) FROM crm_arena_claims WHERE quest_id = :qid{only} GROUP BY 1"
-    ), {"qid": PAST_WORK_ID, **({"uid": user_id} if user_id is not None else {})})).all()
+        f"SELECT user_id, coalesce(sum(xp), 0), count(*) FROM crm_arena_claims WHERE quest_id = :qid AND season_number = :season{only} GROUP BY 1"
+    ), {"qid": PAST_WORK_ID, "season": season, **({"uid": user_id} if user_id is not None else {})})).all()
     return {int(owner): (int(xp), int(claims)) for owner, xp, claims in rows}
 
 
@@ -347,10 +357,11 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
     """The full Arena. Only someone holding the counsellor role can claim, and only on their own card."""
     snap = await load_snapshot(db, None)
     today = colombo_today()
+    season_number, season_start = await current_season(db)
     season = await _season_counts(db)
     active = await _active_days(db, today)
-    totals = await _lead_totals(db)
-    past_claimed = await _past_work_claimed(db)
+    totals = await _lead_totals(db, season_start)
+    past_claimed = await _past_work_claimed(db, season_number)
     recent_start = today - timedelta(days=30)
     actions = {owner: sum(count for day, count in days.items() if day >= recent_start) for owner, days in active.items()}
     most_leads = max([item["assigned"] for item in totals.values()] + [1])
@@ -409,8 +420,8 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
         bonus_percent = streak_bonus_percent(player["streak"])
         progress = await _progress(db, uid, today)
         claim_rows = (await db.execute(text(
-            "SELECT quest_id, level, claim_date, xp FROM crm_arena_claims WHERE user_id = :uid AND claim_date >= :week"
-        ), {"uid": uid, "week": week})).all()
+            "SELECT quest_id, level, claim_date, xp FROM crm_arena_claims WHERE user_id = :uid AND claim_date >= :week AND season_number = :season"
+        ), {"uid": uid, "week": week, "season": season_number})).all()
         claimed_today: dict[str, set[int]] = {}
         for quest_id, level, claim_date, xp in claim_rows:
             if claim_date == today:
@@ -432,6 +443,7 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
     tomorrow = colombo_day_start(today + timedelta(days=1))
     return {
         "viewer_id": viewer_id,
+        "season": {"number": season_number, "started_at": season_start.isoformat()},
         "awaiting": snap["awaiting"],
         "raid": {**raid, "claimed": raid_claimed},
         "leaderboard": board,
@@ -448,12 +460,12 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
     }
 
 
-async def _insert_claim(db: AsyncSession, user_id: int, quest_id: str, level: int, day: date, base_xp: int, bonus: int) -> bool:
+async def _insert_claim(db: AsyncSession, season: int, user_id: int, quest_id: str, level: int, day: date, base_xp: int, bonus: int) -> bool:
     result = await db.execute(text(
-        "INSERT INTO crm_arena_claims (user_id, quest_id, level, claim_date, xp, base_xp, streak_bonus_xp) "
-        "VALUES (:uid, :qid, :level, :day, :xp, :base, :bonus) "
-        "ON CONFLICT (user_id, quest_id, level, claim_date) DO NOTHING RETURNING claim_id"
-    ), {"uid": user_id, "qid": quest_id, "level": level, "day": day, "xp": base_xp + bonus, "base": base_xp, "bonus": bonus})
+        "INSERT INTO crm_arena_claims (season_number, user_id, quest_id, level, claim_date, xp, base_xp, streak_bonus_xp) "
+        "VALUES (:season, :uid, :qid, :level, :day, :xp, :base, :bonus) "
+        "ON CONFLICT (season_number, user_id, quest_id, level, claim_date) DO NOTHING RETURNING claim_id"
+    ), {"season": season, "uid": user_id, "qid": quest_id, "level": level, "day": day, "xp": base_xp + bonus, "base": base_xp, "bonus": bonus})
     return result.scalar() is not None
 
 
@@ -475,7 +487,8 @@ async def claim(db: AsyncSession, user_id: int, quest_id: str, level: int = 1) -
     days = (await _active_days(db, today, user_id)).get(user_id, {})
     streak = arena_streak(set(days), today)
     bonus = streak_bonus_xp(base_xp, streak)
-    inserted = await _insert_claim(db, user_id, quest_id, level, today, base_xp, bonus)
+    number, _ = await current_season(db)
+    inserted = await _insert_claim(db, number, user_id, quest_id, level, today, base_xp, bonus)
     if not inserted:
         await db.rollback()
         raise ValidationError("You already claimed this level today")
@@ -484,12 +497,13 @@ async def claim(db: AsyncSession, user_id: int, quest_id: str, level: int = 1) -
 
 
 async def _claim_past_work(db: AsyncSession, user_id: int, today: date) -> dict:
-    own = (await _lead_totals(db, user_id)).get(user_id, {})
-    claimed, claims = (await _past_work_claimed(db, user_id)).get(user_id, (0, 0))
+    number, start = await current_season(db)
+    own = (await _lead_totals(db, start, user_id)).get(user_id, {})
+    claimed, claims = (await _past_work_claimed(db, number, user_id)).get(user_id, (0, 0))
     available = _past_work_view(own, claimed)["available"]
     if available <= 0:
         raise ValidationError("There's no past work left to claim")
-    if not await _insert_claim(db, user_id, PAST_WORK_ID, claims + 1, today, available, 0):
+    if not await _insert_claim(db, number, user_id, PAST_WORK_ID, claims + 1, today, available, 0):
         await db.rollback()
         raise ValidationError("You already claimed this past work")
     await db.commit()
@@ -503,8 +517,45 @@ async def _claim_raid(db: AsyncSession, user_id: int, today: date) -> dict:
     raid = await _raid(db, today, int(awaiting))
     if not raid["complete"]:
         raise ValidationError("The team raid isn't cleared yet")
-    if not await _insert_claim(db, user_id, RAID_QUEST_ID, 1, raid["week_start"], RAID_REWARD, 0):
+    number, _ = await current_season(db)
+    if not await _insert_claim(db, number, user_id, RAID_QUEST_ID, 1, raid["week_start"], RAID_REWARD, 0):
         await db.rollback()
         raise ValidationError("You already claimed this week's raid")
     await db.commit()
     return {"quest_id": RAID_QUEST_ID, "level": 1, "base_xp": RAID_REWARD, "streak_bonus_xp": 0, "xp": RAID_REWARD}
+
+
+async def reset_season(db: AsyncSession, admin_id: int) -> dict:
+    """Start a new season for everyone. Nothing is deleted: old claims stay under their season, and final standings are kept."""
+    number, _ = await current_season(db)
+    totals = await _season_counts(db)
+    names = dict((await db.execute(text(
+        "SELECT user_id, coalesce(nullif(full_name, ''), email) FROM users WHERE user_id = ANY(:ids)"
+    ), {"ids": list(totals)})).all()) if totals else {}
+    standings = sorted(
+        ({"user_id": owner, "name": names.get(owner), "xp": season_xp_total(counts), "tier": _tier(season_xp_total(counts))["name"]}
+         for owner, counts in totals.items() if season_xp_total(counts) > 0 and owner in names),
+        key=lambda item: -item["xp"],
+    )
+    started = _now()
+    created = (await db.execute(text(
+        "INSERT INTO crm_arena_seasons (season_number, started_at, started_by, previous_standings) "
+        "VALUES (:number, :started, :admin, CAST(:standings AS jsonb)) "
+        "ON CONFLICT (season_number) DO NOTHING RETURNING season_number"
+    ), {"number": number + 1, "started": started, "admin": admin_id, "standings": json.dumps(standings)})).scalar()
+    if created is None:
+        await db.rollback()
+        raise ValidationError("Someone else just started a new season. Refresh the page.")
+    await db.commit()
+    return {"number": number + 1, "started_at": started.isoformat(), "previous_standings": standings}
+
+
+async def list_seasons(db: AsyncSession) -> list[dict]:
+    rows = (await db.execute(text(
+        "SELECT s.season_number, s.started_at, s.previous_standings, coalesce(nullif(u.full_name, ''), u.email) "
+        "FROM crm_arena_seasons s LEFT JOIN users u ON u.user_id = s.started_by ORDER BY s.season_number DESC"
+    ))).all()
+    return [
+        {"number": int(number), "started_at": started.isoformat(), "started_by": name, "previous_standings": standings if isinstance(standings, list) else json.loads(standings or "[]")}
+        for number, started, standings, name in rows
+    ]
