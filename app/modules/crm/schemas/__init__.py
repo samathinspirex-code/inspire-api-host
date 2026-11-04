@@ -25,6 +25,13 @@ LOSS_REASONS = (
     "Qualification / Recognition Concern", "Parent or Guardian Not Interested",
     "Decided to Postpone Studies", "No Longer Interested in Higher Education", "Other",
 )
+POTENTIAL_REASONS = (
+    "Payment Details Sent — Awaiting Payment",
+    "Plans to Pay on an Agreed Date",
+    "Awaiting Salary / Funds",
+    "Awaiting Parent / Sponsor Approval",
+    "Still Deciding / Interested in a Later Intake",
+)
 AFFORDABILITY_REASONS = (
     "Programme Fee Too High", "Initial Payment Too High", "Monthly Installment Too High",
     "Registration Fee Issue", "Currently No Financial Capacity", "Waiting for Salary / Income",
@@ -41,8 +48,6 @@ DELAY_REASONS = (
 def validate_status_fields(values):
     if values.stage not in LEAD_STATUSES:
         raise ValueError("Unsupported lead status")
-    if values.stage in ("follow_up", "potential") and not (values.status_remarks or "").strip():
-        raise ValueError("Enter a note for Follow-Up or Potential")
     if values.stage in ("not_interested", "lost_to_competitor"):
         if values.status_reason not in LOSS_REASONS:
             raise ValueError("Select a reason for this outcome")
@@ -370,6 +375,12 @@ class CrmStageUpdate(BaseModel):
     expected_month: Optional[str] = None
     delay_reason: Optional[str] = None
     followup_date: Optional[datetime] = None
+
+
+class CrmFollowupComplete(BaseModel):
+    note: str = Field(min_length=1)
+    outcome: Literal["contacted", "no_answer", "requested_callback"]
+    next_followup_date: Optional[datetime] = None
 
 
 class CrmLeadListResponse(BaseModel):

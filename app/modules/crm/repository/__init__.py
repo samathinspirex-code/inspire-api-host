@@ -52,23 +52,30 @@ class CrmLeadRepository:
         extra: Optional[dict[str, Any]] = None,
     ) -> list[Any]:
         filters: list[Any] = []
+        extra = extra or {}
         if not include_archived:
             filters.append(CrmLead.is_archived == False)  # noqa: E712
-        if stage:
-            filters.append(CrmLead.stage.in_((stage, *LEGACY_NOT_INTERESTED_STAGES)) if stage == "not_interested" else CrmLead.stage == stage)
-        if source:
-            filters.append(CrmLead.source == source)
+        selected_stages = set(extra.get("stages") or []) | ({stage} if stage else set())
+        if selected_stages:
+            if "not_interested" in selected_stages:
+                selected_stages.update(LEGACY_NOT_INTERESTED_STAGES)
+            filters.append(CrmLead.stage.in_(selected_stages))
+        selected_sources = set(extra.get("sources") or []) | ({source} if source else set())
+        if selected_sources:
+            filters.append(CrmLead.source.in_(selected_sources))
         if unassigned:
             filters.append(CrmLead.assigned_counsellor_id.is_(None))
         elif counsellor_id is not None:
             filters.append(CrmLead.assigned_counsellor_id == counsellor_id)
-        if awarding_body:
-            filters.append(CrmLead.awarding_body == awarding_body)
-        if programme:
+        selected_bodies = set(extra.get("awarding_bodies") or []) | ({awarding_body} if awarding_body else set())
+        if selected_bodies:
+            filters.append(CrmLead.awarding_body.in_(selected_bodies))
+        selected_programmes = set(extra.get("programmes") or []) | ({programme} if programme else set())
+        if selected_programmes:
             filters.append(
                 or_(
-                    CrmLead.interested_programme == programme,
-                    CrmLead.interested_course == programme,
+                    CrmLead.interested_programme.in_(selected_programmes),
+                    CrmLead.interested_course.in_(selected_programmes),
                 )
             )
         if search:

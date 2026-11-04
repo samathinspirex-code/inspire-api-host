@@ -26,6 +26,8 @@ from app.modules.crm.schemas import (
     CALL_OUTCOME_LABELS,
     UNREACHED_CALL_OUTCOMES,
     CrmActivityCreate,
+    POTENTIAL_REASONS,
+    CrmFollowupComplete,
     CrmActivityOut,
     CrmCounsellorLeadPreview,
     CrmAssignmentSettingsOut,
@@ -73,6 +75,27 @@ ACTIVE_ASSIGNED_STAGES = [
 CONTACT_ACTIVITY_TYPES = {"call", "email", "whatsapp", "counselling_session", "follow_up_completed"}
 _CONTACT_SQL = ", ".join(f"'{item}'" for item in sorted(CONTACT_ACTIVITY_TYPES))
 COLOMBO = ZoneInfo("Asia/Colombo")
+
+
+def _scheduled_followup(value: datetime) -> datetime:
+    """Store the chosen Sri Lanka calendar day at noon as UTC without tzinfo."""
+    local = value.replace(tzinfo=COLOMBO) if value.tzinfo is None else value.astimezone(COLOMBO)
+    day = local.date()
+    if day < datetime.now(COLOMBO).date():
+        raise ValidationError("Choose today or a future follow-up date")
+    return datetime.combine(day, time(12), COLOMBO).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _followup_day(value: datetime) -> date:
+    return value.replace(tzinfo=timezone.utc).astimezone(COLOMBO).date()
+
+
+def _followup_category(value: datetime, now: datetime) -> str:
+    due = _followup_day(value)
+    today = now.astimezone(COLOMBO).date()
+    if due < today or (due == today and now.astimezone(COLOMBO).hour >= 18):
+        return "overdue"
+    return "today" if due == today else "upcoming"
 _UNREACHED_SQL = ", ".join(f"'{item}'" for item in UNREACHED_CALL_OUTCOMES)
 # Extra SQL condition on crm_activities (alias a) that drops calls which never reached the person.
 REACHED_ACTIVITY_SQL = f"coalesce(a.call_outcome, '') NOT IN ({_UNREACHED_SQL})"
@@ -878,7 +901,13 @@ async def create_lead(
         await _reject_duplicate_manual_phone(db, data.get("phone"))
     if data.get("stage") not in PIPELINE_STAGES:
         raise ValidationError("Unsupported lead status")
+    if data["stage"] == "potential" and data.get("status_reason") not in POTENTIAL_REASONS:
+        raise ValidationError("Select a Potential reason")
     _validate_lead_state(CrmLead(full_name=data["full_name"], stage="new_lead", email=data.get("email")), data)
+    if data["stage"] == "follow_up" and not data.get("followup_date"):
+        raise ValidationError("Choose a follow-up date")
+    if data.get("followup_date"):
+        data["followup_date"] = _scheduled_followup(data["followup_date"])
     if data.get("academic_course_id") is not None:
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
     requested_created_at = data.pop("created_at", None)
@@ -986,17 +1015,23 @@ async def update_lead(
             data["notes"] = "\n".join(filter(None, (data.get("notes", lead.notes), legacy_note)))
             if data["stage"] == "not_interested" and not data.get("status_reason"):
                 data["status_reason"] = legacy_reason
-        if data["stage"] in ("follow_up", "potential") and not (data.get("status_remarks") or "").strip():
-            raise ValidationError("Enter a note for Follow-Up or Potential")
+        if data["stage"] == "follow_up" and not (data.get("followup_date") or lead.followup_date):
+            raise ValidationError("Choose a follow-up date")
         if data["stage"] not in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect", "follow_up", "potential"):
             data.update(status_reason=None, status_remarks=None)
-        elif data["stage"] not in ("not_interested", "lost_to_competitor"):
+        elif data["stage"] not in ("not_interested", "lost_to_competitor", "potential"):
             data["status_reason"] = None
         if data["stage"] != "cant_afford":
             data["affordability_reason"] = None
         if data["stage"] != "future_prospect":
             data.update(expected_intake=None, expected_month=None, delay_reason=None)
+    if "followup_date" in data and data["followup_date"] is None and lead.followup_date is not None:
+        raise ValidationError("Complete the follow-up before removing its reminder")
+    if data.get("stage", lead.stage) == "potential" and ("stage" in data or "status_reason" in data) and data.get("status_reason", lead.status_reason) not in POTENTIAL_REASONS:
+        raise ValidationError("Select a Potential reason")
     _validate_lead_state(lead, data)
+    if data.get("followup_date"):
+        data["followup_date"] = _scheduled_followup(data["followup_date"])
     if "academic_course_id" in data and data["academic_course_id"] is not None:
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
     if "assigned_counsellor_id" in data:
@@ -1011,7 +1046,7 @@ async def update_lead(
     changes = {key: (getattr(lead, key), value) for key, value in data.items() if getattr(lead, key) != value}
     await repo.update(lead, data, commit=False)
     tracked = {
-        "stage": "Status", "interested_course": "Programme", "assigned_counsellor_id": "Counselor",
+        "stage": "Status", "status_reason": "Reason", "interested_course": "Programme", "assigned_counsellor_id": "Counselor",
         "followup_date": "Follow-up", "notes": "Notes", "programme_fee": "Programme fee",
         "created_at": "Created date",
     }
@@ -1033,7 +1068,7 @@ async def update_lead(
                 "counsellor_id": actor_id,
                 "counsellor_name": actor_name,
             }, commit=False)
-    if "stage" in changes and data["stage"] in ("follow_up", "potential"):
+    if "stage" in changes and data["stage"] == "potential" and (data.get("status_remarks") or "").strip():
         await CrmActivityRepository(db).create({
             "lead_id": lead_id, "activity_type": "note",
             "content": f"{data['stage'].replace('_', ' ').title()} note: {data['status_remarks'].strip()}",
@@ -1071,6 +1106,8 @@ async def update_stage(
     old_stage = lead.stage
     if stage not in PIPELINE_STAGES:
         raise ValidationError("Unsupported lead status")
+    if stage == "potential" and status_reason not in POTENTIAL_REASONS:
+        raise ValidationError("Select a Potential reason")
     legacy_note = None
     if old_stage in ("lost_to_competitor", "cant_afford"):
         legacy_reason, legacy_note = _legacy_outcome_details(lead)
@@ -1079,15 +1116,17 @@ async def update_stage(
     enrolling = stage == "enrolled" and old_stage != "enrolled"
     changes = {
         "stage": stage,
-        "status_reason": status_reason if stage in ("not_interested", "lost_to_competitor") else None,
+        "status_reason": status_reason if stage in ("not_interested", "lost_to_competitor", "potential") else None,
         "status_remarks": status_remarks if stage in ("not_interested", "lost_to_competitor", "cant_afford", "future_prospect", "follow_up", "potential") else None,
         "affordability_reason": affordability_reason if stage == "cant_afford" else None,
         "expected_intake": expected_intake if stage == "future_prospect" else None,
         "expected_month": expected_month if stage == "future_prospect" else None,
         "delay_reason": delay_reason if stage == "future_prospect" else None,
     }
+    if stage == "follow_up" and followup_date is None and lead.followup_date is None:
+        raise ValidationError("Choose a follow-up date")
     if followup_date is not None:
-        changes["followup_date"] = followup_date
+        changes["followup_date"] = _scheduled_followup(followup_date)
     if legacy_note:
         changes["notes"] = "\n".join(filter(None, (lead.notes, legacy_note)))
     _validate_lead_state(lead, changes)
@@ -1099,7 +1138,7 @@ async def update_stage(
         {
             "lead_id": lead_id,
             "activity_type": "stage_change",
-            "content": f"Stage changed from '{old_stage}' to '{stage}'" + (f". Note: {status_remarks.strip()}" if stage in ("follow_up", "potential") else ""),
+            "content": f"Stage changed from '{old_stage}' to '{stage}'" + (f". Reason: {status_reason}" if stage == "potential" else "") + (f". Note: {status_remarks.strip()}" if stage == "potential" and status_remarks else "") + (f". Follow-up: {_followup_day(changes['followup_date'])}" if stage == "follow_up" and "followup_date" in changes else ""),
             "counsellor_id": counsellor_id,
             "counsellor_name": counsellor_name,
         },
@@ -1380,6 +1419,87 @@ async def get_followups(db: AsyncSession) -> list[CrmLeadSummary]:
     return [CrmLeadSummary.model_validate(lead) for lead in leads]
 
 
+async def complete_followup(
+    db: AsyncSession, lead_id: int, payload: CrmFollowupComplete,
+    actor_id: int, actor_name: str,
+) -> CrmLeadOut:
+    lead = (await db.execute(select(CrmLead).where(CrmLead.lead_id == lead_id).with_for_update())).scalar_one_or_none()
+    if lead is None:
+        raise NotFoundError(f"Lead {lead_id} not found")
+    if lead.followup_date is None:
+        raise ValidationError("This lead has no pending follow-up")
+    note = payload.note.strip()
+    if not note:
+        raise ValidationError("Add a follow-up note")
+    if payload.outcome == "requested_callback" and payload.next_followup_date is None:
+        raise ValidationError("Choose the requested callback date")
+    due_day = _followup_day(lead.followup_date)
+    next_date = _scheduled_followup(payload.next_followup_date) if payload.next_followup_date else None
+    outcome_label = {"contacted": "Contacted", "no_answer": "No answer", "requested_callback": "Requested callback"}[payload.outcome]
+    await CrmActivityRepository(db).create({
+        "lead_id": lead_id,
+        "activity_type": "follow_up_completed",
+        "content": f"Follow-up due {due_day.isoformat()} completed. Outcome: {outcome_label}. Note: {note}"
+                   + (f". Next follow-up: {_followup_day(next_date)}" if next_date else ""),
+        "call_outcome": {"contacted": "connected", "no_answer": "no_answer", "requested_callback": "callback_requested"}[payload.outcome],
+        "counsellor_id": actor_id,
+        "counsellor_name": actor_name,
+    }, commit=False)
+    lead.followup_date = next_date
+    completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    lead.last_activity_at = completed_at
+    if payload.outcome == "contacted":
+        lead.last_contacted_at = completed_at
+        lead.unanswered_calls = 0
+        lead.followup_count += 1
+    elif payload.outcome == "no_answer":
+        lead.unanswered_calls += 1
+    await db.flush()
+    await db.commit()
+    return await get_lead(db, lead_id)
+
+
+async def get_followup_summary(db: AsyncSession, counsellor_id: Optional[int] = None) -> dict:
+    now = datetime.now(COLOMBO)
+    today = now.date()
+    report_day = today if now.hour >= 18 else today - timedelta(days=1)
+    leads = (await db.execute(select(CrmLead).where(
+        CrmLead.is_archived == False, CrmLead.followup_date.is_not(None),  # noqa: E712
+        *((CrmLead.assigned_counsellor_id == counsellor_id,) if counsellor_id else ()),
+    ))).scalars().all()
+    due_today = [lead for lead in leads if _followup_category(lead.followup_date, now) == "today"]
+    overdue = [lead for lead in leads if _followup_category(lead.followup_date, now) == "overdue"]
+    upcoming = [lead for lead in leads if _followup_category(lead.followup_date, now) == "upcoming"]
+    report_start = datetime.combine(report_day, time.min, COLOMBO).astimezone(timezone.utc).replace(tzinfo=None)
+    report_end = report_start + timedelta(days=1)
+    completed = (await db.execute(select(CrmActivity).where(
+        CrmActivity.activity_type == "follow_up_completed",
+        CrmActivity.created_at >= report_start,
+        CrmActivity.created_at < report_end,
+        *((CrmActivity.counsellor_id == counsellor_id,) if counsellor_id else ()),
+    ))).scalars().all()
+    report_due = [lead for lead in leads if _followup_day(lead.followup_date) == report_day]
+    by_counsellor: dict[int, dict] = {}
+    for lead in report_due:
+        cid = lead.assigned_counsellor_id
+        if cid is None:
+            continue
+        row = by_counsellor.setdefault(cid, {"counsellor_id": cid, "counsellor_name": lead.counsellor_name or f"Counsellor #{cid}", "due": 0, "completed": 0, "missed": 0, "missed_lead_ids": []})
+        row["due"] += 1
+        row["missed"] += 1
+        row["missed_lead_ids"].append(lead.lead_id)
+    for activity in completed:
+        if f"Follow-up due {report_day.isoformat()} completed." not in activity.content:
+            continue
+        cid = activity.counsellor_id
+        if cid is None:
+            continue
+        row = by_counsellor.setdefault(cid, {"counsellor_id": cid, "counsellor_name": activity.counsellor_name or f"Counsellor #{cid}", "due": 0, "completed": 0, "missed": 0, "missed_lead_ids": []})
+        row["due"] += 1
+        row["completed"] += 1
+    return {"today": today.isoformat(), "report_date": report_day.isoformat(), "due_today": len(due_today), "overdue": len(overdue), "upcoming": len(upcoming), "managers": sorted(by_counsellor.values(), key=lambda row: (-row["missed"], row["counsellor_name"]))}
+
+
 async def get_counsellor_report(
     db: AsyncSession,
     date_from: Optional[date] = None,
@@ -1427,6 +1547,9 @@ async def get_counsellor_report(
     )
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
+    local_now = datetime.now(COLOMBO)
+    overdue_day = local_now.date() + (timedelta(days=1) if local_now.hour >= 18 else timedelta())
+    overdue_cutoff = datetime.combine(overdue_day, time.min, COLOMBO).astimezone(timezone.utc).replace(tzinfo=None)
     in_contacted = and_(CrmLead.last_contacted_at >= start, CrmLead.last_contacted_at < end)
     contacted_stages = CrmLead.stage.in_(("contacted", "follow_up", "potential", "future_prospect", "not_interested", "lost_to_competitor", "cant_afford", "enrolled"))
     contacted_cohort = and_(in_created, or_(in_contacted, contacted_stages))
@@ -1451,7 +1574,7 @@ async def get_counsellor_report(
                 func.count().filter(and_(in_created, CrmLead.stage == "not_interested")),
                 func.count().filter(and_(in_created, CrmLead.stage == "lost_to_competitor")),
                 func.count().filter(and_(in_created, CrmLead.stage == "cant_afford")),
-                func.count().filter(and_(in_follow, CrmLead.followup_date < datetime.utcnow())),
+                func.count().filter(and_(in_follow, CrmLead.followup_date < overdue_cutoff)),
             )
             .where(and_(*lead_scope))
             .group_by(CrmLead.assigned_counsellor_id)
@@ -1654,6 +1777,8 @@ async def add_activity(
     counsellor_id: Optional[int] = None,
     counsellor_name: Optional[str] = None,
 ) -> CrmActivityOut:
+    if payload.activity_type == "follow_up_completed":
+        raise ValidationError("Use Complete follow-up to record an outcome")
     # Ensure lead exists
     lead = await CrmLeadRepository(db).get(lead_id)
     if lead is None:

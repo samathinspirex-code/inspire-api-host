@@ -33,6 +33,7 @@ from app.modules.crm.schemas import (
     CrmPipelineResponse,
     CrmPriorityQueueResponse,
     CrmStageUpdate,
+    CrmFollowupComplete,
 )
 
 
@@ -139,12 +140,16 @@ async def set_counsellor_active(
 @router.get("/leads", response_model=CrmLeadListResponse)
 async def list_leads(
     stage: Optional[str] = Query(None),
+    stages: Optional[list[str]] = Query(None),
     source: Optional[str] = Query(None),
+    sources: Optional[list[str]] = Query(None),
     priority: Optional[str] = Query(None),
     sort: str = Query("newest"),
     counsellor_id: Optional[int] = Query(None),
     awarding_body: Optional[str] = Query(None),
+    awarding_bodies: Optional[list[str]] = Query(None),
     programme: Optional[str] = Query(None),
+    programmes: Optional[list[str]] = Query(None),
     unassigned: bool = Query(False),
     search: Optional[str] = Query(None, max_length=100),
     page: int = Query(1, ge=1),
@@ -172,6 +177,7 @@ async def list_leads(
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
     extra = {"city": city, "country": country, "campaign": campaign, "intake": intake, "priority": priority, "sort": sort,
+             "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes,
              "days_since_contact": days_since_contact, "followup_state": followup_state}
     for field, start, end in (
         ("updated_at", modified_from, modified_to),
@@ -294,6 +300,18 @@ async def get_followups(db: AsyncSession = Depends(get_db), current_user: Curren
     return [lead for lead in followups if lead.assigned_counsellor_id == current_user.user_id] if _counsellor_only(current_user) else followups
 
 
+@router.get("/leads/followups/summary")
+async def get_followup_summary(db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> dict:
+    return await service.get_followup_summary(db, current_user.user_id if _counsellor_only(current_user) else None)
+
+
+@router.post("/leads/{lead_id}/followups/complete", response_model=CrmLeadOut)
+async def complete_followup(lead_id: int, payload: CrmFollowupComplete, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> CrmLeadOut:
+    await _check_lead_access(db, lead_id, current_user)
+    actor_name = await service._actor_name(db, current_user.user_id, current_user.email)
+    return await service.complete_followup(db, lead_id, payload, current_user.user_id, actor_name)
+
+
 @router.get("/reports/counsellors", response_model=CrmCounsellorReportResponse)
 async def counsellor_report(
     date_from: Optional[date] = Query(None),
@@ -320,12 +338,16 @@ async def counsellor_report(
 @router.get("/leads/export")
 async def export_leads_csv(
     stage: Optional[str] = Query(None),
+    stages: Optional[list[str]] = Query(None),
     source: Optional[str] = Query(None),
+    sources: Optional[list[str]] = Query(None),
     priority: Optional[str] = Query(None),
     search: Optional[str] = Query(None, max_length=100),
     counsellor_id: Optional[int] = Query(None),
     awarding_body: Optional[str] = Query(None),
+    awarding_bodies: Optional[list[str]] = Query(None),
     programme: Optional[str] = Query(None),
+    programmes: Optional[list[str]] = Query(None),
     unassigned: bool = Query(False),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
@@ -346,7 +368,8 @@ async def export_leads_csv(
         counsellor_id, unassigned = current_user.user_id, False
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
-    extra = {"priority": priority, "city": city, "intake": intake, "followup_state": followup_state}
+    extra = {"priority": priority, "city": city, "intake": intake, "followup_state": followup_state,
+             "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes}
     for field, start, end in (
         ("updated_at", modified_from, modified_to),
         ("last_contacted_at", contacted_from, contacted_to),
