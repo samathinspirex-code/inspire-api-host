@@ -1,12 +1,13 @@
 """Shared, honest readiness for the entire Growth & Data source catalogue."""
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.modules.insights.demo_data import GTM_EVENTS, PLATFORMS
+from app.modules.insights.website import REPORT_FRESH_FOR
 
 # A saved ID, a configured credential and an ingested report are different things.
 REQUIREMENTS = {
-    "meta": ("Ad account ID and Meta app approval with ads_read", "Paid campaigns, spend and attribution"),
-    "capi": ("Dataset/pixel ID, server token and consent-aware event outbox", "Lead and enrolment feedback"),
+    "meta": ("Ad account ID and a Meta System User token with only ads_read", "Paid campaigns, spend and leads"),
+    "capi": ("Pixel ID, a Conversions API token and compliance approval. Sends hashed phone and email to Meta, only for leads with recorded consent", "Lead and enrolment feedback"),
     "ga4": ("Numeric GA4 property ID and Google analytics.readonly consent", "Website sessions and engagement"),
     "gtm": ("GTM container ID (GTM-XXXX) published on the website. No Google login is needed for this check", "Installation check and duplicate GA4 tag warnings"),
     "gads": ("Customer ID, developer token and Google Ads consent", "Search campaigns and offline conversions"),
@@ -16,13 +17,13 @@ REQUIREMENTS = {
     "ig": ("Professional Instagram account and approved insights permissions", "Organic content performance"),
     "li": ("Ad account ID and approved LinkedIn Marketing API access", "Professional audience campaigns"),
     "yt": ("Channel ID and Google yt-analytics.readonly consent", "Video views and watch time"),
-    "email": ("Choose Email and SMS providers and configure delivery webhooks", "Campaign delivery and engagement"),
-    "payhere": ("Existing Payments configuration and verified payment notifications", "Fees and payment reconciliation"),
-    "brain": ("Map existing LMS records to attendance and retention definitions", "Student activity and retention"),
+    "email": ("Built in. Uses the Mailjet account already set on the server. There is no SMS provider yet", "Sent, blocked, bounced, opened and clicked emails"),
+    "payhere": ("Built in. Uses the Payments ledger and the PayHere merchant set on the server", "Outstanding fees, overdue invoices and on-time payments"),
+    "brain": ("Built in. Reads attendance, enrolments and learning activity from the LMS", "Attendance, dropout and retention by intake"),
     "forms": ("Existing website form submission route", "Enquiries into the CRM"),
     "calls": ("Choose a telephony provider and configure signed call webhooks", "Calls, outcomes and durations"),
 }
-SYNC_PLATFORMS = {"ga4", "gsc", "yt", "gtm"}
+SYNC_PLATFORMS = {"ga4", "gsc", "yt", "gtm", "meta", "email"}
 
 
 def account_state(account: dict, configured: bool, now: datetime | None = None) -> dict:
@@ -32,7 +33,7 @@ def account_state(account: dict, configured: bool, now: datetime | None = None) 
         synced = datetime.fromisoformat(synced)
     if synced and synced.tzinfo is None:
         synced = synced.replace(tzinfo=timezone.utc)
-    stale = bool(synced and now - synced > timedelta(hours=48))
+    stale = bool(synced and now - synced > REPORT_FRESH_FOR)
     checks = (account.get("report") or {}).get("checks") if isinstance(account.get("report"), dict) else None
     if account.get("last_error"):
         label, tone = "Sync failed", "bad"
@@ -49,7 +50,19 @@ def account_state(account: dict, configured: bool, now: datetime | None = None) 
     return {"status_label": label, "tone": tone, "stale": stale, "can_sync": configured and account["platform"] in SYNC_PLATFORMS}
 
 
-def platforms_for(accounts: list[dict], whatsapp: dict | None = None) -> list[dict]:
+def _capi_state(capi: dict) -> tuple[str, str, str]:
+    if not capi["configured"]:
+        return "Not connected", "", "unavailable"
+    if not capi["installed"]:
+        return "Setup needed", "warn", "unavailable"
+    if not capi["enabled"]:
+        return "Ready · sending off", "warn", "unavailable"
+    if capi["failed_30d"] or capi["last_error"]:
+        return "Delivery problem", "bad", "connector"
+    return ("Sending events", "good", "connector") if capi["sent_30d"] else ("Waiting for events", "warn", "connector")
+
+
+def platforms_for(accounts: list[dict], whatsapp: dict | None = None, lms: dict | None = None, finance: dict | None = None, capi: dict | None = None) -> list[dict]:
     result = []
     for definition in PLATFORMS:
         platform = definition["id"]
@@ -70,6 +83,15 @@ def platforms_for(accounts: list[dict], whatsapp: dict | None = None) -> list[di
                 status, tone, source = "No recent handovers", "warn", "cms"
             else:
                 status, tone = "Waiting for first handover", "warn"
+        if platform == "brain" and lms is not None and lms["connected"]:
+            status, tone, source = ("Receiving data", "good", "cms") if lms["receiving"] else ("No recent activity", "warn", "cms")
+        if platform == "payhere" and finance is not None and finance["live"]:
+            if finance["mode"] == "live":
+                status, tone, source = ("Receiving data" if finance["payments"] else "Connected · live"), "good", "cms"
+            else:
+                status, tone, source = f"Ledger linked · {finance['mode']}", "warn", "cms"
+        if platform == "capi" and capi is not None:
+            status, tone, source = _capi_state(capi)
         result.append({**definition, "status": status, "tone": tone,
                        "source": source, "requirements": requirements,
                        "feeds": feeds, "sync_supported": platform in SYNC_PLATFORMS,

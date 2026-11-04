@@ -102,6 +102,9 @@ class AdmissionApplicationCreate(BaseModel):
     preferred_course_id: int | None = Field(None, gt=0)
     preferred_study_mode: StudyMode | None = None
     result_document: AdmissionResultDocument | None = None
+    ads_consent: bool = False
+    fbc: str | None = None
+    fbp: str | None = None
 
 
 class AdmissionApplicationResponse(BaseModel):
@@ -116,6 +119,9 @@ class ContactInquiryCreate(BaseModel):
     phone: str | None = Field(None, min_length=5, max_length=50)
     message: str = Field(..., min_length=1, max_length=5000)
     captcha_token: str | None = Field(None, max_length=4096)
+    ads_consent: bool = False
+    fbc: str | None = None
+    fbp: str | None = None
 
 
 class ContactInquiryResponse(BaseModel):

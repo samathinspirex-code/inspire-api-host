@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     CONNECTORS_CREDENTIALS: dict[str, dict[str, str]] = {}
     CONNECTORS_GOOGLE_CLIENT_ID: str = ""
     CONNECTORS_GOOGLE_CLIENT_SECRET: str = ""
+    CONNECTORS_META_TOKEN: str = ""
+    CONNECTORS_META_PIXEL_ID: str = ""
+    CONNECTORS_META_CAPI_TOKEN: str = ""
+    CONNECTORS_META_CAPI_ENABLED: bool = False
+    CONNECTORS_META_CAPI_LEAD_FORMS: bool = False
 
     PAYMENTS_DATABASE_POOL_SIZE: int = 3
     PAYMENTS_PUBLIC_BASE_URL: str = "http://localhost:8001"
@@ -42,6 +47,9 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
+    # Optional hosted transaction-pooler port for the main SQLAlchemy engine.
+    # Payments and migration scripts need session features and keep POSTGRES_PORT.
+    DATABASE_TRANSACTION_PORT: int | None = None
     # The API serves many simultaneous CMS/LMS requests. Keep this bounded per
     # process, but leave enough headroom that a few slow operations do not make
     # unrelated requests wait for the full pool timeout.
@@ -54,7 +62,7 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            f"@{self.POSTGRES_HOST}:{self.DATABASE_TRANSACTION_PORT or self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
     JWT_PRIVATE_KEY_PATH: str = "keys/jwt_private.pem"

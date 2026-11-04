@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from app.modules.insights.demo_data import PAGES, VISITORS
 
 HOME_COUNTRY = "Sri Lanka"
+REPORT_FRESH_FOR = timedelta(days=8)  # Reports sync weekly; a day's grace before one counts as stale.
 UNKNOWN = {"(not set)", ""}
 CITY_COORDS = {
     "Colombo": (6.93, 79.85), "Gampaha": (7.09, 79.99), "Kandy": (7.29, 80.63), "Kurunegala": (7.49, 80.36), "Negombo": (7.21, 79.84),
@@ -13,7 +14,8 @@ CITY_COORDS = {
     "Moratuwa": (6.77, 79.88), "Kalutara": (6.58, 79.96), "Badulla": (6.99, 81.06), "Nuwara": (6.97, 80.78), "Kegalle": (7.25, 80.35),
     "Matale": (7.47, 80.62), "Hambantota": (6.12, 81.12), "Puttalam": (8.04, 79.83), "Vavuniya": (8.75, 80.50), "Polonnaruwa": (7.94, 81.0),
     "Ampara": (7.29, 81.67), "Chilaw": (7.58, 79.80), "Panadura": (6.71, 79.90), "Kaduwela": (6.93, 79.98), "Maharagama": (6.85, 79.93),
-    "Kelaniya": (6.95, 79.92),
+    "Kelaniya": (6.95, 79.92), "Dehiwala-Mount Lavinia": (6.85, 79.87), "Malabe": (6.90, 79.96), "Kadawatha": (7.00, 79.95),
+    "Katunayake": (7.17, 79.88), "Battaramulla": (6.90, 79.92),
 }
 
 
@@ -29,7 +31,7 @@ def _pct(part: float, whole: float) -> float:
 def _fresh(account: dict) -> bool:
     synced = datetime.fromisoformat(account["last_synced_at"])
     synced = synced if synced.tzinfo else synced.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - synced <= timedelta(hours=48)
+    return datetime.now(timezone.utc) - synced <= REPORT_FRESH_FOR
 
 
 def path_persona(path: str) -> tuple[int, int]:
@@ -152,6 +154,19 @@ def visitors_view(account: dict | None) -> dict | None:
                   for row in pages],
         "reporting_note": report.get("reporting_note"),
     }
+
+
+def search_view(account: dict | None) -> dict | None:
+    if not account:
+        return None
+    report = account["report"]
+    totals = report["metrics"]
+    parts = report.get("breakdowns") or {}
+    pages = [{**row, "name": re.sub(r"^https?://[^/]+", "", row["name"]) or "/"} for row in parts.get("pages", [])]
+    return {"account": account["account_id"], "start": report["start"], "end": report["end"], "fresh": _fresh(account),
+            "clicks": totals.get("clicks", 0), "impressions": totals.get("impressions", 0),
+            "ctr": round(totals.get("ctr", 0) * 100, 2), "position": round(totals.get("position", 0), 1),
+            "queries": parts.get("queries", []), "pages": pages}
 
 
 def demo_visitors() -> dict:

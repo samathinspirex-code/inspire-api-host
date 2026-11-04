@@ -1,4 +1,5 @@
 """Read-only aggregate reports. All URLs are fixed; account IDs are path-escaped."""
+import json
 import math
 import re
 from datetime import datetime, timedelta
@@ -110,6 +111,138 @@ async def gtm_report(container_id: str, *, transport=None) -> dict:
             "reporting_note": " ".join(warnings) or "Container is published and on the home page. This confirms installation, not that each event is delivered."}
 
 
+META_API = "https://graph.facebook.com/v25.0"
+# Meta's own lifetime account states. Anything not listed here is reported as active-or-unknown, without a warning.
+META_ACCOUNT_WARNINGS = {
+    2: "Meta has disabled this ad account.",
+    3: "Meta marks this ad account as unsettled: a payment is outstanding, so ads may stop running.",
+    7: "This ad account is pending a risk review at Meta.",
+    8: "This ad account is pending settlement at Meta.",
+    9: "This ad account is in a payment grace period at Meta.",
+    100: "This ad account is pending closure at Meta.",
+    101: "This ad account is closed at Meta.",
+}
+
+
+async def _meta_get(client, path: str, token: str, params: dict) -> dict:
+    # The token travels only in this header, and error bodies never leave this function.
+    response = await client.get(f"{META_API}/{path}", headers={"Authorization": f"Bearer {token}"}, params=params)
+    if response.is_success:
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("Unexpected provider response shape")
+        return data
+    try:
+        code = response.json()["error"]["code"]
+    except (ValueError, KeyError, TypeError):
+        code = None
+    if code in (4, 17, 32, 613) or response.status_code == 429:
+        raise ProviderFailure("Meta rate limit reached. Try again later.")
+    if code in (10, 190, 200) or response.status_code in (401, 403):
+        raise ProviderFailure("Meta rejected the token. Check the System User token, its ads_read permission and this ad account's access.")
+    raise ProviderFailure("Meta could not supply the report. Check the ad account ID and access.")
+
+
+async def _meta_rows(client, account_id: str, token: str, params: dict) -> list[dict]:
+    rows, after = [], None
+    while True:
+        data = await _meta_get(client, f"act_{account_id}/insights", token, {**params, "limit": 500, **({"after": after} if after else {})})
+        rows += data["data"]
+        paging = data.get("paging") or {}
+        after = (paging.get("cursors") or {}).get("after") if paging.get("next") else None
+        if not after:
+            return rows
+
+
+def _meta_action(row: dict, action_type: str) -> float:
+    return sum(number(item["value"]) for item in row.get("actions") or [] if item["action_type"] == action_type)
+
+
+def _meta_leads(row: dict) -> float:
+    # Region rows carry only the grouped count; for this account it equals `lead` on every other view.
+    return _meta_action(row, "lead") or _meta_action(row, "onsite_conversion.lead_grouped")
+
+
+async def meta_report(account_id: str, token: str, *, transport=None) -> dict:
+    """Read-only spend and results. `lead` is Meta's own lead count; chats are kept apart and never counted as leads."""
+    end = datetime.now(ZoneInfo("Asia/Colombo")).date() - timedelta(days=1)
+    start = end - timedelta(days=29)
+    # The unified setting makes the counts follow each campaign's attribution, as Ads Manager does.
+    common = {"time_range": json.dumps({"since": str(start), "until": str(end)}), "use_unified_attribution_setting": "true"}
+    async with httpx.AsyncClient(timeout=60, follow_redirects=False, transport=transport) as client:
+        info = await _meta_get(client, f"act_{account_id}", token, {"fields": "name,account_status,currency,timezone_name"})
+        totals = await _meta_rows(client, account_id, token, {**common, "fields": "spend,reach,impressions,inline_link_clicks,actions"})
+        campaigns = await _meta_rows(client, account_id, token, {**common, "level": "campaign", "fields": "campaign_name,objective,spend,reach,impressions,inline_link_clicks,actions"})
+        days = await _meta_rows(client, account_id, token, {**common, "time_increment": 1, "fields": "spend,inline_link_clicks,actions"})
+        people = await _meta_rows(client, account_id, token, {**common, "breakdowns": "age,gender", "fields": "spend,actions"})
+        regions = await _meta_rows(client, account_id, token, {**common, "breakdowns": "region", "fields": "spend,inline_link_clicks,actions"})
+    if len(totals) > 1:
+        raise ValueError("Unexpected aggregate rows")
+    total = totals[0] if totals else {}
+    chats = "onsite_conversion.messaging_conversation_started_7d"
+    warning = META_ACCOUNT_WARNINGS.get(info.get("account_status"))
+    return {
+        "platform": "meta", "account_id": account_id, "start": str(start), "end": str(end),
+        "account_name": str(info.get("name") or ""), "currency": str(info["currency"]), "account_status": info.get("account_status"),
+        "warnings": [warning] if warning else [],
+        "metrics": {"spend": number(total.get("spend", 0)), "reach": number(total.get("reach", 0)), "impressions": number(total.get("impressions", 0)),
+                    "link_clicks": number(total.get("inline_link_clicks", 0)), "leads": _meta_leads(total), "conversations": _meta_action(total, chats)},
+        "breakdowns": {
+            "campaigns": sorted(({"name": str(row["campaign_name"]), "objective": str(row.get("objective") or ""), "spend": number(row.get("spend", 0)),
+                                  "impressions": number(row.get("impressions", 0)), "reach": number(row.get("reach", 0)), "clicks": number(row.get("inline_link_clicks", 0)),
+                                  "landing_views": _meta_action(row, "landing_page_view"), "leads": _meta_leads(row), "conversations": _meta_action(row, chats),
+                                  "website_leads": _meta_action(row, "offsite_conversion.fb_pixel_lead")} for row in campaigns), key=lambda item: -item["spend"]),
+            "days": sorted(({"date": row["date_start"], "spend": number(row.get("spend", 0)), "clicks": number(row.get("inline_link_clicks", 0)), "leads": _meta_leads(row)} for row in days), key=lambda item: item["date"]),
+            "people": [{"age": row["age"], "gender": row["gender"], "spend": number(row.get("spend", 0)), "leads": _meta_leads(row)} for row in people],
+            "regions": [{"name": row["region"], "spend": number(row.get("spend", 0)), "clicks": number(row.get("inline_link_clicks", 0)), "leads": _meta_leads(row)} for row in regions],
+        },
+        "source": "provider",
+        "reporting_note": "Meta's own counts, using each campaign's attribution setting. Recent days can still change. Chats are not counted as leads.",
+    }
+
+
+MAILJET_FIELDS = {"sent": "MessageSentCount", "blocked": "MessageBlockedCount", "hard_bounced": "MessageHardBouncedCount", "soft_bounced": "MessageSoftBouncedCount",
+                  "queued": "MessageQueuedCount", "deferred": "MessageDeferredCount", "opened": "MessageOpenedCount", "clicked": "MessageClickedCount",
+                  "spam": "MessageSpamCount", "unsubscribed": "MessageUnsubscribedCount"}
+EMAIL_ALERT_RATE = 5.0  # Percent of processed emails, above which a problem is worth raising.
+
+
+def _email_warnings(metrics: dict, processed: float) -> list[str]:
+    warnings = []
+    if not processed:
+        return warnings
+    blocked = metrics["blocked"] / processed * 100
+    bounced = (metrics["hard_bounced"] + metrics["soft_bounced"]) / processed * 100
+    if blocked >= EMAIL_ALERT_RATE:
+        warnings.append(f"{blocked:.1f}% of emails were blocked by Mailjet, so those people never received them.")
+    if bounced >= EMAIL_ALERT_RATE:
+        warnings.append(f"{bounced:.1f}% of emails bounced. Check for wrong addresses.")
+    if metrics["spam"]:
+        warnings.append(f"{metrics['spam']:.0f} emails were reported as spam.")
+    if metrics["sent"] and not metrics["opened"] and not metrics["clicked"]:
+        warnings.append("Mailjet recorded no opens or clicks. Tracking may be off, so this does not show that nobody read them.")
+    return warnings
+
+
+async def mailjet_report(key: str, secret: str, *, transport=None) -> dict:
+    """Totals only. No recipient address or subject is requested or stored."""
+    end = datetime.now(ZoneInfo("Asia/Colombo")).date() - timedelta(days=1)
+    start = end - timedelta(days=29)
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False, transport=transport, auth=(key, secret)) as client:
+        data = await request_json(client, "GET", "https://api.mailjet.com/v3/REST/statcounters", params={
+            "CounterSource": "APIKey", "CounterTiming": "Message", "CounterResolution": "Day", "Limit": 40,
+            "FromTS": f"{start}T00:00:00", "ToTS": f"{end}T23:59:59"})
+        campaigns = await request_json(client, "GET", "https://api.mailjet.com/v3/REST/campaign", params={"FromTS": f"{start}T00:00:00", "Limit": 1})
+    days = sorted(({"date": row["Timeslice"][:10], "processed": number(row["Total"]), **{name: number(row[field]) for name, field in MAILJET_FIELDS.items()}}
+                   for row in data["Data"] if str(start) <= row["Timeslice"][:10] <= str(end)), key=lambda item: item["date"])
+    metrics = {name: sum(day[name] for day in days) for name in MAILJET_FIELDS}
+    processed = sum(day["processed"] for day in days)
+    return {"platform": "email", "account_id": "mailjet", "start": str(start), "end": str(end), "provider": "Mailjet",
+            "metrics": {"processed": processed, **metrics}, "campaigns": number(campaigns.get("Total", 0)),
+            "warnings": _email_warnings(metrics, processed), "breakdowns": {"days": days}, "source": "provider",
+            "reporting_note": "Mailjet's own totals for system emails. Opens and clicks are only counted when tracking is on. Email is not linked to leads or enrolments."}
+
+
 def number(value) -> float:
     result = float(value)
     if not math.isfinite(result):
@@ -133,11 +266,21 @@ async def request_json(client, method, url, **kwargs):
 
 async def fetch_report(platform: str, account_id: str, credentials: dict, client_id: str, client_secret: str,
                        *, transport=None) -> dict:
-    if platform not in {"ga4", "gsc", "yt", "gtm"}:
+    if platform not in {"ga4", "gsc", "yt", "gtm", "meta", "email"}:
         raise ValidationError("Reporting integration is not implemented for this platform yet")
     account_id = (account_id or "").strip()
     if platform == "gtm":
         return await gtm_report(account_id, transport=transport)
+    if platform == "email":
+        if not (credentials.get("key") and credentials.get("secret")):
+            raise ValidationError("Configure the Mailjet API keys on the server first")
+        return await mailjet_report(credentials["key"], credentials["secret"], transport=transport)
+    if platform == "meta":
+        if not re.fullmatch(r"[0-9]+", account_id):
+            raise ValidationError("Use the numeric Meta ad account ID, without act_")
+        if not credentials.get("token"):
+            raise ValidationError("Configure the Meta System User token on the server first")
+        return await meta_report(account_id, credentials["token"], transport=transport)
     if platform == "ga4" and not re.fullmatch(r"[0-9]+", account_id):
         raise ValidationError("Use the numeric GA4 property ID, not the G- measurement ID")
     if platform == "gsc" and not account_id.startswith(("https://", "http://", "sc-domain:")):
@@ -171,6 +314,12 @@ async def fetch_report(platform: str, account_id: str, credentials: dict, client
             if len(rows) > 1:
                 raise ValueError("Unexpected aggregate rows")
             metrics = {name: number(rows[0][name]) for name in ("clicks", "impressions", "ctr", "position")} if rows else {"clicks": 0, "impressions": 0}
+            breakdowns = {}
+            for key, dimension in (("queries", "query"), ("pages", "page")):
+                detail = await request_json(client, "POST", f"https://www.googleapis.com/webmasters/v3/sites/{quote(account_id, safe='')}/searchAnalytics/query",
+                                            headers=headers, json={"startDate": str(start), "endDate": str(end), "dataState": "final", "dimensions": [dimension], "rowLimit": 25})
+                breakdowns[key] = [{"name": row["keys"][0], **{name: number(row[name]) for name in ("clicks", "impressions", "ctr", "position")}}
+                                   for row in detail.get("rows", [])]
         else:
             names = ["views", "estimatedMinutesWatched", "subscribersGained", "subscribersLost"]
             data = await request_json(client, "GET", "https://youtubeanalytics.googleapis.com/v2/reports", headers=headers,
@@ -185,6 +334,6 @@ async def fetch_report(platform: str, account_id: str, credentials: dict, client
                 raise ValueError("Incomplete metrics")
     report = {"platform": platform, "account_id": account_id, "start": str(start), "end": str(end),
               "metrics": metrics, "source": "provider", "reporting_note": "Provider-defined reporting dates; recent days may be delayed. No cross-account deduplication."}
-    if platform == "ga4":
+    if platform in {"ga4", "gsc"}:
         report["breakdowns"] = breakdowns
     return report

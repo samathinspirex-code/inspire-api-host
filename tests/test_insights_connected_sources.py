@@ -1,15 +1,17 @@
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import date, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.modules.insights import meta as meta_module
 
 import httpx
 import pytest
 
 from app.core.errors import ValidationError
 from app.modules.connectors import providers, registry
-from app.modules.insights import service as insights, studio_data
-from app.modules.insights.website import ga4_events, latest_report, visitors_view
+from app.modules.insights import finance as finance_module, lms as lms_module, service as insights, studio_data
+from app.modules.insights.website import ga4_events, latest_report, search_view, visitors_view
 from app.modules.insights.whatsapp import context_line, summarize
 
 
@@ -58,11 +60,13 @@ def test_whatsapp_platform_status_comes_from_handovers():
     assert status(summarize([], {}, NOW)) == "Waiting for first handover"
 
 
-def test_whatsapp_channel_row_is_live_and_other_rows_stay_demo():
-    rows = insights._channels(summarize([lead(reply_minutes=5)], {}, NOW))
-    row = next(item for item in rows if item["name"] == "WhatsApp Business")
-    assert row["live"] and row["leads"] == 1 and row["spend"] == 0 and sum(row["trend"]) == 1
-    assert next(item for item in rows if item["name"] == "Meta Ads")["source"] == "demo"
+def test_crm_backed_channel_rows_are_live_and_other_rows_stay_demo():
+    live = {"WhatsApp Business": {"spend": 0, "leads": 319, "enrolled": 4, "source": "cms", "live": True, "trend": [1] * 8},
+            "Website & SEO": {"spend": 0, "leads": 97, "enrolled": 2, "source": "cms", "live": True, "trend": [1] * 8}}
+    rows = {item["name"]: item for item in insights._channels(live)}
+    assert rows["WhatsApp Business"]["leads"] == 319 and rows["WhatsApp Business"]["spend"] == 0
+    assert rows["Website & SEO"]["live"] and rows["Website & SEO"]["spend"] == 0
+    assert rows["Meta Ads"]["source"] == "demo" and len(rows) == 10
 
 
 def ga4_account(**report):
@@ -204,17 +208,23 @@ SNAP = {
 GOAL = {"target": 1000, "start": datetime(2026, 1, 1).date(), "end": datetime(2027, 6, 30).date()}
 
 
-def pages(site):
+FINANCE_ROW = {"demo_data": False, "invoices": 10, "payments": 6, "open_invoices": 4, "outstanding": 1500000, "overdue_7d": 2, "overdue_amount": 400000, "due_invoices": 8, "paid_on_time": 6, "collected_30d": 90000}
+FINANCE_EMPTY = finance_module.summarize({**dict.fromkeys(FINANCE_ROW, 0), "demo_data": False}, "sandbox")
+LMS_DATA = lms_module.summarize({"records": 100, "present": 70, "records_30d": 40, "present_30d": 30, "sessions_30d": 4, "enrolments": 50, "withdrawn": 5, "enrolled_students": 40, "active_30d": 30},
+                                [{"intake": "Oct 2026", "students": 2, "cells": [100, 50]}])
+
+
+def pages(site, finance=None, meta=None, email=False):
     bot = summarize([lead(1, reply_minutes=10), lead(2, counsellor=None)], {"student": 1, "counsellor": 1}, datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=3))
     crm = {"source_flow": {"total": 0, "outcomes": [], "sources": []}, "source_programme": {"programmes": [], "rows": []},
-           "counsellor_source": {"sources": [], "rows": []}, "whatsapp_numbers": {7: "+94 77 123 4567"}, "tracked_people": [],
+           "counsellor_source": {"sources": [], "rows": []}, "channel_counts": {}, "whatsapp_numbers": {7: "+94 77 123 4567"}, "tracked_people": [],
            "referral_summary": {"funnel": {"leads": 0, "contacted": 0, "counselled": 0, "enrolled": 0}, "codes": [], "invites": []}}
     patches = [patch.object(studio_data, name, AsyncMock(return_value=value)) for name, value in crm.items()]
     for item in patches:
         item.start()
     try:
         with patch.object(insights, "load_snapshot", AsyncMock(return_value=SNAP)), patch.object(insights, "get_mission", AsyncMock(return_value=GOAL)), \
-                patch.object(insights, "load_whatsapp", AsyncMock(return_value=bot)), patch.object(insights, "_website", AsyncMock(return_value=site)):
+                patch.object(insights, "load_meta", AsyncMock(return_value=meta)), patch.object(insights, "_email_connected", AsyncMock(return_value=email)), patch.object(insights, "load_finance", AsyncMock(return_value=finance or FINANCE_EMPTY)), patch.object(insights, "load_lms", AsyncMock(return_value=LMS_DATA)), patch.object(insights, "load_whatsapp", AsyncMock(return_value=bot)), patch.object(insights, "_website", AsyncMock(return_value=site)), patch.object(insights, "_search", AsyncMock(return_value=None)):
             return {
                 "dashboard": run(insights.dashboard(None, None)), "command": run(insights.command_centre(None, None, 30)),
                 "metrics": run(insights.metrics(None, None)), "brain": run(insights.brain(None, None)),
@@ -259,3 +269,157 @@ def test_city_persona_mix_comes_from_pages_read_in_that_city():
     assert [row["city"] for row in cities] == ["Kandy", "Doha"]
     assert cities[0]["lat"] and cities[1]["lat"] is None
     assert cities[0]["s"] == 60 and cities[1]["p"] == 31
+
+
+def test_lms_figures_replace_demo_retention_and_attendance():
+    data = pages(None)["metrics"]
+    nodes = {node["id"]: node for node in data["tree"]}
+    assert nodes["att"]["value"] == "75.0%" and nodes["att"]["source"] == "LMS"
+    assert nodes["ret"]["value"] == "90.0% (dropout 10.0%)"
+    tile = next(item for item in data["tiles"] if item["label"] == "Dropout ratio")
+    assert tile["value"] == "10.0%" and tile["source"] == "LMS"
+    assert data["cohorts"] == LMS_DATA["cohorts"] and data["cohorts_source"] == "cms"
+    brain = pages(None)["brain"]
+    assert not any("stated" in item["note"] for item in brain["predictions"])
+
+
+def test_lms_summary_invents_nothing_when_empty():
+    empty = lms_module.summarize(dict.fromkeys(("records", "present", "records_30d", "present_30d", "sessions_30d", "enrolments", "withdrawn", "enrolled_students", "active_30d"), 0), [])
+    assert empty["attendance"] is None and empty["dropout"] is None and empty["inactive_share"] is None and not empty["connected"]
+    assert "no attendance records" in lms_module.context_line(empty)
+
+
+def test_cohort_cells_are_measured_per_intake():
+    from datetime import date
+    rows = lms_module.build_cohorts([(1, date(2026, 9, 1)), (2, date(2026, 9, 1)), (3, date(2026, 11, 1))],
+                                    [(1, date(2026, 9, 1)), (2, date(2026, 9, 1)), (1, date(2026, 10, 1))], date(2026, 11, 3))
+    assert rows[0] == {"intake": "Sep 2026", "students": 2, "cells": [100, 50, 0]}
+    assert rows[1] == {"intake": "Nov 2026", "students": 1, "cells": [0]}
+
+
+def test_brain_platform_status_comes_from_lms_records():
+    def status(**counts):
+        base = dict.fromkeys(("records", "present", "records_30d", "present_30d", "sessions_30d", "enrolments", "withdrawn", "enrolled_students", "active_30d"), 0)
+        return next(p for p in registry.platforms_for([], None, lms_module.summarize({**base, **counts}, [])) if p["id"] == "brain")["status"]
+    assert status(records=5, records_30d=5) == "Receiving data"
+    assert status(records=5) == "No recent activity"
+    assert status() == "Not connected"
+
+
+def test_search_view_shows_real_figures_and_short_page_paths():
+    row = {"clicks": 3, "impressions": 90, "ctr": 0.033, "position": 7.2}
+    account = {"platform": "gsc", "account_id": "https://inspirecollege.lk/", "last_synced_at": datetime.now(timezone.utc).isoformat(), "report": {
+        "start": "2026-10-05", "end": "2026-11-03", "metrics": {"clicks": 10, "impressions": 500, "ctr": 0.02, "position": 11.26},
+        "breakdowns": {"queries": [{"name": "inspire college", **row}], "pages": [{"name": "https://inspirecollege.lk/programs/hnd", **row}, {"name": "https://inspirecollege.lk/", **row}]}}}
+    view = search_view(account)
+    assert (view["clicks"], view["ctr"], view["position"]) == (10, 2.0, 11.3)
+    assert [page["name"] for page in view["pages"]] == ["/programs/hnd", "/"]
+    assert search_view(None) is None
+
+
+def test_payments_ledger_replaces_demo_fee_figures():
+    data = pages(None, finance_module.summarize(FINANCE_ROW, "sandbox"))
+    outstanding = next(item for item in data["dashboard"]["kpis"] if item["label"] == "Outstanding")
+    assert outstanding["value"] == "LKR 1.5M" and outstanding["source"] == "cms"
+    overdue = next(item for item in data["dashboard"]["pending"] if "overdue" in item["label"])
+    assert overdue["count"] == 2 and overdue["source"] == "cms"
+    tiles = {tile["label"]: tile for tile in data["metrics"]["tiles"]}
+    assert tiles["Outstanding fees"]["source"] == "Payments" and tiles["Payments on time"]["value"] == "75.0%"
+    assert next(node for node in data["metrics"]["tree"] if node["id"] == "pay")["value"] == "75.0%"
+    assert next(item for item in data["brain"]["datasets"] if item["key"] == "finance")["source"] == "Payments"
+    assert not any("(demo)" in signal["detail"] for signal in data["brain"]["signals"] if signal["key"] == "finance")
+
+
+def test_empty_ledger_shows_real_zero_not_demo():
+    data = pages(None)
+    assert next(item for item in data["dashboard"]["kpis"] if item["label"] == "Outstanding")["value"] == "LKR 0"
+    assert next(item for item in data["dashboard"]["pending"] if "overdue" in item["label"])["count"] == 0
+    assert next(tile for tile in data["metrics"]["tiles"] if tile["label"] == "Payments on time")["value"] == "—"
+    assert "not that fees are fully collected" in finance_module.context_line(FINANCE_EMPTY)
+
+
+def test_demo_ledger_or_missing_schema_keeps_figures_labelled_demo():
+    assert finance_module.summarize({**FINANCE_ROW, "demo_data": True}, "sandbox")["live"] is False
+    assert finance_module.summarize(None, "sandbox")["live"] is False
+    data = pages(None, {"live": False, "mode": "sandbox"})
+    outstanding = next(item for item in data["dashboard"]["kpis"] if item["label"] == "Outstanding")
+    assert outstanding["value"] == "LKR 4.2M" and outstanding["source"] == "demo"
+
+
+def test_payhere_status_never_claims_live_in_sandbox():
+    def status(**extra):
+        finance = {**finance_module.summarize(FINANCE_ROW, "sandbox"), **extra}
+        return next(p for p in registry.platforms_for([], None, None, finance) if p["id"] == "payhere")["status"]
+    assert status() == "Ledger linked · sandbox"
+    assert status(mode="live") == "Receiving data"
+    assert status(mode="live", payments=0) == "Connected · live"
+
+
+def meta_account_row(spend=100.0, currency="LKR", synced=None):
+    days = [{"date": f"2026-10-{day:02d}", "spend": 10.0, "clicks": 1.0, "leads": 2.0 if day <= 7 else 1.0} for day in range(1, 31)]
+    return {"platform": "meta", "name": "Inspire", "last_synced_at": (synced or datetime.now(timezone.utc)).isoformat(), "report": {
+        "account_id": "123", "start": "2026-10-01", "end": "2026-10-30", "currency": currency, "warnings": ["Unsettled"],
+        "metrics": {"spend": spend, "reach": 80.0, "impressions": 90.0, "link_clicks": 30.0, "leads": 37.0, "conversations": 50.0},
+        "breakdowns": {"days": days, "campaigns": [{"name": "A", "spend": spend, "impressions": 90.0, "reach": 80.0, "clicks": 30.0, "landing_views": 1.0, "leads": 37.0, "conversations": 50.0, "website_leads": 0.0}],
+                       "people": [{"age": "18-24", "gender": "male", "spend": 60.0, "leads": 20.0}, {"age": "18-24", "gender": "female", "spend": 30.0, "leads": 15.0}, {"age": "Unknown", "gender": "unknown", "spend": 10.0, "leads": 2.0}],
+                       "regions": [{"name": "Western Province", "spend": 90.0, "clicks": 20.0, "leads": 30.0}, {"name": "Unknown", "spend": 10.0, "clicks": 1.0, "leads": 0.0}]}}}
+
+
+def test_meta_view_matches_the_studio_shape_and_never_mixes_currencies():
+    usd = meta_account_row(spend=9999.0, currency="USD")
+    lkr = meta_account_row()
+    assert meta_module.meta_account([usd]) is None
+    assert meta_module.meta_account([usd, lkr]) is lkr
+    view = meta_module.meta_view(lkr)
+    assert view["live"] is True and view["stale"] is False and view["leads"] == 37
+    assert view["men_leads"][0] == 20 and view["women_spend"][0] == 30 and view["unknown_leads"] == 2
+    assert view["regions"] == {"Western": {"spend": 90.0, "clicks": 20.0, "leads": 30.0}}
+    assert view["days"][0] == "10-01" and sum(view["cost"]) == 300
+    assert meta_module.weekly_leads(view) == [12, 7, 7, 7]  # full weeks only, counted back from the latest day
+    assert meta_module.cpl_weeks(view) == (5, 10)
+
+
+def test_old_meta_report_is_marked_stale():
+    view = meta_module.meta_view(meta_account_row(synced=datetime.now(timezone.utc) - timedelta(days=9)))
+    assert view["stale"] is True
+
+
+def test_live_meta_replaces_every_meta_sample():
+    view = {**meta_module.meta_view(meta_account_row()), "crm": {"leads": 30, "contacted": 20, "enrolled": 4}}
+    data = pages(None, meta=view)
+    tiles = {tile["label"]: tile for tile in data["metrics"]["tiles"]}
+    assert tiles["Meta spend · 30d"]["source"] == "Meta" and tiles["Meta cost per lead"]["source"] == "Meta"
+    assert tiles["Meta cost per lead"]["delta"] == "last 30 days"
+    assert next(node for node in data["metrics"]["tree"] if node["id"] == "paid")["source"] == "Meta"
+    assert data["overview"]["meta"]["live"] is True and data["overview"]["meta_info"]["account"] == "Inspire"
+    row = next(item for item in data["channels"]["channels"] if item["name"] == "Meta Ads")
+    assert row["source"] == "connector" and row["live"] is True and row["enrolled"] == 4 and row["spend"] == 100
+    assert data["lab"]["meta_campaigns"][0]["name"] == "A"
+    assert next(item for item in data["brain"]["datasets"] if item["key"] == "meta")["source"] == "Meta"
+    signal = next(item for item in data["brain"]["signals"] if item["key"] == "meta")
+    assert "demo" not in signal["detail"]
+    assert not any("demo" in " ".join(item["sources"]).lower() for item in data["lab"]["recommendations"])
+    assert "Unsettled" in meta_module.summary(view) and "not counted as leads" in meta_module.summary(view)
+
+
+def test_without_meta_the_samples_stay_labelled_demo():
+    data = pages(None)
+    assert next(tile for tile in data["metrics"]["tiles"] if tile["label"] == "Meta spend · 30d")["source"] == "Demo"
+    assert data["overview"]["meta_info"]["live"] is False
+    assert next(item for item in data["channels"]["channels"] if item["name"] == "Meta Ads")["source"] == "demo"
+
+
+def test_meta_crm_query_binds_real_dates():
+    # asyncpg rejects text for a date parameter, which took every dashboard down once Meta had synced.
+    result = MagicMock()
+    result.mappings.return_value.first.return_value = {"leads": 3, "contacted": 2, "enrolled": 1}
+    db = MagicMock(execute=AsyncMock(return_value=result))
+    assert run(meta_module.crm_results(db, {"start": "2026-10-05", "end": "2026-11-03"})) == {"leads": 3, "contacted": 2, "enrolled": 1}
+    params = db.execute.await_args.args[1]
+    assert params["start"] == date(2026, 10, 5) and params["end"] == date(2026, 11, 3)
+
+
+def test_connected_mailjet_removes_the_email_samples():
+    assert next(item for item in pages(None)["channels"]["channels"] if item["name"] == "Email")["source"] == "demo"
+    row = next(item for item in pages(None, email=True)["channels"]["channels"] if item["name"] == "Email")
+    assert row["source"] == "connector" and row["live"] is True and (row["spend"], row["leads"], row["enrolled"]) == (0, 0, 0)
