@@ -101,6 +101,7 @@ class StudentAcademicClass(BaseModel):
 
 class StudentAcademicAssessment(BaseModel):
     grading_mode: str = "bands"
+    uses_rubric: bool = False
     assessment_id: int
     kind: str
     submission_type: str | None = None

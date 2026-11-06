@@ -14,6 +14,11 @@ def is_athe(assignment) -> bool:
     return bool(getattr(assignment, "is_athe", False))
 
 
+def uses_rubric(assignment) -> bool:
+    """ATHE written work is marked on the rubric, where a fail band is shown as "Resubmission"."""
+    return is_athe(assignment) and getattr(assignment, "submission_type", None) != "mcq"
+
+
 async def load_assignment_grading_modes(db: AsyncSession, assignments) -> None:
     """Resolve class-specific awarding bodies without changing stored scores."""
     assignments = list(assignments)

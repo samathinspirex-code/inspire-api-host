@@ -201,7 +201,7 @@ GRADE_FILLS = {
     "Distinction": "FFC6EFCE",
     "Merit": "FFDDEBF7",
     "Pass": "FFE2F0D9",
-    "Not Yet Achieved": "FFFCE4D6",
+    "Resubmission": "FFFCE4D6",
 }
 COLUMN_WIDTHS = {"A": 29.86, "B": 36.0, "C": 18.0, "D": 23.57, "E": 54.0, "F": 18.0, "G": 88.0}
 THIN = Side(style="thin", color="FFBFBFBF")

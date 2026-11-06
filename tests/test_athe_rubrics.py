@@ -61,7 +61,7 @@ class RubricGradingTests(unittest.TestCase):
 
     def test_missing_pass_locks_merit_and_is_not_yet_achieved(self):
         summary = compute_rubric_grade(CRITERIA, results(not_achieved={"2.2"}))
-        self.assertEqual(summary["overall_grade"], "Not Yet Achieved")
+        self.assertEqual(summary["overall_grade"], "Resubmission")
         self.assertEqual(summary["all_merit"], "Locked")
         self.assertEqual(grade_band(summary["overall_grade"]), "fail")
         lo2 = next(row for row in summary["groups"] if row["lo_code"] == "LO2")
