@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
 from app.modules.lms.coursework_service import _assignment_item, _ensure_lecturer_course, grade_band_for_score
-from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes
+from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes, uses_rubric
 from app.modules.lms.models import (
     ClassStudent,
     CourseEnrollment,
@@ -145,6 +145,7 @@ async def lecturer_gradebook(
                 graded_count += 1
             results.append(GradebookResultItem(
                 grading_mode=grading_mode(assignment),
+                uses_rubric=uses_rubric(assignment),
                 assignment_id=assignment.assignment_id,
                 title=assignment.title,
                 submission_type=assignment.submission_type,
@@ -215,6 +216,7 @@ async def lecturer_gradebook(
 
 async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesResponse:
     rows = await CourseworkRepository(db).list_for_student(user_id, include_exams=True)
+    await load_assignment_grading_modes(db, [assignment for assignment, *_ in rows])
     practice_assignment_ids = set((await db.execute(
         select(LmsExam.assignment_id).where(LmsExam.assessment_kind == "practice_test")
     )).scalars().all())
@@ -231,6 +233,7 @@ async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesRespons
         group["possible"] += Decimal(assignment.max_marks)
         group["grades"].append(StudentGradeItem(
             grading_mode=grading_mode(assignment),
+            uses_rubric=uses_rubric(assignment),
             assignment_id=assignment.assignment_id,
             title=assignment.title,
             submission_type=assignment.submission_type,

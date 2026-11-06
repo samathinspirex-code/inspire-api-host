@@ -15,7 +15,7 @@ from app.modules.cms.models import MediaAsset, Program
 from app.modules.cms.schemas import MediaUploadRequest, MediaUploadTicket
 from app.modules.lms import content_service
 from app.modules.lms.coursework_service import grade_band_for_score
-from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes
+from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes, uses_rubric
 from app.modules.lms.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -652,6 +652,7 @@ async def get_student_academic_profile(
         marks = submission.marks_awarded if submission and visible else None
         assignments.append(StudentAcademicAssessment(
             grading_mode=grading_mode(assignment),
+            uses_rubric=uses_rubric(assignment),
             assessment_id=assignment.assignment_id, kind="assignment", submission_type=assignment.submission_type, title=assignment.title,
             course_code=course_map[assignment.course_id].code,
             course_title=course_map[assignment.course_id].title,

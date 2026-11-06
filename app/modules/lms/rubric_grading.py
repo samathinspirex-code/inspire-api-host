@@ -3,7 +3,7 @@
 * Pass: every Pass criterion is achieved.
 * Merit: every Pass and every Merit criterion is achieved ("Locked" until all Pass criteria are met).
 * Distinction: every Pass, Merit and Distinction criterion is achieved ("Locked" until all Merit criteria are met).
-* Otherwise "Not Yet Achieved".
+* Otherwise "Resubmission" (ATHE calls this "Not Yet Achieved").
 
 A level that has no criteria in the rubric is "N/A" and does not block the next level.
 The LMS-UI copy of these rules lives in LMS-UI/src/grading.js (computeRubricGrade) and must stay identical.
@@ -12,9 +12,10 @@ from collections import OrderedDict
 
 LEVELS = ("pass", "merit", "distinction")
 LEVEL_LABELS = {"pass": "Pass", "merit": "Merit", "distinction": "Distinction"}
-NOT_YET_ACHIEVED = "Not Yet Achieved"
+NOT_YET_ACHIEVED = "Resubmission"
+LEGACY_NOT_YET_ACHIEVED = ("Not Yet Achieved", "Fail")  # stored by forms completed before the rename
 OVERALL_GRADES = ("Distinction", "Merit", "Pass", NOT_YET_ACHIEVED)
-GRADE_TO_BAND = {"Distinction": "distinction", "Merit": "merit", "Pass": "pass", NOT_YET_ACHIEVED: "fail"}
+GRADE_TO_BAND = {"Distinction": "distinction", "Merit": "merit", "Pass": "pass", NOT_YET_ACHIEVED: "fail", **{label: "fail" for label in LEGACY_NOT_YET_ACHIEVED}}
 
 ACHIEVED = "Achieved"
 NOT_YET = "Not yet"
@@ -128,3 +129,8 @@ def compute_rubric_grade(criteria, results) -> dict:
 
 def grade_band(overall_grade: str | None) -> str | None:
     return GRADE_TO_BAND.get(overall_grade or "")
+
+
+def display_grade(overall_grade: str | None) -> str | None:
+    """Shows older "Not Yet Achieved" / "Fail" results as Resubmission."""
+    return NOT_YET_ACHIEVED if overall_grade in LEGACY_NOT_YET_ACHIEVED else overall_grade

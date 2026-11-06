@@ -140,6 +140,7 @@ class GradeReleaseUpdate(BaseModel):
 
 class GradebookResultItem(BaseModel):
     grading_mode: Literal["marks", "bands"] = "bands"
+    uses_rubric: bool = False
     assignment_id: int
     title: str
     submission_type: str = "written"
@@ -199,6 +200,7 @@ class LecturerGradebookResponse(BaseModel):
 
 class StudentGradeItem(BaseModel):
     grading_mode: Literal["marks", "bands"] = "bands"
+    uses_rubric: bool = False
     assignment_id: int
     title: str
     submission_type: str = "written"

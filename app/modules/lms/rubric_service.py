@@ -28,7 +28,7 @@ from app.modules.lms.models import (
     StudentProfile,
 )
 from app.modules.lms.repository import CourseworkRepository
-from app.modules.lms.rubric_grading import compute_rubric_grade, grade_band
+from app.modules.lms.rubric_grading import compute_rubric_grade, display_grade, grade_band
 from app.modules.lms.schemas.rubric import (
     AssignmentRubricItem,
     AssignmentRubricWrite,
@@ -411,7 +411,7 @@ def _form_item(form: LmsRubricAssessment | None, submission_id: int, role: str, 
         overall_comment=form.overall_comment,
         resubmission=form.resubmission,
         assessment_date=form.assessment_date,
-        overall_grade=form.overall_grade,
+        overall_grade=display_grade(form.overall_grade),
         grade_summary=form.grade_summary,
         status=form.status,
         completed_at=form.completed_at,
@@ -581,9 +581,9 @@ async def overview(db: AsyncSession, assignment_id: int, user_id: int) -> Rubric
             is_late=cw.submission_is_late(submission, assignment.due_at),
             needs_marking=needs,
             first_status=(first.status if first else "not_started") if show_first or role == "viewer" else None,
-            first_grade=first.overall_grade if first and show_first else None,
+            first_grade=display_grade(first.overall_grade) if first and show_first else None,
             second_status=(second.status if second else "not_started") if (show_second or (role == "viewer" and rubric.second_assessor_user_id)) else None,
-            second_grade=second.overall_grade if second and show_second else None,
+            second_grade=display_grade(second.overall_grade) if second and show_second else None,
         ))
     to_mark = [row for row in rows if row.needs_marking]
 
@@ -665,7 +665,7 @@ def _form_dict(rubric: LmsAssignmentRubric, form: LmsRubricAssessment | None, le
         "first_assessor": _person_name(people.get(rubric.first_assessor_user_id)),
         "second_assessor": _person_name(people.get(rubric.second_assessor_user_id)),
         "assessment_date": form.assessment_date if form else None,
-        "overall_grade": form.overall_grade if form else None,
+        "overall_grade": display_grade(form.overall_grade) if form else None,
         "criteria": criteria,
         "actions_needed": form.actions_needed if form else "",
         "overall_comment": form.overall_comment if form else "",
