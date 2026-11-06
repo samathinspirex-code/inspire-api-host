@@ -12,6 +12,7 @@ from app.modules.auth.models import User
 from app.modules.lms.coursework_service import as_utc, grade_band_for_score, remaining_seconds, utc_now, _ensure_lecturer_course, _ensure_student_target
 from app.modules.lms.gradebook_service import percentage
 from app.modules.lms.models import (
+    ClassLecturer,
     CourseEnrollment,
     ClassStudent,
     LmsClass,

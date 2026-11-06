@@ -6,7 +6,7 @@ from io import StringIO
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
 from app.modules.lms.coursework_service import _assignment_item, _ensure_lecturer_course, grade_band_for_score
 from app.modules.lms.assessment_grading import grading_mode, load_assignment_grading_modes
@@ -269,6 +269,13 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
     if assignment is None:
         raise NotFoundError("Assignment not found")
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if assignment.submission_type != "mcq":
+        from app.modules.lms import rubric_service
+        rubric = await rubric_service.get_assignment_rubric(db, assignment_id)
+        if rubric is not None and released:
+            await rubric_service.ensure_release_allowed(db, assignment, user_id)
+        elif rubric is not None and not await rubric_service.can_manage_release(db, rubric, user_id):
+            raise ForbiddenError("Only the 1st assessor or an admin can change the release of rubric results")
     if released and assignment.submission_type == "mcq":
         submissions = list((await db.execute(
             select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment_id)

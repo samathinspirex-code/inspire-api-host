@@ -6,6 +6,14 @@ def grading_mode(assignment) -> str:
     return getattr(assignment, "grading_mode", "bands")
 
 
+def is_athe_body(awarding_body) -> bool:
+    return "athe" in str(awarding_body or "").casefold()
+
+
+def is_athe(assignment) -> bool:
+    return bool(getattr(assignment, "is_athe", False))
+
+
 async def load_assignment_grading_modes(db: AsyncSession, assignments) -> None:
     """Resolve class-specific awarding bodies without changing stored scores."""
     assignments = list(assignments)
@@ -29,3 +37,5 @@ async def load_assignment_grading_modes(db: AsyncSession, assignments) -> None:
         body, kind = bodies.get(item.assignment_id, ("", None))
         cpd_assignment = str(body or "").strip().casefold() == "cpd" and kind not in {"exam", "practice_test"}
         item.grading_mode = "marks" if cpd_assignment else "bands"
+        item.awarding_body = str(body or "").strip()
+        item.is_athe = is_athe_body(body) and kind not in {"exam", "practice_test"}
