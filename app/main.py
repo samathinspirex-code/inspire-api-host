@@ -47,6 +47,7 @@ app.add_middleware(
     allow_origin_regex=r"https://([a-z0-9-]+\.)?inspirecollege\.lk",
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 

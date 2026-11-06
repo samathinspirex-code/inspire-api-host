@@ -19,13 +19,13 @@ MAX_EXCEL_BYTES = 2_000_000
 MAX_EXPANDED_BYTES = 8_000_000
 
 
-def _check_archive(data: bytes):
+def _check_archive(data: bytes, table_label: str = "student table"):
     if not data or len(data) > MAX_EXCEL_BYTES:
         raise ValidationError("Excel files must be .xlsx and at most 2 MB.")
     with ZipFile(io.BytesIO(data)) as archive:
         entries = archive.infolist()
         if len(entries) > 200 or sum(entry.file_size for entry in entries) > MAX_EXPANDED_BYTES:
-            raise ValidationError("This workbook is too complex. Copy the student table to a new .xlsx workbook.")
+            raise ValidationError(f"This workbook is too complex. Copy the {table_label} to a new .xlsx workbook.")
         if len({entry.filename for entry in entries}) != len(entries):
             raise ValidationError("This workbook contains duplicate archive entries. Save a fresh .xlsx copy.")
         for entry in entries:

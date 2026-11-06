@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -36,6 +36,23 @@ from app.modules.lms import dashboard_service
 from app.modules.lms import vimeo_service
 from app.modules.lms import zoom_service
 from app.modules.lms import zoom_cleanup_service
+from app.modules.lms import rubric_excel
+from app.modules.lms import rubric_service
+from app.modules.lms.schemas.coursework import CourseworkReviewSummaryResponse
+from app.modules.lms.schemas.rubric import (
+    AssignmentRubricItem,
+    AssignmentRubricWrite,
+    ClassRubricContext,
+    RubricAssessmentWrite,
+    RubricMarkingResponse,
+    RubricOverviewResponse,
+    RubricTemplateDraft,
+    RubricTemplateItem,
+    RubricTemplateListResponse,
+    RubricTemplateUpdate,
+    RubricTemplateWrite,
+    StudentRubricFeedback,
+)
 from app.modules.lms.schemas.dashboard import AdminDashboardResponse, StudentPopulationResponse
 from app.modules.cms import media_service
 from app.modules.cms.schemas import MediaAssetResponse, MediaUploadRequest, MediaUploadTicket
@@ -332,6 +349,17 @@ async def list_coursework_assignments(
     )
 
 
+@router.get("/coursework/review-summary", response_model=CourseworkReviewSummaryResponse)
+async def coursework_review_summary(
+    class_id: int = Query(..., gt=0),
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseworkReviewSummaryResponse:
+    return await coursework_service.review_summary(
+        db, current_user.user_id, service.resolve_role(current_user.access), class_id,
+    )
+
+
 @router.post("/coursework/assignments", response_model=CourseworkAssignmentItem)
 async def create_coursework_assignment(
     payload: CourseworkAssignmentCreate,
@@ -518,6 +546,195 @@ async def export_lecturer_gradebook(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="gradebook-{report.course_code}-{date.today().isoformat()}.csv"'},
     )
+
+
+# --------------------------------------------------------------------------- ATHE marking rubrics
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _attachment(content: bytes, file_name: str, media_type: str) -> Response:
+    ascii_name = file_name.encode("ascii", "ignore").decode().replace('"', "") or "download"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8''{quote(file_name)}',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/rubric-templates", response_model=RubricTemplateListResponse)
+async def list_rubric_templates(
+    include_archived: bool = Query(False),
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricTemplateListResponse:
+    return await rubric_service.list_templates(db, current_user.user_id, include_archived)
+
+
+@router.post("/rubric-templates", response_model=RubricTemplateItem)
+async def create_rubric_template(
+    payload: RubricTemplateWrite,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricTemplateItem:
+    return await rubric_service.create_template(db, payload, current_user.user_id)
+
+
+@router.post("/rubric-templates/import", response_model=RubricTemplateDraft)
+async def import_rubric_template(
+    request: Request,
+    file_name: str | None = Query(None, max_length=255),
+    current_user: CurrentUser = Depends(lecturer_access),
+) -> RubricTemplateDraft:
+    if request.headers.get("content-type", "").split(";")[0] != XLSX_MEDIA_TYPE:
+        raise APIError(415, "UNSUPPORTED_FILE", "Upload an Excel .xlsx file.")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > MAX_EXCEL_BYTES:
+            raise APIError(413, "FILE_TOO_LARGE", "Excel files must be at most 2 MB.")
+        data.extend(chunk)
+    draft = await run_in_threadpool(rubric_excel.parse_rubric_workbook, bytes(data), file_name)
+    return RubricTemplateDraft(**draft)
+
+
+@router.get("/rubric-templates/{template_id}", response_model=RubricTemplateItem)
+async def get_rubric_template(
+    template_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricTemplateItem:
+    return await rubric_service.get_template(db, template_id, current_user.user_id)
+
+
+@router.patch("/rubric-templates/{template_id}", response_model=RubricTemplateItem)
+async def update_rubric_template(
+    template_id: int,
+    payload: RubricTemplateUpdate,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricTemplateItem:
+    return await rubric_service.update_template(db, template_id, payload, current_user.user_id)
+
+
+@router.delete("/rubric-templates/{template_id}", status_code=204)
+async def delete_rubric_template(
+    template_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await rubric_service.delete_template(db, template_id, current_user.user_id)
+    return Response(status_code=204)
+
+
+@router.get("/classes/{class_id}/rubric-context", response_model=ClassRubricContext)
+async def get_class_rubric_context(
+    class_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ClassRubricContext:
+    return await rubric_service.class_rubric_context(db, class_id, current_user.user_id)
+
+
+@router.get("/coursework/assignments/{assignment_id}/rubric", response_model=AssignmentRubricItem | None)
+async def get_assignment_rubric(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentRubricItem | None:
+    return await rubric_service.get_rubric(db, assignment_id, current_user.user_id)
+
+
+@router.put("/coursework/assignments/{assignment_id}/rubric", response_model=AssignmentRubricItem)
+async def attach_assignment_rubric(
+    assignment_id: int,
+    payload: AssignmentRubricWrite,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentRubricItem:
+    return await rubric_service.attach_rubric(db, assignment_id, payload, current_user.user_id)
+
+
+@router.delete("/coursework/assignments/{assignment_id}/rubric", status_code=204)
+async def remove_assignment_rubric(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await rubric_service.remove_rubric(db, assignment_id, current_user.user_id)
+    return Response(status_code=204)
+
+
+@router.get("/coursework/assignments/{assignment_id}/rubric/overview", response_model=RubricOverviewResponse)
+async def get_assignment_rubric_overview(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricOverviewResponse:
+    return await rubric_service.overview(db, assignment_id, current_user.user_id)
+
+
+@router.get("/coursework/assignments/{assignment_id}/rubric/export-all")
+async def export_all_rubric_forms(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    file_name, content = await rubric_service.export_all(db, assignment_id, current_user.user_id)
+    return _attachment(content, file_name, "application/zip")
+
+
+@router.get("/coursework/submissions/{submission_id}/rubric", response_model=RubricMarkingResponse)
+async def get_submission_rubric_forms(
+    submission_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricMarkingResponse:
+    return await rubric_service.get_marking(db, submission_id, current_user.user_id)
+
+
+@router.put("/coursework/submissions/{submission_id}/rubric-assessments/{form_role}", response_model=RubricMarkingResponse)
+async def save_submission_rubric_form(
+    submission_id: int,
+    form_role: Literal["first", "second"],
+    payload: RubricAssessmentWrite,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> RubricMarkingResponse:
+    return await rubric_service.save_assessment(db, submission_id, form_role, payload, current_user.user_id)
+
+
+@router.get("/coursework/submissions/{submission_id}/rubric-assessments/{form_role}/export")
+async def export_submission_rubric_form(
+    submission_id: int,
+    form_role: Literal["first", "second"],
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    file_name, content = await rubric_service.export_assessment(db, submission_id, form_role, current_user.user_id)
+    return _attachment(content, file_name, XLSX_MEDIA_TYPE)
+
+
+@router.get("/my/coursework/assignments/{assignment_id}/feedback", response_model=StudentRubricFeedback)
+async def get_my_rubric_feedback(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentRubricFeedback:
+    return await rubric_service.student_feedback(db, assignment_id, current_user.user_id)
+
+
+@router.get("/my/coursework/assignments/{assignment_id}/feedback/export")
+async def export_my_rubric_feedback(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    file_name, content = await rubric_service.student_feedback_export(db, assignment_id, current_user.user_id)
+    return _attachment(content, file_name, XLSX_MEDIA_TYPE)
 
 
 @router.get("/my/grades", response_model=StudentGradesResponse)

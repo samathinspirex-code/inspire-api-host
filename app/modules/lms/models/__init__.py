@@ -35,6 +35,12 @@ from app.modules.lms.models.coursework import LmsCourseworkAssignment, LmsCourse
 from app.modules.lms.models.exam import LmsExam, LmsExamAnswer, LmsExamAttempt, LmsExamQuestion
 from app.modules.lms.models.template_bank import LmsAssessmentTemplate, LmsAssessmentTemplateQuestion
 from app.modules.lms.models.notification import LmsAnnouncement, LmsNotification
+from app.modules.lms.models.rubric import (
+    LmsAssignmentRubric,
+    LmsRubricAssessment,
+    LmsRubricTemplate,
+    LmsRubricTemplateCriterion,
+)
 
 __all__ = [
     "ClassLecturer",
@@ -76,4 +82,8 @@ __all__ = [
     "LmsAssessmentTemplateQuestion",
     "LmsAnnouncement",
     "LmsNotification",
+    "LmsAssignmentRubric",
+    "LmsRubricAssessment",
+    "LmsRubricTemplate",
+    "LmsRubricTemplateCriterion",
 ]

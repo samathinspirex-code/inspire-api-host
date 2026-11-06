@@ -77,6 +77,8 @@ class CourseworkAssignmentItem(BaseModel):
     grade_band: str | None = None
     feedback: str | None = None
     exam_id: int | None = None
+    is_athe: bool = False
+    has_rubric: bool = False
     answer_text: str | None = None
     attachment_asset_id: int | None = None
     attachment_url: str | None = None
@@ -226,3 +228,17 @@ class StudentGradesResponse(BaseModel):
     overall_percentage: float
     released_assignments: int
     courses: list[StudentCourseGrade]
+
+
+class AssignmentSubmissionCounts(BaseModel):
+    assignment_id: int
+    submitted: int = 0
+    to_mark: int = 0
+    marked: int = 0
+    in_progress: int = 0
+
+
+class CourseworkReviewSummaryResponse(BaseModel):
+    """Assignments plus submission counts in one request, for the Assessment Review page."""
+    data: list[CourseworkAssignmentItem]
+    counts: list[AssignmentSubmissionCounts]

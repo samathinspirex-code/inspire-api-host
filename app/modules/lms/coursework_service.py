@@ -29,7 +29,8 @@ from app.modules.lms.schemas import (
     CourseworkSubmissionListResponse,
 )
 from app.modules.lms import notification_service
-from app.modules.lms.assessment_grading import grading_mode
+from app.modules.lms import rubric_service
+from app.modules.lms.assessment_grading import grading_mode, is_athe
 
 
 GRADE_BAND_PERCENT = {"fail": Decimal("0"), "pass": Decimal("50"), "merit": Decimal("65"), "distinction": Decimal("85")}
@@ -184,6 +185,8 @@ def _assignment_item(
         attachment_name=asset.original_filename if asset else None,
         remaining_seconds=remaining_seconds(submission.expires_at) if submission else None,
         exam_id=exam_id,
+        is_athe=is_athe(assignment) and assignment.submission_type != "mcq",
+        has_rubric=bool(getattr(assignment, "has_rubric", False)),
     )
 
 
@@ -365,6 +368,7 @@ async def list_assignments(
         raw_rows = await repo.list_for_lecturer(user_id) if role == "LECTURER" else await repo.list_for_manager()
         rows = [row for row in raw_rows if belongs_to_workspace(row[0])]
         exam_ids = await _graded_exam_ids(db, [row[0].assignment_id for row in rows])
+        await rubric_service.annotate_has_rubric(db, [row[0] for row in rows])
         data = []
         for row in rows:
             material = await db.get(MediaAsset, row[0].question_paper_asset_id) if row[0].question_paper_asset_id else None
@@ -374,6 +378,7 @@ async def list_assignments(
         raise ForbiddenError("This LMS role cannot access coursework assignments")
     student_rows = [row for row in await repo.list_for_student(user_id) if belongs_to_workspace(row[0])]
     exam_ids = await _graded_exam_ids(db, [row[0].assignment_id for row in student_rows])
+    await rubric_service.annotate_has_rubric(db, [row[0] for row in student_rows])
     data = []
     for assignment, course, target_class, submission in student_rows:
         now = utc_now()
@@ -696,6 +701,8 @@ async def mark_submission(db: AsyncSession, submission_id: int, payload: Coursew
         raise ValidationError("The student has not finished this attempt")
     if assignment.submission_type == "mcq":
         raise ValidationError("Quiz marks are calculated automatically from the answers")
+    if is_athe(assignment) and await rubric_service.get_assignment_rubric(db, assignment.assignment_id) is not None:
+        raise ValidationError("This assignment is marked with its ATHE rubric. Open it from Assessment Review.")
     if grading_mode(assignment) == "marks" and payload.marks_awarded is None:
         raise ValidationError("Enter numeric marks for this CPD assignment")
     if grading_mode(assignment) == "marks":
@@ -736,3 +743,40 @@ async def complete_material_upload(db: AsyncSession, asset_id: int, user_id: int
     if asset.created_by != user_id or asset.folder != "assignment-materials":
         raise ForbiddenError("This question paper upload does not belong to your account")
     return await media_service.complete_upload(db, asset_id)
+
+
+async def review_summary(db: AsyncSession, user_id: int, role: str, class_id: int):
+    """Assignments for one class with submission counts, using one grouped query instead of one request per assignment."""
+    from sqlalchemy import and_, case
+    from app.modules.lms.schemas.coursework import AssignmentSubmissionCounts, CourseworkReviewSummaryResponse
+
+    assignments = (await list_assignments(db, user_id, role, class_id=class_id)).data
+    ids = [item.assignment_id for item in assignments]
+    counts = {assignment_id: AssignmentSubmissionCounts(assignment_id=assignment_id) for assignment_id in ids}
+    if ids:
+        mcq_ids = {item.assignment_id for item in assignments if item.submission_type == "mcq"}
+        auto_marked = and_(
+            LmsExamAttempt.attempt_id.is_not(None),
+            LmsExamAttempt.status != "in_progress",
+            LmsExamAttempt.auto_marks.is_not(None),
+        )
+        marked = case((or_(LmsCourseworkSubmission.marks_awarded.is_not(None), auto_marked), 1), else_=0)
+        rows = (await db.execute(
+            select(LmsCourseworkSubmission.assignment_id, LmsCourseworkSubmission.status, marked.label("marked"), func.count())
+            .outerjoin(LmsExam, and_(LmsExam.assignment_id == LmsCourseworkSubmission.assignment_id, LmsExam.assessment_kind == "graded_mcq"))
+            .outerjoin(LmsExamAttempt, and_(LmsExamAttempt.exam_id == LmsExam.exam_id,
+                                            LmsExamAttempt.student_user_id == LmsCourseworkSubmission.student_user_id))
+            .where(LmsCourseworkSubmission.assignment_id.in_(ids), LmsCourseworkSubmission.status != "withdrawn")
+            .group_by(LmsCourseworkSubmission.assignment_id, LmsCourseworkSubmission.status, marked)
+        )).all()
+        for assignment_id, status, is_marked, total in rows:
+            item = counts[assignment_id]
+            if status in {"submitted", "reviewed", "returned", "expired"}:
+                item.submitted += total
+            if status == "submitted":
+                item.to_mark += total
+            if status == "in_progress":
+                item.in_progress += total
+            if status in {"reviewed", "returned"} or (assignment_id in mcq_ids and is_marked):
+                item.marked += total
+    return CourseworkReviewSummaryResponse(data=assignments, counts=list(counts.values()))
