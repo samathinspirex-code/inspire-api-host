@@ -9,6 +9,8 @@ ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS zoom_host_connection_id
 ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS zoom_passcode_encrypted TEXT;
 ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS processing_status VARCHAR(30) NOT NULL DEFAULT 'not_applicable';
 ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS processing_error TEXT;
+ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS host_joined_uuid VARCHAR(255);
+ALTER TABLE lms_online_meetings ADD COLUMN IF NOT EXISTS host_joined_at TIMESTAMPTZ;
 ALTER TABLE lms_online_meetings ALTER COLUMN google_space_name DROP NOT NULL;
 ALTER TABLE lms_online_meetings ALTER COLUMN google_meeting_uri DROP NOT NULL;
 ALTER TABLE lms_online_meetings ALTER COLUMN google_meeting_code DROP NOT NULL;

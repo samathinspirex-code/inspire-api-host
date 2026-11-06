@@ -252,8 +252,13 @@ Configure `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_REDIRECT_URI`,
 a Fernet key and must remain stable after host accounts are connected. Configure
 the Zoom event subscription endpoint as
 `https://<api-host>/api/v1/lms/integrations/zoom/webhook` and subscribe to
-`meeting.started`, `meeting.ended`, and `recording.completed`. The start event
-keeps attendance tied to the actual Zoom occurrence when a meeting is restarted.
+`meeting.started`, `meeting.participant_joined`, `meeting.ended`, and
+`recording.completed`. The start event keeps attendance tied to the actual Zoom
+occurrence when a meeting is restarted. `meeting.participant_joined` records when
+the connected host account joins, so End for All in the Zoom app completes the
+class at once; students who join early and leave never complete it. Without that
+subscription, classes still complete within a few minutes from the participant
+report.
 
 In LMS Settings, enable Zoom and connect up to two licensed host accounts. Each
 host can be limited to one or two concurrent meetings. The existing notification

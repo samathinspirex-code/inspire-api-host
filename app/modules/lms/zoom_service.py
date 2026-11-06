@@ -582,6 +582,20 @@ def webhook_validation_token(plain_token: str) -> str:
     ).hexdigest()
 
 
+async def _is_host_participant(db: AsyncSession, meeting_id: int, obj: dict, participant: dict) -> bool:
+    """A participant_joined event for the meeting's connected host account."""
+    host=(await db.execute(text("""SELECT h.zoom_user_id,h.email FROM lms_online_meetings m
+      JOIN lms_zoom_host_connections h ON h.connection_id=m.zoom_host_connection_id
+      WHERE m.meeting_id=:id"""),{"id":meeting_id})).mappings().first()
+    host_ids={str(value) for value in (host and host["zoom_user_id"], obj.get("host_id")) if value}
+    participant_ids={str(participant.get(key)) for key in ("id","participant_user_id") if participant.get(key)}
+    if host_ids & participant_ids:
+        return True
+    host_email=str((host and host["email"]) or "").strip().casefold()
+    email=str(participant.get("email") or participant.get("user_email") or "").strip().casefold()
+    return bool(host_email and email == host_email)
+
+
 async def receive_webhook(db: AsyncSession, event: dict) -> None:
     name=event.get("event",""); obj=event.get("payload",{}).get("object",{}); meeting_id=str(obj.get("id") or "")
     local=await db.scalar(text("SELECT meeting_id FROM lms_online_meetings WHERE provider='zoom' AND provider_meeting_id=:id ORDER BY meeting_id DESC LIMIT 1"),{"id":meeting_id})
@@ -593,20 +607,25 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
           SET provider_meeting_uuid=:uuid WHERE meeting_id=:id AND status='scheduled'
             AND :started BETWEEN start_time-interval '2 hours' AND end_time+interval '2 hours'"""),
           {"uuid":obj["uuid"],"id":local,"started":instance_started})
+    if name=="meeting.participant_joined" and obj.get("uuid"):
+        # Remember the exact Zoom occurrence the host account joined, so its
+        # meeting.ended can complete the class at once.
+        if await _is_host_participant(db,local,obj,obj.get("participant") or {}):
+            await db.execute(text("""UPDATE lms_online_meetings
+              SET host_joined_uuid=:uuid,host_joined_at=now()
+              WHERE meeting_id=:id AND status='scheduled'"""),{"uuid":obj["uuid"],"id":local})
     if name=="meeting.ended":
-        # Desktop Zoom hosts cannot signal their End for All click to the LMS.
-        # Accept Zoom's signed end event for this scheduled occurrence; the
-        # participant report is imported separately once Zoom publishes it.
-        started=_dt(obj.get("start_time"))
-        finished=_dt(obj.get("end_time"))
+        # Zoom also sends meeting.ended when students joined before the host and
+        # then all left, so the event alone never completes a class. It completes
+        # the class only when the host account joined this same occurrence (End
+        # for All in the Zoom app) or after an LMS-confirmed End for All. Anything
+        # else is left to sweep_finished_meetings and its participant report.
         completed=await db.scalar(text("""UPDATE lms_online_meetings
           SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
           WHERE meeting_id=:id AND status='scheduled' AND (
-            (CAST(:started AS TIMESTAMPTZ) IS NOT NULL AND CAST(:finished AS TIMESTAMPTZ) IS NOT NULL
-              AND CAST(:started AS TIMESTAMPTZ) BETWEEN start_time-interval '2 hours' AND end_time+interval '2 hours'
-              AND CAST(:finished AS TIMESTAMPTZ) >= CAST(:started AS TIMESTAMPTZ))
+            (CAST(:uuid AS VARCHAR) IS NOT NULL AND host_joined_uuid=CAST(:uuid AS VARCHAR))
             OR (processing_status='end_requested' AND updated_at >= now()-interval '2 minutes')
-          ) RETURNING meeting_id"""),{"id":local,"started":started,"finished":finished})
+          ) RETURNING meeting_id"""),{"id":local,"uuid":obj.get("uuid") or None})
         if completed:
             kinds.append("attendance")
     if name=="recording.completed":
@@ -708,6 +727,23 @@ def _participants_near_class(participants: list[dict], context: dict) -> bool:
     end=context["end_time"]+timedelta(hours=2)
     joined=[_dt(p.get("join_time")) for p in participants]
     return bool(joined) and all(join and start <= join <= end for join in joined)
+
+
+def _host_attended(participants: list[dict], host: dict) -> bool:
+    """True only when the connected host account was in this Zoom occurrence.
+
+    Lecturers start classes from the LMS with the host account, so a report
+    without that account is a students-only session (joined before the host).
+    """
+    host_id = str(host.get("zoom_user_id") or "")
+    host_email = str(host.get("email") or "").strip().casefold()
+    for participant in participants:
+        if host_id and str(participant.get("id") or "") == host_id:
+            return True
+        email = str(participant.get("user_email") or participant.get("email") or "").strip().casefold()
+        if host_email and email == host_email:
+            return True
+    return False
 
 
 def _name_key(value) -> str:
@@ -1084,12 +1120,32 @@ async def sweep_missing_attendance(db: AsyncSession, now: datetime, limit: int=1
     await db.commit(); return len(rows)
 
 
+NO_HOST_COMPLETION_GRACE_MINUTES = 30
+
+
+async def _meeting_may_be_live(meeting: dict, token: str) -> bool:
+    """Zoom reports status 'started' while anyone is in the meeting.
+
+    Any failure counts as live so an unreadable meeting stays scheduled.
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"{ZOOM_API}/meetings/{quote(str(meeting['provider_meeting_id']), safe='')}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if response.is_error:
+        return True
+    return str(response.json().get("status") or "").lower() == "started"
+
+
 async def sweep_finished_meetings(db: AsyncSession, now: datetime, limit: int=10,
                                   meeting_id: int | None=None, grace_minutes: int=5) -> int:
     """Recover desktop-hosted meetings when Zoom's end webhook is missed.
 
     A past-meeting participant report exists only after Zoom has ended an
-    occurrence. Its join times must match this class before changing status.
+    occurrence. Its join times must match this class before changing status,
+    and the connected host account must be in it: students who join before the
+    host and leave also end an occurrence, and must not complete the class.
     """
     rows=(await db.execute(text("""SELECT m.* FROM lms_online_meetings m
       WHERE m.provider='zoom' AND m.status='scheduled'
@@ -1109,6 +1165,15 @@ async def sweep_finished_meetings(db: AsyncSession, now: datetime, limit: int=10
             participants=await _past_participants(dict(meeting),token)
             if not _participants_near_class(participants,dict(meeting)):
                 continue
+            # Students who joined early and left end a Zoom occurrence too.
+            # Keep the class scheduled until the host's own session has ended.
+            # A class taught without the host account only completes once its
+            # scheduled time is well past and Zoom no longer reports it live.
+            if not _host_attended(participants,dict(host)):
+                if now < meeting["end_time"]+timedelta(minutes=NO_HOST_COMPLETION_GRACE_MINUTES):
+                    continue
+                if await _meeting_may_be_live(dict(meeting),token):
+                    continue
             changed=await db.scalar(text("""UPDATE lms_online_meetings
               SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
               WHERE meeting_id=:id AND status='scheduled' RETURNING meeting_id"""),
