@@ -88,6 +88,7 @@ ROLE_NAVIGATION = {
         ("my-classes", "My Classes", "video"),
         ("assignment-bank", "Assignments", "file"),
         ("practice-bank", "Practice Tests", "clipboard"),
+        ("simulators", "Simulators", "sim"),
         ("grades", "Gradebook", "award"),
         ("attendance", "Attendance", "clipboard"),
         ("reports", "Reports", "chart"),
@@ -97,6 +98,7 @@ ROLE_NAVIGATION = {
     "STUDENT": [
         ("profile", "My Profile", "user"),
         ("my-classes", "My Classes", "video"),
+        ("simulators", "Simulators", "sim"),
         ("meetings", "Online Classes", "camera"),
         ("assignments", "Assignments", "file"),
         ("attendance", "Attendance", "clipboard"),

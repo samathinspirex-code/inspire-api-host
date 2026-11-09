@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
 from app.modules.auth.models import User
 from app.modules.lms import coursework_service as cw
-from app.modules.lms import rubric_excel
+from app.modules.lms import rubric_excel, rubric_pdf
 from app.modules.lms.assessment_grading import is_athe, is_athe_body
 from app.modules.lms.models import (
     ClassLecturer,
@@ -676,15 +676,15 @@ def _rubric_title(rubric) -> str:
     return rubric.template_name or rubric.form_title or rubric.assignment_title or "Feedback"
 
 
-async def _workbook_for(db: AsyncSession, rubric, submission, form_role: str) -> tuple[str, bytes]:
+async def _feedback_file_for(db: AsyncSession, rubric, submission, form_role: str) -> tuple[str, bytes]:
     forms = await _forms(db, submission.submission_id)
     form = forms.get(form_role)
     learner = await db.get(User, submission.student_user_id)
     profile = await db.get(StudentProfile, submission.student_user_id)
     people = await _people(db, [rubric.first_assessor_user_id, rubric.second_assessor_user_id])
-    content = rubric_excel.build_feedback_workbook(_form_dict(rubric, form, learner, profile, submission, people))
+    content = rubric_pdf.build_feedback_pdf(_form_dict(rubric, form, learner, profile, submission, people))
     suffix = None if form_role == "first" else "2nd Assessor"
-    return rubric_excel.feedback_file_name(_rubric_title(rubric), _person_name(learner), suffix), content
+    return rubric_excel.feedback_file_name(_rubric_title(rubric), _person_name(learner), suffix, ".pdf"), content
 
 
 async def export_assessment(db: AsyncSession, submission_id: int, form_role: str, user_id: int) -> tuple[str, bytes]:
@@ -694,7 +694,7 @@ async def export_assessment(db: AsyncSession, submission_id: int, form_role: str
     role = viewer_role(rubric, user_id, await is_global_admin(db, user_id))
     if not can_read_form(role, form_role):
         raise ForbiddenError("You cannot download this assessor form")
-    return await _workbook_for(db, rubric, submission, form_role)
+    return await _feedback_file_for(db, rubric, submission, form_role)
 
 
 async def export_all(db: AsyncSession, assignment_id: int, user_id: int) -> tuple[str, bytes]:
@@ -714,7 +714,7 @@ async def export_all(db: AsyncSession, assignment_id: int, user_id: int) -> tupl
     files = []
     for submission, _user, _profile, _asset in await CourseworkRepository(db).list_submissions(assignment_id):
         if submission.submission_id in completed:
-            files.append(await _workbook_for(db, rubric, submission, form_role))
+            files.append(await _feedback_file_for(db, rubric, submission, form_role))
     if not files:
         raise ValidationError("No completed feedback forms to download yet")
     safe_title = rubric_excel.feedback_file_name(_rubric_title(rubric), assignment.title, "Feedback Forms", ".zip")
@@ -759,7 +759,7 @@ async def student_feedback(db: AsyncSession, assignment_id: int, user_id: int) -
 
 async def student_feedback_export(db: AsyncSession, assignment_id: int, user_id: int) -> tuple[str, bytes]:
     _assignment, rubric, submission, _form = await _student_context(db, assignment_id, user_id)
-    return await _workbook_for(db, rubric, submission, "first")
+    return await _feedback_file_for(db, rubric, submission, "first")
 
 
 async def class_rubric_context(db: AsyncSession, class_id: int, user_id: int) -> ClassRubricContext:

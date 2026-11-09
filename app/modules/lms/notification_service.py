@@ -163,6 +163,12 @@ async def _enqueue(db: AsyncSession, user_ids: list[int], event_key: str, notifi
     return len(result.scalars().all())
 
 
+async def notify_simulator(db: AsyncSession, user_ids: list[int], event_key: str, title: str, message: str, query: str) -> int:
+    """Adds a bell notification (no email). The caller commits."""
+    action_url = f"{settings.LMS_UI_URL.rstrip('/')}?view=simulators&{query}"
+    return await _enqueue(db, user_ids, event_key, "simulator", title, message, action_url, "normal", utc_now(), False)
+
+
 async def _announcement_item(db: AsyncSession, item: LmsAnnouncement) -> AnnouncementItem:
     ids = item.attachment_asset_ids or []
     assets = {asset.media_asset_id: asset for asset in (await db.execute(

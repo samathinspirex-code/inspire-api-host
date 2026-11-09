@@ -38,6 +38,21 @@ from app.modules.lms import zoom_service
 from app.modules.lms import zoom_cleanup_service
 from app.modules.lms import rubric_excel
 from app.modules.lms import rubric_service
+from app.modules.lms import simulator_service
+from app.modules.lms.schemas.simulator import (
+    SimInviteCreate,
+    SimInviteRespond,
+    SimMessageCreate,
+    SimRoleChoice,
+    SimRunCreate,
+    SimRunUpdate,
+    SimTeamCreate,
+    SimTemplateArchive,
+    SimTemplateUpdate,
+    SimTemplateWrite,
+    SimVote,
+    SimXpAdjustment,
+)
 from app.modules.lms.schemas.coursework import CourseworkReviewSummaryResponse
 from app.modules.lms.schemas.rubric import (
     AssignmentRubricItem,
@@ -715,7 +730,7 @@ async def export_submission_rubric_form(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     file_name, content = await rubric_service.export_assessment(db, submission_id, form_role, current_user.user_id)
-    return _attachment(content, file_name, XLSX_MEDIA_TYPE)
+    return _attachment(content, file_name, "application/pdf")
 
 
 @router.get("/my/coursework/assignments/{assignment_id}/feedback", response_model=StudentRubricFeedback)
@@ -734,7 +749,7 @@ async def export_my_rubric_feedback(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     file_name, content = await rubric_service.student_feedback_export(db, assignment_id, current_user.user_id)
-    return _attachment(content, file_name, XLSX_MEDIA_TYPE)
+    return _attachment(content, file_name, "application/pdf")
 
 
 @router.get("/my/grades", response_model=StudentGradesResponse)
@@ -2584,3 +2599,130 @@ async def remove_class_lecturer(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await assignment_service.remove_class_lecturer(db, class_id, user_id)
+
+
+# --------------------------------------------------------------------------- team simulators
+
+@router.get("/simulator-templates")
+async def list_simulator_templates(include_archived: bool = Query(False), current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.list_templates(db, current_user.user_id, include_archived)
+
+
+@router.post("/simulator-templates")
+async def create_simulator_template(payload: SimTemplateWrite, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.create_template(db, payload, current_user.user_id)
+
+
+@router.get("/simulator-templates/{template_id}")
+async def get_simulator_template(template_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.get_template(db, template_id, current_user.user_id)
+
+
+@router.put("/simulator-templates/{template_id}")
+async def update_simulator_template(template_id: int, payload: SimTemplateUpdate, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.update_template(db, template_id, payload, current_user.user_id)
+
+
+@router.post("/simulator-templates/{template_id}/copy")
+async def copy_simulator_template(template_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.copy_template(db, template_id, current_user.user_id)
+
+
+@router.put("/simulator-templates/{template_id}/archive")
+async def archive_simulator_template(template_id: int, payload: SimTemplateArchive, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.archive_template(db, template_id, payload.is_archived, current_user.user_id)
+
+
+@router.get("/classes/{class_id}/simulators")
+async def list_class_simulators(class_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.list_class_runs(db, class_id, current_user.user_id)
+
+
+@router.post("/classes/{class_id}/simulators")
+async def apply_simulator_to_class(class_id: int, payload: SimRunCreate, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.apply_template(db, class_id, payload, current_user.user_id)
+
+
+@router.put("/simulator-runs/{run_id}")
+async def update_simulator_run(run_id: int, payload: SimRunUpdate, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.update_run(db, run_id, payload, current_user.user_id)
+
+
+@router.get("/simulator-runs/{run_id}/results")
+async def get_simulator_run_results(run_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.run_results(db, run_id, current_user.user_id)
+
+
+@router.post("/simulator-runs/{run_id}/adjustments")
+async def adjust_simulator_xp(run_id: int, payload: SimXpAdjustment, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.adjust_xp(db, run_id, payload, current_user.user_id)
+
+
+@router.get("/simulator-teams/{team_id}/review")
+async def review_simulator_team(team_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.team_review(db, team_id, current_user.user_id)
+
+
+@router.get("/my/classes/{class_id}/simulators")
+async def list_my_class_simulators(class_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.student_class_runs(db, class_id, current_user.user_id)
+
+
+@router.get("/my/simulators/{run_id}")
+async def get_my_simulator(run_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.student_run_detail(db, run_id, current_user.user_id)
+
+
+@router.post("/my/simulators/{run_id}/team")
+async def create_my_simulator_team(run_id: int, payload: SimTeamCreate, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.create_team(db, run_id, payload, current_user.user_id)
+
+
+@router.post("/my/simulator-teams/{team_id}/invites")
+async def invite_to_my_simulator_team(team_id: int, payload: SimInviteCreate, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.invite_student(db, team_id, payload.student_user_id, current_user.user_id)
+
+
+@router.post("/my/simulator-invites/{invite_id}/respond")
+async def respond_to_simulator_invite(invite_id: int, payload: SimInviteRespond, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.respond_invite(db, invite_id, payload.accept, current_user.user_id)
+
+
+@router.delete("/my/simulator-invites/{invite_id}")
+async def cancel_simulator_invite(invite_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.cancel_invite(db, invite_id, current_user.user_id)
+
+
+@router.put("/my/simulator-teams/{team_id}/role")
+async def choose_my_simulator_role(team_id: int, payload: SimRoleChoice, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.choose_role(db, team_id, payload.role_key, current_user.user_id)
+
+
+@router.post("/my/simulator-teams/{team_id}/leave")
+async def leave_my_simulator_team(team_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.leave_team(db, team_id, current_user.user_id)
+
+
+@router.post("/my/simulator-teams/{team_id}/start")
+async def start_my_simulator_team(team_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.start_team(db, team_id, current_user.user_id)
+
+
+@router.get("/my/simulator-teams/{team_id}/state")
+async def get_my_simulator_state(team_id: int, after_message_id: int = Query(0, ge=0), current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.team_state(db, team_id, current_user.user_id, after_message_id)
+
+
+@router.put("/my/simulator-teams/{team_id}/votes")
+async def vote_in_my_simulator(team_id: int, payload: SimVote, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.cast_vote(db, team_id, payload, current_user.user_id)
+
+
+@router.post("/my/simulator-teams/{team_id}/close-voting")
+async def close_my_simulator_voting(team_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.close_voting(db, team_id, current_user.user_id)
+
+
+@router.post("/my/simulator-teams/{team_id}/messages")
+async def post_my_simulator_message(team_id: int, payload: SimMessageCreate, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.post_message(db, team_id, payload.body, current_user.user_id)
