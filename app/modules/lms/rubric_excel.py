@@ -391,9 +391,10 @@ def build_feedback_zip(files: list[tuple[str, bytes]]) -> bytes:
     used = set()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files:
+            stem, dot, extension = name.rpartition(".")
             candidate, counter = name, 2
             while candidate in used:
-                candidate = name.replace(".xlsx", f"_{counter}.xlsx")
+                candidate = f"{stem} ({counter}).{extension}" if dot else f"{name} ({counter})"
                 counter += 1
             used.add(candidate)
             archive.writestr(candidate, content)

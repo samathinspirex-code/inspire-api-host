@@ -1,0 +1,4311 @@
+[
+ {
+  "starter_key": "found",
+  "programme": "Foundation",
+  "level": "ug",
+  "tone": "student",
+  "title": "Pop-Up Café Challenge",
+  "tagline": "Run a campus café for one term. Don’t go broke. Make it the vibe.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Boss",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Money",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Hype",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Ops",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "cash",
+     "label": "Cash",
+     "start": 100,
+     "direction": 1,
+     "scale": 40,
+     "prefix": "LKR ",
+     "suffix": "k",
+     "decimals": 0
+    },
+    {
+     "key": "cust",
+     "label": "Customers / week",
+     "start": 120,
+     "direction": 1,
+     "scale": 60,
+     "prefix": "",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "vibe",
+     "label": "Vibe score",
+     "start": 70,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "waste",
+     "label": "Food waste",
+     "start": 12,
+     "direction": -1,
+     "scale": 6,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Opening week",
+     "brief": "You’ve got LKR 100k and a corner of the campus foyer. First impressions are everything.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "What’s on the menu?",
+       "options": [
+        {
+         "text": "Tiny menu, 4 drinks done perfectly",
+         "effects": {
+          "vibe": 6,
+          "waste": -4,
+          "cust": 5
+         }
+        },
+        {
+         "text": "Huge menu with everything",
+         "effects": {
+          "cust": 20,
+          "waste": 8,
+          "cash": -10
+         }
+        },
+        {
+         "text": "Copy the trendy bubble-tea place",
+         "effects": {
+          "cust": 15,
+          "vibe": -4,
+          "cash": -15
+         }
+        }
+       ]
+      },
+      {
+       "question": "Pick your price",
+       "options": [
+        {
+         "text": "LKR 300, cheap and cheerful",
+         "effects": {
+          "cust": 30,
+          "cash": -5
+         }
+        },
+        {
+         "text": "LKR 450, fair",
+         "effects": {
+          "cust": 10,
+          "cash": 12
+         }
+        },
+        {
+         "text": "LKR 650, premium",
+         "effects": {
+          "cust": -10,
+          "cash": 15,
+          "vibe": 3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Get noticed",
+     "brief": "Time to market. Your classmates are your customers.",
+     "event": "Plot twist: a rival stall just opened right next to you.",
+     "decisions": [
+      {
+       "question": "How do you market?",
+       "options": [
+        {
+         "text": "Instagram reels starring your team",
+         "effects": {
+          "cust": 18,
+          "vibe": 5,
+          "cash": -3
+         }
+        },
+        {
+         "text": "Print flyers",
+         "effects": {
+          "cust": 6,
+          "cash": -4
+         }
+        },
+        {
+         "text": "Loyalty card: 10th coffee free",
+         "effects": {
+          "cust": 12,
+          "cash": -6,
+          "vibe": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "What about the rival?",
+       "options": [
+        {
+         "text": "Price war",
+         "effects": {
+          "cust": 10,
+          "cash": -15
+         }
+        },
+        {
+         "text": "Collab: combo deal with them",
+         "effects": {
+          "cust": 15,
+          "cash": 5,
+          "vibe": 3
+         }
+        },
+        {
+         "text": "Ignore them, focus on quality",
+         "effects": {
+          "vibe": 5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Exam week",
+     "brief": "Demand is wild. Can your operation keep up?",
+     "event": "Everyone is tired, stressed and needs caffeine.",
+     "decisions": [
+      {
+       "question": "Staffing",
+       "options": [
+        {
+         "text": "Hire 2 part-timers",
+         "effects": {
+          "cust": 10,
+          "cash": -10,
+          "vibe": 4
+         }
+        },
+        {
+         "text": "Do it all yourself",
+         "effects": {
+          "cash": 5,
+          "vibe": -6
+         }
+        },
+        {
+         "text": "QR self-ordering",
+         "effects": {
+          "cust": 8,
+          "cash": -6,
+          "waste": -2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Stock",
+       "options": [
+        {
+         "text": "Order daily from sales data",
+         "effects": {
+          "waste": -6,
+          "cash": 4
+         }
+        },
+        {
+         "text": "Bulk buy for the discount",
+         "effects": {
+          "waste": 6,
+          "cash": 6
+         }
+        },
+        {
+         "text": "Use the AI demand forecast",
+         "effects": {
+          "waste": -8,
+          "cash": 2
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Grow or chill?",
+     "brief": "Last round. What’s your café’s legacy?",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Big move",
+       "options": [
+        {
+         "text": "Second stall at the sports ground",
+         "effects": {
+          "cust": 25,
+          "cash": -20
+         }
+        },
+        {
+         "text": "Catering for campus events",
+         "effects": {
+          "cash": 18,
+          "vibe": 2
+         }
+        },
+        {
+         "text": "Stay small, level up quality",
+         "effects": {
+          "vibe": 8,
+          "cash": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Final touch",
+       "options": [
+        {
+         "text": "Zero-waste cups",
+         "effects": {
+          "vibe": 6,
+          "cash": -4,
+          "waste": -3
+         }
+        },
+        {
+         "text": "Sell café merch",
+         "effects": {
+          "cash": 8
+         }
+        },
+        {
+         "text": "Late-night study hours",
+         "effects": {
+          "cust": 15,
+          "cash": 6,
+          "vibe": -2
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "hndbus",
+  "programme": "HND Business",
+  "level": "ug",
+  "tone": "student",
+  "title": "Startup Studio: Colombo Drop",
+  "tagline": "Launch a sustainable streetwear brand from zero. Build the hype, keep the cash.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Founder",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "CFO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "CMO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Ops lead",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "cash",
+     "label": "Cash",
+     "start": 5,
+     "direction": 1,
+     "scale": 3,
+     "prefix": "LKR ",
+     "suffix": "M",
+     "decimals": 1
+    },
+    {
+     "key": "cust",
+     "label": "Customers",
+     "start": 1000,
+     "direction": 1,
+     "scale": 600,
+     "prefix": "",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "buzz",
+     "label": "Brand buzz",
+     "start": 50,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "team",
+     "label": "Team morale",
+     "start": 70,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "The drop",
+     "brief": "You have LKR 5M, a logo and a dream. Time to launch.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "What do you launch with?",
+       "options": [
+        {
+         "text": "5 hero products",
+         "effects": {
+          "buzz": 6,
+          "cash": -0.4
+         }
+        },
+        {
+         "text": "A 30-piece collection",
+         "effects": {
+          "cust": 300,
+          "cash": -1.5
+         }
+        },
+        {
+         "text": "Pre-order drop, make after orders",
+         "effects": {
+          "cash": 0.8,
+          "buzz": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Where do you sell?",
+       "options": [
+        {
+         "text": "Instagram + TikTok Shop",
+         "effects": {
+          "cust": 400,
+          "buzz": 8,
+          "cash": -0.5
+         }
+        },
+        {
+         "text": "Mall pop-ups",
+         "effects": {
+          "cust": 250,
+          "cash": -0.8,
+          "buzz": 4
+         }
+        },
+        {
+         "text": "Wholesale to boutiques",
+         "effects": {
+          "cust": 150,
+          "cash": 0.6,
+          "buzz": -3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "It’s blowing up",
+     "brief": "Ride the wave without wiping out.",
+     "event": "A micro-influencer tagged your hoodie. Demand is spiking.",
+     "decisions": [
+      {
+       "question": "Supply",
+       "options": [
+        {
+         "text": "Restock fast on supplier credit",
+         "effects": {
+          "cust": 500,
+          "cash": -1
+         }
+        },
+        {
+         "text": "Waitlist the hype",
+         "effects": {
+          "buzz": 10,
+          "cust": 150
+         }
+        },
+        {
+         "text": "Raise prices 15%",
+         "effects": {
+          "cash": 0.9,
+          "buzz": -4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Team",
+       "options": [
+        {
+         "text": "Hire an ops manager",
+         "effects": {
+          "team": 8,
+          "cash": -0.6
+         }
+        },
+        {
+         "text": "Take interns from Inspire",
+         "effects": {
+          "team": 4,
+          "cash": -0.2,
+          "buzz": 2
+         }
+        },
+        {
+         "text": "Founders do everything",
+         "effects": {
+          "team": -12,
+          "cash": 0.2
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Money talk",
+     "brief": "Cash is oxygen. Decide how you fund the next six months.",
+     "event": "Courier rates just jumped 20%.",
+     "decisions": [
+      {
+       "question": "Funding",
+       "options": [
+        {
+         "text": "Angel investor: 20% for LKR 10M",
+         "effects": {
+          "cash": 10,
+          "team": 3
+         }
+        },
+        {
+         "text": "Bank loan LKR 5M",
+         "effects": {
+          "cash": 5,
+          "team": -2
+         }
+        },
+        {
+         "text": "Bootstrap",
+         "effects": {
+          "team": 2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Delivery costs",
+       "options": [
+        {
+         "text": "Switch courier, renegotiate",
+         "effects": {
+          "cash": 0.4
+         }
+        },
+        {
+         "text": "Free delivery over LKR 8k",
+         "effects": {
+          "cust": 300,
+          "cash": -0.5
+         }
+        },
+        {
+         "text": "Pass the cost to customers",
+         "effects": {
+          "cash": 0.3,
+          "cust": -150
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Scale",
+     "brief": "Year one is ending. What does the brand become?",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Big bet",
+       "options": [
+        {
+         "text": "Flagship store in Colombo 7",
+         "effects": {
+          "cust": 600,
+          "cash": -4,
+          "buzz": 8
+         }
+        },
+        {
+         "text": "Ship to the Maldives via Insta",
+         "effects": {
+          "cust": 400,
+          "cash": -1,
+          "buzz": 5
+         }
+        },
+        {
+         "text": "Upcycling programme",
+         "effects": {
+          "buzz": 12,
+          "team": 6,
+          "cash": -0.6
+         }
+        }
+       ]
+      },
+      {
+       "question": "Culture",
+       "options": [
+        {
+         "text": "4-day week trial",
+         "effects": {
+          "team": 12,
+          "cash": -0.3
+         }
+        },
+        {
+         "text": "Profit share",
+         "effects": {
+          "team": 8,
+          "cash": -0.8
+         }
+        },
+        {
+         "text": "Bonuses on targets",
+         "effects": {
+          "team": 4,
+          "cust": 100,
+          "cash": -0.5
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "hndcom",
+  "programme": "HND Computing",
+  "level": "ug",
+  "tone": "student",
+  "title": "Ship It: App Studio",
+  "tagline": "Build a study app, survive launch day and keep the bugs (mostly) away.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Tech lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Backend",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Frontend",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Product",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "users",
+     "label": "Users",
+     "start": 2,
+     "direction": 1,
+     "scale": 3,
+     "prefix": "",
+     "suffix": "k",
+     "decimals": 1
+    },
+    {
+     "key": "up",
+     "label": "Uptime",
+     "start": 97,
+     "direction": 1,
+     "scale": 2,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 1
+    },
+    {
+     "key": "bugs",
+     "label": "Open bugs",
+     "start": 40,
+     "direction": -1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "run",
+     "label": "Runway",
+     "start": 12,
+     "direction": 1,
+     "scale": 4,
+     "prefix": "",
+     "suffix": " mo",
+     "decimals": 1
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Pick your stack",
+     "brief": "Your team has 12 months of runway and a Figma file.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Tech stack",
+       "options": [
+        {
+         "text": "Proven: React Native + Firebase",
+         "effects": {
+          "up": 1,
+          "run": -0.5
+         }
+        },
+        {
+         "text": "Bleeding-edge framework",
+         "effects": {
+          "users": 0.5,
+          "bugs": 15
+         }
+        },
+        {
+         "text": "No-code MVP",
+         "effects": {
+          "run": 1,
+          "bugs": 5,
+          "users": 0.5
+         }
+        }
+       ]
+      },
+      {
+       "question": "First killer feature",
+       "options": [
+        {
+         "text": "Offline mode",
+         "effects": {
+          "users": 1
+         }
+        },
+        {
+         "text": "AI study planner",
+         "effects": {
+          "users": 2,
+          "bugs": 8
+         }
+        },
+        {
+         "text": "Polish onboarding",
+         "effects": {
+          "users": 1.2,
+          "bugs": -5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Launch day",
+     "brief": "Thousands of students are signing up at once.",
+     "event": "You hit the front page. Servers are melting.",
+     "decisions": [
+      {
+       "question": "Scale",
+       "options": [
+        {
+         "text": "Autoscaling + CDN",
+         "effects": {
+          "up": 2,
+          "run": -1
+         }
+        },
+        {
+         "text": "Rate-limit sign-ups",
+         "effects": {
+          "users": -0.5,
+          "up": 1
+         }
+        },
+        {
+         "text": "Hope for the best",
+         "effects": {
+          "up": -3,
+          "bugs": 10
+         }
+        }
+       ]
+      },
+      {
+       "question": "Shipping process",
+       "options": [
+        {
+         "text": "CI/CD with tests",
+         "effects": {
+          "bugs": -12,
+          "run": -0.5
+         }
+        },
+        {
+         "text": "Ship daily, test in prod",
+         "effects": {
+          "users": 1,
+          "bugs": 12
+         }
+        },
+        {
+         "text": "Weekly releases",
+         "effects": {
+          "bugs": -5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Security scare",
+     "brief": "Trust is on the line.",
+     "event": "A security researcher reports a data leak in your API.",
+     "decisions": [
+      {
+       "question": "Response",
+       "options": [
+        {
+         "text": "Fix fast and disclose openly",
+         "effects": {
+          "up": 0.5,
+          "users": 0.3,
+          "bugs": -5
+         }
+        },
+        {
+         "text": "Quiet patch",
+         "effects": {
+          "bugs": -5,
+          "users": -0.5
+         }
+        },
+        {
+         "text": "Ignore it",
+         "effects": {
+          "users": -2,
+          "bugs": 10
+         }
+        }
+       ]
+      },
+      {
+       "question": "Prevention",
+       "options": [
+        {
+         "text": "Hire a security engineer",
+         "effects": {
+          "bugs": -8,
+          "run": -1.5
+         }
+        },
+        {
+         "text": "Launch a bug bounty",
+         "effects": {
+          "bugs": -6,
+          "run": -0.5
+         }
+        },
+        {
+         "text": "Student pen-test challenge",
+         "effects": {
+          "bugs": -4,
+          "users": 0.5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Make money",
+     "brief": "Runway is ticking. Find a model that works.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Business model",
+       "options": [
+        {
+         "text": "Freemium",
+         "effects": {
+          "users": 2,
+          "run": 3
+         }
+        },
+        {
+         "text": "In-app ads",
+         "effects": {
+          "users": 1,
+          "run": 2,
+          "up": -0.5
+         }
+        },
+        {
+         "text": "Sell to colleges (B2B)",
+         "effects": {
+          "run": 5,
+          "users": 0.5
+         }
+        }
+       ]
+      },
+      {
+       "question": "Next sprint",
+       "options": [
+        {
+         "text": "Refactor tech debt",
+         "effects": {
+          "bugs": -15,
+          "users": -0.3
+         }
+        },
+        {
+         "text": "Feature blitz",
+         "effects": {
+          "users": 2,
+          "bugs": 12
+         }
+        },
+        {
+         "text": "Open-source a library",
+         "effects": {
+          "users": 0.8,
+          "bugs": -3
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "hndlaw",
+  "programme": "HND Law",
+  "level": "ug",
+  "tone": "student",
+  "title": "Contract Clash",
+  "tagline": "Your client’s bakery got burned by a supplier. Win it, settle it, or lose it.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Lead counsel",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Researcher",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Client lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Strategist",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "str",
+     "label": "Case strength",
+     "start": 50,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "trust",
+     "label": "Client trust",
+     "start": 60,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "cost",
+     "label": "Legal costs",
+     "start": 200,
+     "direction": -1,
+     "scale": 100,
+     "prefix": "LKR ",
+     "suffix": "k",
+     "decimals": 0
+    },
+    {
+     "key": "days",
+     "label": "Days to resolve",
+     "start": 180,
+     "direction": -1,
+     "scale": 60,
+     "prefix": "",
+     "suffix": "",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "New client",
+     "brief": "A bakery’s flour supplier missed three deliveries in peak season. They want justice.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "First move",
+       "options": [
+        {
+         "text": "Read the contract and every email first",
+         "effects": {
+          "str": 10,
+          "days": 10
+         }
+        },
+        {
+         "text": "Fire off an angry demand letter",
+         "effects": {
+          "trust": 5,
+          "str": -5
+         }
+        },
+        {
+         "text": "Call the supplier for a chat",
+         "effects": {
+          "trust": 3,
+          "days": -15
+         }
+        }
+       ]
+      },
+      {
+       "question": "Evidence",
+       "options": [
+        {
+         "text": "Delivery logs and WhatsApp messages",
+         "effects": {
+          "str": 12,
+          "cost": 20
+         }
+        },
+        {
+         "text": "Statements from bakery staff",
+         "effects": {
+          "str": 8
+         }
+        },
+        {
+         "text": "Rely on the client’s memory",
+         "effects": {
+          "str": -6
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "The twist",
+     "brief": "Is it real or a convenient excuse?",
+     "event": "The supplier claims force majeure because of flooding.",
+     "decisions": [
+      {
+       "question": "Your angle",
+       "options": [
+        {
+         "text": "Research the clause and case law",
+         "effects": {
+          "str": 10,
+          "cost": 30
+         }
+        },
+        {
+         "text": "Concede the point",
+         "effects": {
+          "trust": -15
+         }
+        },
+        {
+         "text": "Argue the losses could have been avoided",
+         "effects": {
+          "str": 5
+         }
+        }
+       ]
+      },
+      {
+       "question": "Route",
+       "options": [
+        {
+         "text": "Mediation",
+         "effects": {
+          "days": -60,
+          "cost": -40,
+          "trust": 5
+         }
+        },
+        {
+         "text": "File a claim in court",
+         "effects": {
+          "str": 5,
+          "days": 60,
+          "cost": 80
+         }
+        },
+        {
+         "text": "Negotiate a settlement",
+         "effects": {
+          "days": -40,
+          "trust": 3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Keep the client close",
+     "brief": "The baker is anxious and calling daily.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Client comms",
+       "options": [
+        {
+         "text": "Weekly plain-language updates",
+         "effects": {
+          "trust": 12
+         }
+        },
+        {
+         "text": "Only when something changes",
+         "effects": {
+          "trust": -6
+         }
+        },
+        {
+         "text": "Promise them a win",
+         "effects": {
+          "trust": -8
+         }
+        }
+       ]
+      },
+      {
+       "question": "Damages",
+       "options": [
+        {
+         "text": "Claim lost profits with evidence",
+         "effects": {
+          "str": 8,
+          "cost": 20
+         }
+        },
+        {
+         "text": "Only direct losses",
+         "effects": {
+          "str": 4
+         }
+        },
+        {
+         "text": "Add a punitive claim",
+         "effects": {
+          "str": -5,
+          "cost": 30
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Endgame",
+     "brief": "The supplier offers 70% of the claim.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Decision",
+       "options": [
+        {
+         "text": "Accept the settlement",
+         "effects": {
+          "days": -50,
+          "trust": 6
+         }
+        },
+        {
+         "text": "Go to trial",
+         "effects": {
+          "str": 6,
+          "days": 90,
+          "cost": 120
+         }
+        },
+        {
+         "text": "Arbitration",
+         "effects": {
+          "days": -30,
+          "cost": 40,
+          "str": 3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Professional ethics",
+       "options": [
+        {
+         "text": "Tell the client about a weak point honestly",
+         "effects": {
+          "trust": 10
+         }
+        },
+        {
+         "text": "Keep it quiet",
+         "effects": {
+          "trust": -12
+         }
+        },
+        {
+         "text": "Get a second opinion",
+         "effects": {
+          "str": 4,
+          "cost": 25
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "hndhealth",
+  "programme": "HND Health",
+  "level": "ug",
+  "tone": "student",
+  "title": "Ward Manager",
+  "tagline": "Run a busy outpatient clinic. Keep patients safe and your team sane.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Ward lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Triage",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Quality",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Rota",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "safe",
+     "label": "Patient safety",
+     "start": 75,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "wait",
+     "label": "Average wait",
+     "start": 45,
+     "direction": -1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": " min",
+     "decimals": 0
+    },
+    {
+     "key": "tired",
+     "label": "Staff fatigue",
+     "start": 40,
+     "direction": -1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "bud",
+     "label": "Budget left",
+     "start": 500,
+     "direction": 1,
+     "scale": 150,
+     "prefix": "LKR ",
+     "suffix": "k",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Shift planning",
+     "brief": "Monday morning. 14 nurses, 3 doctors, a full waiting room.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Rota",
+       "options": [
+        {
+         "text": "12-hour shifts",
+         "effects": {
+          "bud": 40,
+          "tired": 15
+         }
+        },
+        {
+         "text": "8-hour overlapping shifts",
+         "effects": {
+          "tired": -8,
+          "bud": -40
+         }
+        },
+        {
+         "text": "A float pool of nurses",
+         "effects": {
+          "wait": -10,
+          "bud": -30
+         }
+        }
+       ]
+      },
+      {
+       "question": "Triage",
+       "options": [
+        {
+         "text": "Nurse-led triage at the door",
+         "effects": {
+          "wait": -15,
+          "safe": 5
+         }
+        },
+        {
+         "text": "First come, first served",
+         "effects": {
+          "wait": 10,
+          "safe": -8
+         }
+        },
+        {
+         "text": "Digital check-in kiosk",
+         "effects": {
+          "wait": -8,
+          "bud": -60
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Outbreak",
+     "brief": "Capacity is stretched.",
+     "event": "Dengue cases have doubled this week.",
+     "decisions": [
+      {
+       "question": "Capacity",
+       "options": [
+        {
+         "text": "Open an overflow bay",
+         "effects": {
+          "wait": -12,
+          "bud": -80,
+          "tired": 6
+         }
+        },
+        {
+         "text": "Redirect stable patients to the community clinic",
+         "effects": {
+          "wait": -8,
+          "safe": 3
+         }
+        },
+        {
+         "text": "Cancel non-urgent visits",
+         "effects": {
+          "wait": -10,
+          "safe": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Infection control",
+       "options": [
+        {
+         "text": "Run a drill",
+         "effects": {
+          "safe": 10,
+          "tired": 3
+         }
+        },
+        {
+         "text": "Hand-hygiene audit",
+         "effects": {
+          "safe": 6
+         }
+        },
+        {
+         "text": "Skip it, too busy",
+         "effects": {
+          "safe": -10
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "A near miss",
+     "brief": "How you respond shapes your team’s safety culture.",
+     "event": "Two medication errors were reported this week.",
+     "decisions": [
+      {
+       "question": "Response",
+       "options": [
+        {
+         "text": "Double-check high-risk medicines",
+         "effects": {
+          "safe": 12,
+          "wait": 3
+         }
+        },
+        {
+         "text": "Blame the individual",
+         "effects": {
+          "tired": 10,
+          "safe": -4
+         }
+        },
+        {
+         "text": "Barcode scanning",
+         "effects": {
+          "safe": 10,
+          "bud": -70
+         }
+        }
+       ]
+      },
+      {
+       "question": "Wellbeing",
+       "options": [
+        {
+         "text": "Protected breaks",
+         "effects": {
+          "tired": -12,
+          "wait": 3
+         }
+        },
+        {
+         "text": "Team lunch on Friday",
+         "effects": {
+          "tired": -3
+         }
+        },
+        {
+         "text": "Overtime bonuses",
+         "effects": {
+          "tired": 6,
+          "bud": -30
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Make it better",
+     "brief": "The hospital board wants a plan for next quarter.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Improvement",
+       "options": [
+        {
+         "text": "Redesign patient flow",
+         "effects": {
+          "wait": -15,
+          "safe": 3
+         }
+        },
+        {
+         "text": "Telehealth follow-ups",
+         "effects": {
+          "wait": -10,
+          "bud": -20
+         }
+        },
+        {
+         "text": "Add beds",
+         "effects": {
+          "wait": -5,
+          "bud": -100
+         }
+        }
+       ]
+      },
+      {
+       "question": "Learning",
+       "options": [
+        {
+         "text": "Patient feedback loop",
+         "effects": {
+          "safe": 4,
+          "wait": -3
+         }
+        },
+        {
+         "text": "Training budget",
+         "effects": {
+          "safe": 6,
+          "tired": -4,
+          "bud": -40
+         }
+        },
+        {
+         "text": "Keep things as they are",
+         "effects": {}
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "hndedu",
+  "programme": "HND Teaching",
+  "level": "ug",
+  "tone": "student",
+  "title": "Classroom Lab",
+  "tagline": "Teach a class of 30 very different learners. Make them want to come back.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Lead teacher",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Inclusion",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Assessment",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Tech",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "eng",
+     "label": "Engagement",
+     "start": 55,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "att",
+     "label": "Attainment",
+     "start": 50,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "inc",
+     "label": "Inclusion",
+     "start": 60,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "nrg",
+     "label": "Your energy",
+     "start": 70,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "First lesson",
+     "brief": "30 students, mixed abilities, Monday 8am.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Lesson style",
+       "options": [
+        {
+         "text": "Starter quiz then group task",
+         "effects": {
+          "eng": 10,
+          "nrg": -4
+         }
+        },
+        {
+         "text": "40-minute lecture",
+         "effects": {
+          "att": 3,
+          "eng": -8
+         }
+        },
+        {
+         "text": "Project-based learning",
+         "effects": {
+          "eng": 12,
+          "att": 4,
+          "nrg": -8
+         }
+        }
+       ]
+      },
+      {
+       "question": "Different needs",
+       "options": [
+        {
+         "text": "Differentiated worksheets",
+         "effects": {
+          "inc": 10,
+          "nrg": -6
+         }
+        },
+        {
+         "text": "Same task for everyone",
+         "effects": {
+          "inc": -8
+         }
+        },
+        {
+         "text": "Peer buddies",
+         "effects": {
+          "inc": 7,
+          "eng": 3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Phones out",
+     "brief": "Time to set the tone.",
+     "event": "Phones are everywhere and attention is dropping.",
+     "decisions": [
+      {
+       "question": "Phones",
+       "options": [
+        {
+         "text": "Phone box at the door",
+         "effects": {
+          "eng": 5,
+          "inc": -2
+         }
+        },
+        {
+         "text": "Use phones for a live quiz",
+         "effects": {
+          "eng": 10
+         }
+        },
+        {
+         "text": "Ignore it",
+         "effects": {
+          "att": -5
+         }
+        }
+       ]
+      },
+      {
+       "question": "Feedback",
+       "options": [
+        {
+         "text": "Live marking during class",
+         "effects": {
+          "att": 8,
+          "nrg": -5
+         }
+        },
+        {
+         "text": "Detailed written comments",
+         "effects": {
+          "att": 6,
+          "nrg": -10
+         }
+        },
+        {
+         "text": "AI-assisted feedback you review",
+         "effects": {
+          "att": 6,
+          "nrg": 2
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Beyond the lesson",
+     "brief": "Teaching is more than content.",
+     "event": "A quiet student seems to be struggling at home.",
+     "decisions": [
+      {
+       "question": "Pastoral care",
+       "options": [
+        {
+         "text": "Talk privately and refer to the counsellor",
+         "effects": {
+          "inc": 10,
+          "att": 2
+         }
+        },
+        {
+         "text": "Leave it",
+         "effects": {
+          "inc": -10
+         }
+        },
+        {
+         "text": "Mention it in front of the class",
+         "effects": {
+          "inc": -15,
+          "eng": -5
+         }
+        }
+       ]
+      },
+      {
+       "question": "Assessment",
+       "options": [
+        {
+         "text": "Weekly low-stakes quizzes",
+         "effects": {
+          "att": 8
+         }
+        },
+        {
+         "text": "One big exam",
+         "effects": {
+          "att": 2,
+          "eng": -5
+         }
+        },
+        {
+         "text": "Portfolio",
+         "effects": {
+          "inc": 5,
+          "att": 5,
+          "nrg": -5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Grow as a teacher",
+     "brief": "End of term. Reflect and plan.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Your development",
+       "options": [
+        {
+         "text": "Observe a colleague",
+         "effects": {
+          "att": 4,
+          "nrg": 2
+         }
+        },
+        {
+         "text": "Take an online course",
+         "effects": {
+          "att": 3
+         }
+        },
+        {
+         "text": "Rest",
+         "effects": {
+          "nrg": 3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Families",
+       "options": [
+        {
+         "text": "Parents’ evening with data",
+         "effects": {
+          "inc": 6,
+          "att": 3
+         }
+        },
+        {
+         "text": "A class newsletter",
+         "effects": {
+          "eng": 2
+         }
+        },
+        {
+         "text": "Nothing extra",
+         "effects": {}
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "topup",
+  "programme": "Top-up degree",
+  "level": "ug",
+  "tone": "student",
+  "title": "Go Global: Market Entry",
+  "tagline": "Take a Sri Lankan snack brand abroad. Pick the market, the model and the moves.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "MD",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Finance",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Marketing",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Supply chain",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "share",
+     "label": "Market share",
+     "start": 0,
+     "direction": 1,
+     "scale": 3,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 1
+    },
+    {
+     "key": "profit",
+     "label": "Profit",
+     "start": 0,
+     "direction": 1,
+     "scale": 4,
+     "prefix": "LKR ",
+     "suffix": "M",
+     "decimals": 1
+    },
+    {
+     "key": "risk",
+     "label": "Risk level",
+     "start": 50,
+     "direction": -1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "brand",
+     "label": "Brand awareness",
+     "start": 40,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Where to?",
+     "brief": "The board wants international revenue within a year.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Market",
+       "options": [
+        {
+         "text": "Maldives",
+         "effects": {
+          "share": 2,
+          "risk": -5
+         }
+        },
+        {
+         "text": "Dubai",
+         "effects": {
+          "share": 1,
+          "risk": 5,
+          "brand": 5
+         }
+        },
+        {
+         "text": "Bangladesh",
+         "effects": {
+          "share": 3,
+          "risk": 8
+         }
+        }
+       ]
+      },
+      {
+       "question": "Entry mode",
+       "options": [
+        {
+         "text": "Export through a distributor",
+         "effects": {
+          "risk": -5,
+          "profit": 2
+         }
+        },
+        {
+         "text": "Joint venture",
+         "effects": {
+          "share": 3,
+          "risk": 3
+         }
+        },
+        {
+         "text": "Own subsidiary",
+         "effects": {
+          "share": 5,
+          "risk": 10,
+          "profit": -5
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Currency shock",
+     "brief": "Margins are wobbling.",
+     "event": "The rupee just moved 12% against the dollar.",
+     "decisions": [
+      {
+       "question": "FX",
+       "options": [
+        {
+         "text": "Hedge with forward contracts",
+         "effects": {
+          "risk": -10,
+          "profit": -1
+         }
+        },
+        {
+         "text": "Price in USD",
+         "effects": {
+          "risk": -5,
+          "share": -1
+         }
+        },
+        {
+         "text": "Do nothing",
+         "effects": {
+          "risk": 8,
+          "profit": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Localisation",
+       "options": [
+        {
+         "text": "Local influencers and language",
+         "effects": {
+          "brand": 10,
+          "share": 2
+         }
+        },
+        {
+         "text": "Keep the global brand as is",
+         "effects": {
+          "brand": 3
+         }
+        },
+        {
+         "text": "Co-brand with a local retailer",
+         "effects": {
+          "share": 3,
+          "brand": 4
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Rules and routes",
+     "brief": "Regulators and logistics will make or break you.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Regulation",
+       "options": [
+        {
+         "text": "Hire local legal counsel",
+         "effects": {
+          "risk": -8,
+          "profit": -1
+         }
+        },
+        {
+         "text": "Research it yourselves",
+         "effects": {
+          "risk": 4
+         }
+        },
+        {
+         "text": "Lobby the government",
+         "effects": {
+          "risk": 5,
+          "brand": -4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Supply",
+       "options": [
+        {
+         "text": "Manufacture locally",
+         "effects": {
+          "profit": 4,
+          "risk": 3
+         }
+        },
+        {
+         "text": "Ship from Sri Lanka",
+         "effects": {
+          "profit": 1
+         }
+        },
+        {
+         "text": "Use a 3PL hub",
+         "effects": {
+          "profit": 2,
+          "risk": -3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Next chapter",
+     "brief": "Year-end review with the board.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Growth",
+       "options": [
+        {
+         "text": "Expand to a second city",
+         "effects": {
+          "share": 4,
+          "profit": 2,
+          "risk": 4
+         }
+        },
+        {
+         "text": "Go deeper where you are",
+         "effects": {
+          "share": 2,
+          "profit": 4
+         }
+        },
+        {
+         "text": "Exit and refocus",
+         "effects": {
+          "risk": -15,
+          "share": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Reputation",
+       "options": [
+        {
+         "text": "Publish an ESG report",
+         "effects": {
+          "brand": 8
+         }
+        },
+        {
+         "text": "Price promotion",
+         "effects": {
+          "share": 3,
+          "profit": -2
+         }
+        },
+        {
+         "text": "Loyalty app",
+         "effects": {
+          "share": 2,
+          "brand": 3,
+          "profit": 1
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "pgd",
+  "programme": "PG Diploma",
+  "level": "pg",
+  "tone": "professional",
+  "title": "The Boardroom",
+  "tagline": "You are CEO of Lanka Fresh, a mid-sized FMCG company facing retail and regulatory disruption.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "CEO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "CFO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Chief Strategy Officer",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Chief People Officer",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "px",
+     "label": "Share price",
+     "start": 100,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "LKR ",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "ms",
+     "label": "Market share",
+     "start": 18,
+     "direction": 1,
+     "scale": 3,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 1
+    },
+    {
+     "key": "esg",
+     "label": "ESG rating",
+     "start": 45,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "trust",
+     "label": "Stakeholder trust",
+     "start": 60,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Strategic review",
+     "brief": "Board paper: growth has stalled at 2% while private labels take share. The board expects a clear direction.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Strategic direction",
+       "options": [
+        {
+         "text": "Double down on flagship brands",
+         "effects": {
+          "ms": 2,
+          "px": 5
+         }
+        },
+        {
+         "text": "Diversify into plant-based foods",
+         "effects": {
+          "ms": 1,
+          "esg": 8,
+          "px": 2
+         }
+        },
+        {
+         "text": "Acquire a regional competitor",
+         "effects": {
+          "ms": 5,
+          "px": -6,
+          "trust": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Digital route to market",
+       "options": [
+        {
+         "text": "Build a direct-to-consumer platform",
+         "effects": {
+          "ms": 1,
+          "px": 4
+         }
+        },
+        {
+         "text": "Data partnership with a supermarket chain",
+         "effects": {
+          "ms": 2,
+          "trust": 2
+         }
+        },
+        {
+         "text": "Wait and observe",
+         "effects": {
+          "px": -3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Channel pressure",
+     "brief": "Your response will signal the company’s negotiating posture for years.",
+     "event": "The largest retailer demands an additional 8% margin or reduced shelf space.",
+     "decisions": [
+      {
+       "question": "Retailer response",
+       "options": [
+        {
+         "text": "Accept the terms",
+         "effects": {
+          "ms": 1,
+          "px": -6
+         }
+        },
+        {
+         "text": "Decline and grow modern-trade alternatives",
+         "effects": {
+          "ms": -2,
+          "px": 2,
+          "trust": 3
+         }
+        },
+        {
+         "text": "Counter with joint promotions",
+         "effects": {
+          "ms": 1,
+          "px": 1
+         }
+        }
+       ]
+      },
+      {
+       "question": "Cost base",
+       "options": [
+        {
+         "text": "Automate the main plant",
+         "effects": {
+          "px": 6,
+          "trust": -4,
+          "esg": 2
+         }
+        },
+        {
+         "text": "Renegotiate fairly with farmer suppliers",
+         "effects": {
+          "esg": 6,
+          "trust": 6,
+          "px": -1
+         }
+        },
+        {
+         "text": "Cut marketing spend",
+         "effects": {
+          "px": 3,
+          "ms": -2
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Regulatory shift",
+     "brief": "Compliance is mandatory; leadership is optional.",
+     "event": "Government announces single-use plastic packaging restrictions within 18 months.",
+     "decisions": [
+      {
+       "question": "Packaging",
+       "options": [
+        {
+         "text": "Lead with compostable packaging now",
+         "effects": {
+          "esg": 12,
+          "px": -3,
+          "trust": 5
+         }
+        },
+        {
+         "text": "Comply at minimum, on the deadline",
+         "effects": {
+          "esg": 2
+         }
+        },
+        {
+         "text": "Lobby for a delay",
+         "effects": {
+          "esg": -8,
+          "trust": -6
+         }
+        }
+       ]
+      },
+      {
+       "question": "Leadership pipeline",
+       "options": [
+        {
+         "text": "Succession plan and leadership academy",
+         "effects": {
+          "trust": 6,
+          "px": 2
+         }
+        },
+        {
+         "text": "Hire external star executives",
+         "effects": {
+          "px": 4,
+          "trust": -3
+         }
+        },
+        {
+         "text": "Freeze hiring",
+         "effects": {
+          "px": 2,
+          "trust": -4
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Investor day",
+     "brief": "Analysts and institutional investors expect a capital allocation plan and a credible narrative.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Capital allocation",
+       "options": [
+        {
+         "text": "Raise the dividend",
+         "effects": {
+          "px": 6,
+          "trust": 2
+         }
+        },
+        {
+         "text": "Reinvest in R&D",
+         "effects": {
+          "ms": 3,
+          "esg": 3,
+          "px": 2
+         }
+        },
+        {
+         "text": "Share buyback",
+         "effects": {
+          "px": 8,
+          "trust": -2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Narrative",
+       "options": [
+        {
+         "text": "Long-term value plan with ESG targets",
+         "effects": {
+          "trust": 8,
+          "px": 3
+         }
+        },
+        {
+         "text": "Short-term earnings guidance",
+         "effects": {
+          "px": 5,
+          "trust": -3
+         }
+        },
+        {
+         "text": "Say little",
+         "effects": {
+          "px": -3
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "masters",
+  "programme": "SCU Masters",
+  "level": "pg",
+  "tone": "professional",
+  "title": "Turnaround CEO",
+  "tagline": "Serendib Hospitality Group is losing money after a tourism downturn. You have 24 months.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Group CEO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "CFO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Chief Commercial Officer",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Board liaison",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "ebitda",
+     "label": "EBITDA",
+     "start": -20,
+     "direction": 1,
+     "scale": 15,
+     "prefix": "LKR ",
+     "suffix": "M",
+     "decimals": 0
+    },
+    {
+     "key": "run",
+     "label": "Cash runway",
+     "start": 6,
+     "direction": 1,
+     "scale": 4,
+     "prefix": "",
+     "suffix": " mo",
+     "decimals": 0
+    },
+    {
+     "key": "occ",
+     "label": "Occupancy",
+     "start": 48,
+     "direction": 1,
+     "scale": 8,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 0
+    },
+    {
+     "key": "board",
+     "label": "Board confidence",
+     "start": 50,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "The first 100 days",
+     "brief": "You inherit six hotels, high debt and a demoralised workforce. Lenders want a plan in 30 days.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Liquidity",
+       "options": [
+        {
+         "text": "Sell a non-core property",
+         "effects": {
+          "run": 6,
+          "board": 5
+         }
+        },
+        {
+         "text": "Reduce headcount 20%",
+         "effects": {
+          "run": 4,
+          "board": 3,
+          "occ": -3
+         }
+        },
+        {
+         "text": "Rights issue to shareholders",
+         "effects": {
+          "run": 8,
+          "board": -4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Positioning",
+       "options": [
+        {
+         "text": "Long-stay offer for remote workers",
+         "effects": {
+          "occ": 8
+         }
+        },
+        {
+         "text": "Deep discounting",
+         "effects": {
+          "occ": 12,
+          "ebitda": -10
+         }
+        },
+        {
+         "text": "Premium wellness niche",
+         "effects": {
+          "occ": 4,
+          "ebitda": 8
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "External shock",
+     "brief": "Forward bookings drop 30% overnight.",
+     "event": "A key source market issues a travel advisory for the region.",
+     "decisions": [
+      {
+       "question": "Demand response",
+       "options": [
+        {
+         "text": "Pivot to domestic and regional travellers",
+         "effects": {
+          "occ": 6,
+          "ebitda": -3
+         }
+        },
+        {
+         "text": "Insurance-backed booking guarantee",
+         "effects": {
+          "occ": 4,
+          "board": 3
+         }
+        },
+        {
+         "text": "Wait for it to pass",
+         "effects": {
+          "occ": -8
+         }
+        }
+       ]
+      },
+      {
+       "question": "Governance",
+       "options": [
+        {
+         "text": "Independent turnaround committee",
+         "effects": {
+          "board": 10
+         }
+        },
+        {
+         "text": "Run it from the CEO office",
+         "effects": {
+          "board": -6
+         }
+        },
+        {
+         "text": "Bring in external advisers",
+         "effects": {
+          "board": 4,
+          "run": -1
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Operating model",
+     "brief": "Costs are under control; now you need revenue quality.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Technology",
+       "options": [
+        {
+         "text": "Revenue management system with AI pricing",
+         "effects": {
+          "ebitda": 12,
+          "run": -1
+         }
+        },
+        {
+         "text": "Direct booking site and OTA renegotiation",
+         "effects": {
+          "occ": 5,
+          "ebitda": 5
+         }
+        },
+        {
+         "text": "Defer investment",
+         "effects": {
+          "ebitda": -4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Workforce",
+       "options": [
+        {
+         "text": "Reskill staff into multi-skilled roles",
+         "effects": {
+          "ebitda": 6,
+          "board": 3
+         }
+        },
+        {
+         "text": "Outsource housekeeping",
+         "effects": {
+          "ebitda": 8,
+          "board": -3
+         }
+        },
+        {
+         "text": "Rehire laid-off staff with retention bonuses",
+         "effects": {
+          "occ": 3,
+          "ebitda": -4
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Recapitalisation",
+     "brief": "Lenders will refinance only with a credible long-term structure.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Structure",
+       "options": [
+        {
+         "text": "Sale and leaseback of two hotels",
+         "effects": {
+          "run": 10,
+          "ebitda": -4
+         }
+        },
+        {
+         "text": "Partner with a global hotel brand",
+         "effects": {
+          "occ": 10,
+          "board": 6,
+          "ebitda": 5
+         }
+        },
+        {
+         "text": "List a subsidiary",
+         "effects": {
+          "run": 6,
+          "board": -2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Investor communication",
+       "options": [
+        {
+         "text": "Transparent update with scenarios",
+         "effects": {
+          "board": 10
+         }
+        },
+        {
+         "text": "Optimistic guidance",
+         "effects": {
+          "board": 2
+         }
+        },
+        {
+         "text": "No update until results improve",
+         "effects": {
+          "board": -8
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "cpdhr",
+  "programme": "CPD AI for HR",
+  "level": "cpd",
+  "tone": "professional",
+  "title": "People Ops AI Lab",
+  "tagline": "Introduce AI into HR at a 500-person company without losing your people’s trust.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "HR director",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Talent lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Data & ethics",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Change lead",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "tth",
+     "label": "Time to hire",
+     "start": 45,
+     "direction": -1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": " days",
+     "decimals": 0
+    },
+    {
+     "key": "trust",
+     "label": "Employee trust",
+     "start": 60,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "bias",
+     "label": "Bias risk",
+     "start": 50,
+     "direction": -1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "save",
+     "label": "Annual savings",
+     "start": 0,
+     "direction": 1,
+     "scale": 4,
+     "prefix": "LKR ",
+     "suffix": "M",
+     "decimals": 1
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Where to start",
+     "brief": "The CEO wants faster hiring and lower HR costs this year.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Recruitment",
+       "options": [
+        {
+         "text": "AI CV screening with human review",
+         "effects": {
+          "tth": -12,
+          "bias": -5,
+          "save": 2
+         }
+        },
+        {
+         "text": "Fully automated screening",
+         "effects": {
+          "tth": -18,
+          "bias": 15,
+          "trust": -8
+         }
+        },
+        {
+         "text": "Keep it manual for now",
+         "effects": {}
+        }
+       ]
+      },
+      {
+       "question": "Policy",
+       "options": [
+        {
+         "text": "Publish an AI-use policy after consulting staff",
+         "effects": {
+          "trust": 12,
+          "bias": -5
+         }
+        },
+        {
+         "text": "Quiet rollout",
+         "effects": {
+          "trust": -10
+         }
+        },
+        {
+         "text": "Brief the union only",
+         "effects": {
+          "trust": 4
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "A complaint",
+     "brief": "How you respond will be scrutinised.",
+     "event": "A candidate says the AI rejected her unfairly and posts about it online.",
+     "decisions": [
+      {
+       "question": "Response",
+       "options": [
+        {
+         "text": "Audit the model and explain the decision",
+         "effects": {
+          "bias": -12,
+          "trust": 8
+         }
+        },
+        {
+         "text": "Defend the vendor",
+         "effects": {
+          "trust": -10
+         }
+        },
+        {
+         "text": "Pause the tool",
+         "effects": {
+          "tth": 8,
+          "trust": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Next use case",
+       "options": [
+        {
+         "text": "HR chatbot for leave and policy questions",
+         "effects": {
+          "save": 3,
+          "trust": 3
+         }
+        },
+        {
+         "text": "AI performance scoring",
+         "effects": {
+          "bias": 8,
+          "trust": -6,
+          "save": 2
+         }
+        },
+        {
+         "text": "Personalised learning recommendations",
+         "effects": {
+          "trust": 5,
+          "save": 1
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Data and skills",
+     "brief": "Legal and IT ask how employee data is handled.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Data",
+       "options": [
+        {
+         "text": "Minimise data and get consent",
+         "effects": {
+          "trust": 8,
+          "bias": -3
+         }
+        },
+        {
+         "text": "Collect everything that might be useful",
+         "effects": {
+          "bias": 6,
+          "trust": -8
+         }
+        },
+        {
+         "text": "Use the vendor defaults",
+         "effects": {
+          "trust": -2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Capability",
+       "options": [
+        {
+         "text": "Upskill the HR team in data and prompting",
+         "effects": {
+          "save": 2,
+          "trust": 3
+         }
+        },
+        {
+         "text": "Hire a data scientist",
+         "effects": {
+          "save": 3
+         }
+        },
+        {
+         "text": "No change",
+         "effects": {}
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Scale responsibly",
+     "brief": "The board asks whether to roll out across all business units.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Rollout",
+       "options": [
+        {
+         "text": "Measure ROI and publish results",
+         "effects": {
+          "trust": 5,
+          "save": 2
+         }
+        },
+        {
+         "text": "Scale to all units now",
+         "effects": {
+          "save": 5,
+          "bias": 4
+         }
+        },
+        {
+         "text": "Set up an ethics review board",
+         "effects": {
+          "bias": -8,
+          "trust": 6
+         }
+        }
+       ]
+      },
+      {
+       "question": "Decision rights",
+       "options": [
+        {
+         "text": "Human approval for every decision",
+         "effects": {
+          "bias": -6,
+          "tth": 3
+         }
+        },
+        {
+         "text": "Automate offer letters",
+         "effects": {
+          "tth": -8,
+          "trust": -4
+         }
+        },
+        {
+         "text": "Human review by risk level",
+         "effects": {
+          "bias": -4,
+          "tth": -4
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "cpdfin",
+  "programme": "CPD AI for Finance",
+  "level": "cpd",
+  "tone": "professional",
+  "title": "AI CFO",
+  "tagline": "Modernise a finance function: faster close, better forecasts, tighter controls.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "CFO",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Controller",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "FP&A lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Risk & audit",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "close",
+     "label": "Days to close",
+     "start": 10,
+     "direction": -1,
+     "scale": 3,
+     "prefix": "",
+     "suffix": " days",
+     "decimals": 0
+    },
+    {
+     "key": "fc",
+     "label": "Forecast accuracy",
+     "start": 70,
+     "direction": 1,
+     "scale": 8,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 0
+    },
+    {
+     "key": "fraud",
+     "label": "Fraud losses",
+     "start": 800,
+     "direction": -1,
+     "scale": 300,
+     "prefix": "LKR ",
+     "suffix": "k",
+     "decimals": 0
+    },
+    {
+     "key": "ctrl",
+     "label": "Control strength",
+     "start": 60,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Quick wins",
+     "brief": "The month-end close takes 10 days and the forecast is regularly wrong.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Automation",
+       "options": [
+        {
+         "text": "Automate bank reconciliation",
+         "effects": {
+          "close": -3,
+          "ctrl": 4
+         }
+        },
+        {
+         "text": "AI forecasting model",
+         "effects": {
+          "fc": 8
+         }
+        },
+        {
+         "text": "Robotic process automation for invoices",
+         "effects": {
+          "close": -2,
+          "fraud": 50
+         }
+        }
+       ]
+      },
+      {
+       "question": "Foundations",
+       "options": [
+        {
+         "text": "Clean master data first",
+         "effects": {
+          "fc": 5,
+          "ctrl": 6,
+          "close": 1
+         }
+        },
+        {
+         "text": "Skip it",
+         "effects": {
+          "fc": -4
+         }
+        },
+        {
+         "text": "Buy a data-quality tool",
+         "effects": {
+          "fc": 3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Deepfake attempt",
+     "brief": "Fraud is evolving faster than controls.",
+     "event": "An accounts clerk receives a convincing voice call from the \"CEO\" requesting an urgent transfer.",
+     "decisions": [
+      {
+       "question": "Immediate control",
+       "options": [
+        {
+         "text": "Mandatory call-back verification",
+         "effects": {
+          "fraud": -300,
+          "ctrl": 10
+         }
+        },
+        {
+         "text": "Pay it, it sounded genuine",
+         "effects": {
+          "fraud": 1500,
+          "ctrl": -10
+         }
+        },
+        {
+         "text": "Escalate to IT only",
+         "effects": {
+          "fraud": -100
+         }
+        }
+       ]
+      },
+      {
+       "question": "Detection",
+       "options": [
+        {
+         "text": "Anomaly detection on payments",
+         "effects": {
+          "fraud": -200,
+          "ctrl": 6
+         }
+        },
+        {
+         "text": "Rely on the annual audit",
+         "effects": {
+          "fraud": 100
+         }
+        },
+        {
+         "text": "Segregation-of-duties review",
+         "effects": {
+          "ctrl": 8
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Model governance",
+     "brief": "Auditors ask how AI-generated numbers are validated.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Model choice",
+       "options": [
+        {
+         "text": "Explainable models auditors can follow",
+         "effects": {
+          "ctrl": 8,
+          "fc": 2
+         }
+        },
+        {
+         "text": "Black-box model with best accuracy",
+         "effects": {
+          "fc": 6,
+          "ctrl": -6
+         }
+        },
+        {
+         "text": "Vendor’s standard model",
+         "effects": {
+          "fc": 3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Planning",
+       "options": [
+        {
+         "text": "Rolling 13-week cash forecast",
+         "effects": {
+          "fc": 6
+         }
+        },
+        {
+         "text": "Annual budget only",
+         "effects": {
+          "fc": -3
+         }
+        },
+        {
+         "text": "Scenario planning",
+         "effects": {
+          "fc": 4,
+          "ctrl": 2
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Operating model",
+     "brief": "The CEO asks what the finance team of the future looks like.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "People",
+       "options": [
+        {
+         "text": "Upskill the finance team",
+         "effects": {
+          "close": -1,
+          "fc": 3
+         }
+        },
+        {
+         "text": "Outsource transactional work",
+         "effects": {
+          "close": -1,
+          "ctrl": -4
+         }
+        },
+        {
+         "text": "Shared service centre plus AI",
+         "effects": {
+          "close": -2,
+          "fc": 2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Reporting",
+       "options": [
+        {
+         "text": "Real-time board dashboard",
+         "effects": {
+          "ctrl": 4
+         }
+        },
+        {
+         "text": "Monthly reporting pack",
+         "effects": {}
+        },
+        {
+         "text": "AI-drafted commentary, reviewed by humans",
+         "effects": {
+          "close": -1,
+          "ctrl": 3
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "cpddm",
+  "programme": "CPD Digital Marketing",
+  "level": "cpd",
+  "tone": "professional",
+  "title": "Growth Sprint",
+  "tagline": "Six weeks, one budget, one goal: more qualified leads at a lower cost.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Head of growth",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Paid media",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Content",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Analytics",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "leads",
+     "label": "Qualified leads",
+     "start": 200,
+     "direction": 1,
+     "scale": 150,
+     "prefix": "",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "cpa",
+     "label": "Cost per lead",
+     "start": 2500,
+     "direction": -1,
+     "scale": 500,
+     "prefix": "LKR ",
+     "suffix": "",
+     "decimals": 0
+    },
+    {
+     "key": "roas",
+     "label": "Return on ad spend",
+     "start": 1.5,
+     "direction": 1,
+     "scale": 0.5,
+     "prefix": "",
+     "suffix": "x",
+     "decimals": 1
+    },
+    {
+     "key": "brand",
+     "label": "Brand search",
+     "start": 40,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Budget plan",
+     "brief": "You have LKR 1.5M for six weeks.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Channel mix",
+       "options": [
+        {
+         "text": "70% Meta, 30% Google",
+         "effects": {
+          "leads": 150,
+          "cpa": -200
+         }
+        },
+        {
+         "text": "Even split plus TikTok",
+         "effects": {
+          "leads": 120,
+          "brand": 8
+         }
+        },
+        {
+         "text": "All in on influencers",
+         "effects": {
+          "brand": 15,
+          "cpa": 600
+         }
+        }
+       ]
+      },
+      {
+       "question": "Creative",
+       "options": [
+        {
+         "text": "UGC-style short videos",
+         "effects": {
+          "leads": 80,
+          "cpa": -300
+         }
+        },
+        {
+         "text": "Polished studio ads",
+         "effects": {
+          "brand": 5,
+          "cpa": 200
+         }
+        },
+        {
+         "text": "Static images",
+         "effects": {
+          "cpa": 100
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Tracking breaks",
+     "brief": "You can’t optimise what you can’t measure.",
+     "event": "A platform privacy change cuts your attribution data by a third.",
+     "decisions": [
+      {
+       "question": "Measurement",
+       "options": [
+        {
+         "text": "Server-side tracking and conversions API",
+         "effects": {
+          "cpa": -300,
+          "roas": 0.3
+         }
+        },
+        {
+         "text": "Trust platform numbers",
+         "effects": {
+          "cpa": 300
+         }
+        },
+        {
+         "text": "Marketing mix modelling",
+         "effects": {
+          "roas": 0.2,
+          "brand": 2
+         }
+        }
+       ]
+      },
+      {
+       "question": "Conversion",
+       "options": [
+        {
+         "text": "A/B test the landing page",
+         "effects": {
+          "cpa": -250,
+          "leads": 60
+         }
+        },
+        {
+         "text": "Send traffic to the homepage",
+         "effects": {
+          "cpa": 150
+         }
+        },
+        {
+         "text": "Click-to-WhatsApp ads",
+         "effects": {
+          "leads": 100,
+          "cpa": -150
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Optimise",
+     "brief": "Week four: double down on what works.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Audience",
+       "options": [
+        {
+         "text": "Retarget warm audiences",
+         "effects": {
+          "roas": 0.5,
+          "cpa": -200
+         }
+        },
+        {
+         "text": "Broad prospecting",
+         "effects": {
+          "leads": 100,
+          "cpa": 150
+         }
+        },
+        {
+         "text": "Lookalikes of best customers",
+         "effects": {
+          "leads": 80,
+          "roas": 0.3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Nurture",
+       "options": [
+        {
+         "text": "Email nurture sequence",
+         "effects": {
+          "roas": 0.3
+         }
+        },
+        {
+         "text": "SMS blasts",
+         "effects": {
+          "leads": 40,
+          "brand": -4
+         }
+        },
+        {
+         "text": "SEO content",
+         "effects": {
+          "brand": 10
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Scale",
+     "brief": "Final two weeks.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Budget",
+       "options": [
+        {
+         "text": "Scale winners by 30%",
+         "effects": {
+          "leads": 150,
+          "cpa": 150
+         }
+        },
+        {
+         "text": "Cut losers, hold spend",
+         "effects": {
+          "cpa": -200,
+          "roas": 0.2
+         }
+        },
+        {
+         "text": "Test a new channel",
+         "effects": {
+          "brand": 5,
+          "leads": 50
+         }
+        }
+       ]
+      },
+      {
+       "question": "Ways of working",
+       "options": [
+        {
+         "text": "Weekly dashboard and learnings",
+         "effects": {
+          "roas": 0.2
+         }
+        },
+        {
+         "text": "Monthly review",
+         "effects": {}
+        },
+        {
+         "text": "Automated bidding rules",
+         "effects": {
+          "cpa": -100
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "cpdie",
+  "programme": "CPD Innovation & Entrepreneurship",
+  "level": "cpd",
+  "tone": "professional",
+  "title": "Pitch to Launch",
+  "tagline": "Take an idea to a funded launch. Validate, build, pitch.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Founder",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Product",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Growth",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Finance",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "pmf",
+     "label": "Product-market fit",
+     "start": 20,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 0
+    },
+    {
+     "key": "run",
+     "label": "Runway",
+     "start": 6,
+     "direction": 1,
+     "scale": 4,
+     "prefix": "",
+     "suffix": " mo",
+     "decimals": 0
+    },
+    {
+     "key": "inv",
+     "label": "Investor interest",
+     "start": 30,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "team",
+     "label": "Team strength",
+     "start": 60,
+     "direction": 1,
+     "scale": 12,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Validate",
+     "brief": "You have an idea and six months of savings.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Discovery",
+       "options": [
+        {
+         "text": "20 customer interviews",
+         "effects": {
+          "pmf": 10,
+          "run": -0.5
+         }
+        },
+        {
+         "text": "Build first, ask later",
+         "effects": {
+          "run": -2,
+          "pmf": 2
+         }
+        },
+        {
+         "text": "Social media survey",
+         "effects": {
+          "pmf": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Team",
+       "options": [
+        {
+         "text": "Co-founder with complementary skills",
+         "effects": {
+          "team": 12
+         }
+        },
+        {
+         "text": "Go solo",
+         "effects": {
+          "team": -8,
+          "run": 1
+         }
+        },
+        {
+         "text": "Freelancers",
+         "effects": {
+          "team": 2,
+          "run": -1
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Surprise signal",
+     "brief": "Listen to the market or stick to the vision?",
+     "event": "Early users love a side feature and ignore your core product.",
+     "decisions": [
+      {
+       "question": "Direction",
+       "options": [
+        {
+         "text": "Pivot to the loved feature",
+         "effects": {
+          "pmf": 15,
+          "inv": 5
+         }
+        },
+        {
+         "text": "Stay the course",
+         "effects": {
+          "pmf": -5
+         }
+        },
+        {
+         "text": "Test both for a month",
+         "effects": {
+          "pmf": 6,
+          "run": -1
+         }
+        }
+       ]
+      },
+      {
+       "question": "Cash",
+       "options": [
+        {
+         "text": "Pre-sales",
+         "effects": {
+          "run": 3,
+          "pmf": 5
+         }
+        },
+        {
+         "text": "Apply for a grant",
+         "effects": {
+          "run": 2
+         }
+        },
+        {
+         "text": "Personal loan",
+         "effects": {
+          "run": 2,
+          "team": -3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "The pitch",
+     "brief": "Demo day in two weeks.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Story",
+       "options": [
+        {
+         "text": "Traction-led story",
+         "effects": {
+          "inv": 15
+         }
+        },
+        {
+         "text": "Big-vision market slide",
+         "effects": {
+          "inv": 6
+         }
+        },
+        {
+         "text": "Tech-heavy demo",
+         "effects": {
+          "inv": 4
+         }
+        }
+       ]
+      },
+      {
+       "question": "Support",
+       "options": [
+        {
+         "text": "Build an advisory board",
+         "effects": {
+          "inv": 5,
+          "team": 3
+         }
+        },
+        {
+         "text": "Join an accelerator",
+         "effects": {
+          "inv": 8,
+          "run": 2,
+          "team": 2
+         }
+        },
+        {
+         "text": "Go it alone",
+         "effects": {}
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Launch",
+     "brief": "Term sheet or bootstrap?",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Funding",
+       "options": [
+        {
+         "text": "Raise pre-seed at a fair valuation",
+         "effects": {
+          "run": 12,
+          "inv": 5
+         }
+        },
+        {
+         "text": "Revenue-based financing",
+         "effects": {
+          "run": 6
+         }
+        },
+        {
+         "text": "Keep bootstrapping",
+         "effects": {
+          "team": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Go-to-market",
+       "options": [
+        {
+         "text": "Public launch",
+         "effects": {
+          "pmf": 5,
+          "inv": 3
+         }
+        },
+        {
+         "text": "Private beta",
+         "effects": {
+          "pmf": 3
+         }
+        },
+        {
+         "text": "Big launch event",
+         "effects": {
+          "inv": 4,
+          "run": -1
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "starter_key": "cpdpm",
+  "programme": "CPD Project Management",
+  "level": "cpd",
+  "tone": "professional",
+  "title": "Deadline Rescue",
+  "tagline": "Take over a late, over-budget IT project and land it.",
+  "roles": [
+   {
+    "key": "role_1",
+    "name": "Project manager",
+    "responsibility": ""
+   },
+   {
+    "key": "role_2",
+    "name": "Sponsor liaison",
+    "responsibility": ""
+   },
+   {
+    "key": "role_3",
+    "name": "Delivery lead",
+    "responsibility": ""
+   },
+   {
+    "key": "role_4",
+    "name": "Risk lead",
+    "responsibility": ""
+   }
+  ],
+  "content": {
+   "kpis": [
+    {
+     "key": "sched",
+     "label": "Schedule slip",
+     "start": 20,
+     "direction": -1,
+     "scale": 6,
+     "prefix": "",
+     "suffix": " days",
+     "decimals": 0
+    },
+    {
+     "key": "budget",
+     "label": "Budget overrun",
+     "start": 10,
+     "direction": -1,
+     "scale": 4,
+     "prefix": "",
+     "suffix": "%",
+     "decimals": 0
+    },
+    {
+     "key": "stake",
+     "label": "Stakeholder satisfaction",
+     "start": 55,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    },
+    {
+     "key": "morale",
+     "label": "Team morale",
+     "start": 60,
+     "direction": 1,
+     "scale": 10,
+     "prefix": "",
+     "suffix": "/100",
+     "decimals": 0
+    }
+   ],
+   "rounds": [
+    {
+     "title": "Take stock",
+     "brief": "The project is 20 days late and 10% over budget. The sponsor is frustrated.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Recovery plan",
+       "options": [
+        {
+         "text": "Re-baseline using the critical path",
+         "effects": {
+          "sched": -6,
+          "stake": 5
+         }
+        },
+        {
+         "text": "Overtime crunch",
+         "effects": {
+          "sched": -8,
+          "morale": -15
+         }
+        },
+        {
+         "text": "Cut scope with the sponsor",
+         "effects": {
+          "sched": -10,
+          "stake": -3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Rhythm",
+       "options": [
+        {
+         "text": "Daily stand-ups",
+         "effects": {
+          "morale": 4,
+          "sched": -2
+         }
+        },
+        {
+         "text": "Weekly status emails",
+         "effects": {
+          "stake": 2
+         }
+        },
+        {
+         "text": "Kanban board",
+         "effects": {
+          "sched": -3,
+          "morale": 3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Key person risk",
+     "brief": "Knowledge is walking out the door.",
+     "event": "Your lead developer resigns.",
+     "decisions": [
+      {
+       "question": "Cover",
+       "options": [
+        {
+         "text": "Contractor backfill",
+         "effects": {
+          "sched": -3,
+          "budget": 4
+         }
+        },
+        {
+         "text": "Spread the work across the team",
+         "effects": {
+          "morale": -8
+         }
+        },
+        {
+         "text": "Pair programming and documentation",
+         "effects": {
+          "morale": 3,
+          "sched": 1
+         }
+        }
+       ]
+      },
+      {
+       "question": "Risk",
+       "options": [
+        {
+         "text": "Review the risk register",
+         "effects": {
+          "budget": -2,
+          "stake": 3
+         }
+        },
+        {
+         "text": "Do nothing",
+         "effects": {}
+        },
+        {
+         "text": "Release contingency budget",
+         "effects": {
+          "budget": 3,
+          "sched": -3
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Stakeholders",
+     "brief": "The steering committee meets next week.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Transparency",
+       "options": [
+        {
+         "text": "Demo working software",
+         "effects": {
+          "stake": 10
+         }
+        },
+        {
+         "text": "Hide the issues",
+         "effects": {
+          "stake": -10
+         }
+        },
+        {
+         "text": "Formal change control board",
+         "effects": {
+          "budget": -3,
+          "stake": 3
+         }
+        }
+       ]
+      },
+      {
+       "question": "Method",
+       "options": [
+        {
+         "text": "Agile sprints",
+         "effects": {
+          "sched": -4,
+          "morale": 4
+         }
+        },
+        {
+         "text": "Waterfall stage gates",
+         "effects": {
+          "budget": -2
+         }
+        },
+        {
+         "text": "Hybrid",
+         "effects": {
+          "sched": -2,
+          "budget": -1
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Go-live",
+     "brief": "Ship it.",
+     "event": null,
+     "decisions": [
+      {
+       "question": "Release",
+       "options": [
+        {
+         "text": "Go live with known minor bugs",
+         "effects": {
+          "sched": -6,
+          "stake": -2
+         }
+        },
+        {
+         "text": "Delay one week",
+         "effects": {
+          "sched": 5,
+          "stake": 3
+         }
+        },
+        {
+         "text": "Phased rollout",
+         "effects": {
+          "sched": -3,
+          "stake": 5
+         }
+        }
+       ]
+      },
+      {
+       "question": "Close-out",
+       "options": [
+        {
+         "text": "Lessons-learned retrospective",
+         "effects": {
+          "morale": 6
+         }
+        },
+        {
+         "text": "Celebrate with a bonus",
+         "effects": {
+          "morale": 8,
+          "budget": 2
+         }
+        },
+        {
+         "text": "Move straight on",
+         "effects": {}
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ }
+]

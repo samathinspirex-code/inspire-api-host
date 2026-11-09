@@ -9,7 +9,10 @@ from openpyxl import load_workbook
 
 from app.core.errors import ForbiddenError, ValidationError
 from app.modules.lms import rubric_service
-from app.modules.lms.rubric_excel import build_feedback_workbook, feedback_file_name, parse_rubric_workbook
+from pypdf import PdfReader
+
+from app.modules.lms.rubric_excel import build_feedback_workbook, build_feedback_zip, feedback_file_name, parse_rubric_workbook
+from app.modules.lms.rubric_pdf import build_feedback_pdf
 from app.modules.lms.rubric_grading import compute_rubric_grade, grade_band, level_from_ac_code, normalise_level
 from app.modules.lms.schemas.rubric import RubricAssessmentWrite, RubricCriterionResult
 
@@ -18,7 +21,7 @@ SAMPLE = [
     ("LO1", "Understand types of organisation", "1.1", "pass"),
     ("LO1", "Understand types of organisation", "1.2", "pass"),
     ("LO1", "Understand types of organisation", "1.3", "pass"),
-    ("LO1", "Understand types of organisation", "1M1", "merit"),
+    ("LO1", "Understand types of", "1M1", "merit"),
     ("LO2", "Understand the structure of organisations", "2.1", "pass"),
     ("LO2", "Understand the structure of organisations", "2.2", "pass"),
     ("LO2", "Understand the structure of organisations", "2D1", "distinction"),
@@ -157,6 +160,29 @@ class RubricExcelTests(unittest.TestCase):
     def test_file_name_is_safe(self):
         self.assertEqual(feedback_file_name("ATHE L4 Business Environment", "Test Learner"), "ATHE L4 Business Environment - Test Learner.xlsx")
         self.assertEqual(feedback_file_name("Unit 1/2: Rubric", "Ann", "2nd Assessor"), "Unit 1-2- Rubric - Ann - 2nd Assessor.xlsx")
+
+
+class RubricPdfTests(unittest.TestCase):
+    def test_feedback_pdf_has_header_criteria_and_comments(self):
+        content = build_feedback_pdf(sample_form(overall_grade="Resubmission", overall_comment="Rework <LO2> & resubmit."))
+        self.assertTrue(content.startswith(b"%PDF"))
+        reader = PdfReader(io.BytesIO(content))
+        self.assertEqual(reader.metadata.title, "ATHE LEVEL 4 HND IN BUSINESS AND MANAGEMENT")
+        text = " ".join(page.extract_text() for page in reader.pages)
+        for expected in ("Test Learner", "IC000001", "Resubmission", "Understand types of", "1M1", "Not Achieved",
+                         "=SUM(A1)", "For 1M1: add the assessment", "Rework <LO2> & resubmit.", "Overall comment and feedback"):
+            self.assertIn(expected, text)
+
+    def test_long_evidence_flows_onto_more_pages(self):
+        long_criteria = [{**item, "achieved": True, "evidence": "Detailed evidence. " * 60} for item in CRITERIA]
+        reader = PdfReader(io.BytesIO(build_feedback_pdf(sample_form(criteria=long_criteria))))
+        self.assertGreater(len(reader.pages), 2)
+        self.assertIn("Page 2", reader.pages[1].extract_text())
+
+    def test_zip_keeps_duplicate_names_apart(self):
+        import zipfile
+        archive = zipfile.ZipFile(io.BytesIO(build_feedback_zip([("A - Ann.pdf", b"1"), ("A - Ann.pdf", b"2")])))
+        self.assertEqual(archive.namelist(), ["A - Ann.pdf", "A - Ann (2).pdf"])
 
 
 class RubricVisibilityTests(unittest.TestCase):

@@ -41,6 +41,17 @@ from app.modules.lms.models.rubric import (
     LmsRubricTemplate,
     LmsRubricTemplateCriterion,
 )
+from app.modules.lms.models.simulator import (
+    LmsSimInvite,
+    LmsSimMessage,
+    LmsSimRoundResult,
+    LmsSimRun,
+    LmsSimTeam,
+    LmsSimTeamMember,
+    LmsSimTemplate,
+    LmsSimVote,
+    LmsXpLedger,
+)
 
 __all__ = [
     "ClassLecturer",
@@ -86,4 +97,13 @@ __all__ = [
     "LmsRubricAssessment",
     "LmsRubricTemplate",
     "LmsRubricTemplateCriterion",
+    "LmsSimInvite",
+    "LmsSimMessage",
+    "LmsSimRoundResult",
+    "LmsSimRun",
+    "LmsSimTeam",
+    "LmsSimTeamMember",
+    "LmsSimTemplate",
+    "LmsSimVote",
+    "LmsXpLedger",
 ]
