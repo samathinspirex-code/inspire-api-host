@@ -65,6 +65,7 @@ def _check_roles(roles: list[SimRole]) -> None:
 class SimTemplateWrite(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     tagline: str = Field(default="", max_length=400)
+    cover_image_url: str | None = Field(default=None, max_length=1000, pattern=r"^https://\S+$")
     programme: str = Field(default="", max_length=120)
     level: Literal["ug", "pg", "cpd"] = "ug"
     tone: Literal["student", "professional"] = "student"

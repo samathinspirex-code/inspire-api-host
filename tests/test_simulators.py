@@ -128,6 +128,14 @@ class Schemas(unittest.TestCase):
         self.assertEqual([role["key"] for role in roles], ["role_1", "role_2"])
 
 
+    def test_cover_image_must_be_https(self):
+        base = {key: STARTERS[0][key] for key in ("title", "tagline", "programme", "level", "tone", "content", "roles")}
+        self.assertEqual(SimTemplateWrite(**base, cover_image_url="https://cdn.example.test/a.webp").cover_image_url, "https://cdn.example.test/a.webp")
+        self.assertIsNone(SimTemplateWrite(**base).cover_image_url)
+        for bad in ("javascript:alert(1)", "http://plain.example.test/a.png"):
+            with self.assertRaises(SchemaError):
+                SimTemplateWrite(**base, cover_image_url=bad)
+
 class Windows(unittest.TestCase):
     def test_window_states_and_incomplete_team(self):
         self.assertEqual(service._window(make_run(), NOW), "open")
@@ -303,6 +311,18 @@ class Rounds(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("effects", json.dumps(state, default=str))
         self.assertEqual(state["round"]["title"], "One")
 
+
+class AdminAccess(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_manages_any_class(self):
+        db = MagicMock()
+        db.get = AsyncMock(side_effect=[SimpleNamespace(status="active"), None])
+        with patch.object(service, "is_global_admin", AsyncMock(return_value=True)):
+            await service._ensure_class_manager(db, 3, 42)
+
+    def test_admins_have_the_simulators_menu(self):
+        from app.modules.lms.service import ROLE_NAVIGATION
+        for role in ("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"):
+            self.assertEqual([key for key, _, _ in ROLE_NAVIGATION[role]].count("simulators"), 1, role)
 
 if __name__ == "__main__":
     unittest.main()
