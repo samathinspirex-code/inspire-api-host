@@ -193,6 +193,7 @@ from app.modules.lms.schemas import (
     MyProfileResponse,
     LecturerDirectoryProfileResponse,
     MyProfileUpdate,
+    ProfileAvatarUpdate,
     StudentAcademicProfileResponse,
     AnalyticsDashboardResponse,
     VimeoCourseLibraryResponse,
@@ -328,6 +329,17 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
 ) -> MyProfileResponse:
     return await profile_service.update_my_profile(
+        db, current_user.user_id, service.resolve_role(current_user.access), payload
+    )
+
+
+@router.put("/profile/avatar", response_model=MyProfileResponse)
+async def set_my_profile_avatar(
+    payload: ProfileAvatarUpdate,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MyProfileResponse:
+    return await profile_service.set_profile_avatar(
         db, current_user.user_id, service.resolve_role(current_user.access), payload
     )
 
