@@ -140,3 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_lms_xp_ledger_student ON lms_xp_ledger (student_u
 ;
 CREATE INDEX IF NOT EXISTS idx_lms_xp_ledger_class ON lms_xp_ledger (class_id, student_user_id)
 ;
+ALTER TABLE lms_sim_templates ADD COLUMN IF NOT EXISTS cover_image_url VARCHAR(1000)
+;
+ALTER TABLE lms_sim_runs ADD COLUMN IF NOT EXISTS cover_image_url VARCHAR(1000)
+;

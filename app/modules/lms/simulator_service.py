@@ -142,7 +142,7 @@ async def _award(db: AsyncSession, *, student_user_id: int, run: LmsSimRun, team
 
 def _template_item(template: LmsSimTemplate, user_id: int, admin: bool, include_content: bool = False) -> dict:
     item = {
-        "template_id": template.template_id, "title": template.title, "tagline": template.tagline,
+        "template_id": template.template_id, "title": template.title, "tagline": template.tagline, "cover_image_url": template.cover_image_url,
         "programme": template.programme, "level": template.level, "tone": template.tone,
         "is_starter": template.starter_key is not None, "is_archived": template.is_archived,
         "can_edit": template.created_by == user_id or (admin and template.starter_key is None),
@@ -183,7 +183,7 @@ async def get_template(db: AsyncSession, template_id: int, user_id: int) -> dict
 
 async def create_template(db: AsyncSession, payload, user_id: int) -> dict:
     template = LmsSimTemplate(
-        title=payload.title.strip(), tagline=payload.tagline.strip(), programme=payload.programme.strip(), level=payload.level,
+        title=payload.title.strip(), tagline=payload.tagline.strip(), cover_image_url=payload.cover_image_url, programme=payload.programme.strip(), level=payload.level,
         tone=payload.tone, content=payload.content.model_dump(), roles=_normalise_roles(payload.roles), created_by=user_id,
     )
     db.add(template)
@@ -199,6 +199,7 @@ async def update_template(db: AsyncSession, template_id: int, payload, user_id: 
     if template.created_by != user_id and not admin:
         raise ForbiddenError("Only the lecturer who created this template or an admin can change it")
     template.title, template.tagline, template.programme = payload.title.strip(), payload.tagline.strip(), payload.programme.strip()
+    template.cover_image_url = payload.cover_image_url
     template.level, template.tone = payload.level, payload.tone
     template.content, template.roles = payload.content.model_dump(), _normalise_roles(payload.roles)
     await db.commit()
@@ -209,7 +210,7 @@ async def update_template(db: AsyncSession, template_id: int, payload, user_id: 
 async def copy_template(db: AsyncSession, template_id: int, user_id: int) -> dict:
     source, admin = await _readable_template(db, template_id, user_id)
     template = LmsSimTemplate(
-        source_template_id=source.template_id, title=f"{source.title} (copy)"[:160], tagline=source.tagline, programme=source.programme,
+        source_template_id=source.template_id, title=f"{source.title} (copy)"[:160], tagline=source.tagline, cover_image_url=source.cover_image_url, programme=source.programme,
         level=source.level, tone=source.tone, content=source.content, roles=source.roles, created_by=user_id,
     )
     db.add(template)
@@ -232,7 +233,7 @@ async def archive_template(db: AsyncSession, template_id: int, is_archived: bool
 
 def _run_item(run: LmsSimRun) -> dict:
     return {
-        "run_id": run.run_id, "class_id": run.class_id, "template_id": run.template_id, "title": run.title, "tagline": run.tagline,
+        "run_id": run.run_id, "class_id": run.class_id, "template_id": run.template_id, "title": run.title, "tagline": run.tagline, "cover_image_url": run.cover_image_url,
         "tone": run.tone, "roles": run.roles, "min_team_size": run.min_team_size, "max_team_size": run.max_team_size,
         "allow_solo": run.allow_solo, "opens_at": run.opens_at, "closes_at": run.closes_at, "xp_per_round": run.xp_per_round,
         "points_per_round": run.points_per_round, "status": run.status, "window": _window(run), "total_rounds": len(run.content["rounds"]),
@@ -245,7 +246,7 @@ async def apply_template(db: AsyncSession, class_id: int, payload, user_id: int)
     if template.is_archived:
         raise ValidationError("This template is archived")
     run = LmsSimRun(
-        class_id=class_id, template_id=template.template_id, title=template.title, tagline=template.tagline, tone=template.tone,
+        class_id=class_id, template_id=template.template_id, title=template.title, tagline=template.tagline, cover_image_url=template.cover_image_url, tone=template.tone,
         content=template.content, roles=_normalise_roles(payload.roles), min_team_size=payload.min_team_size, max_team_size=payload.max_team_size,
         allow_solo=payload.allow_solo, opens_at=payload.opens_at, closes_at=payload.closes_at, xp_per_round=payload.xp_per_round,
         points_per_round=payload.points_per_round, created_by=user_id,
