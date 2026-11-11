@@ -34,7 +34,7 @@ from app.modules.lms.models.progress import LmsLearningProgress
 from app.modules.lms.models.coursework import LmsCourseworkAssignment, LmsCourseworkSubmission
 from app.modules.lms.models.exam import LmsExam, LmsExamAnswer, LmsExamAttempt, LmsExamQuestion
 from app.modules.lms.models.template_bank import LmsAssessmentTemplate, LmsAssessmentTemplateQuestion
-from app.modules.lms.models.notification import LmsAnnouncement, LmsNotification
+from app.modules.lms.models.notification import LmsAnnouncement, LmsNotification, LmsNotificationPreference
 from app.modules.lms.models.rubric import (
     LmsAssignmentRubric,
     LmsRubricAssessment,
@@ -93,6 +93,7 @@ __all__ = [
     "LmsAssessmentTemplateQuestion",
     "LmsAnnouncement",
     "LmsNotification",
+    "LmsNotificationPreference",
     "LmsAssignmentRubric",
     "LmsRubricAssessment",
     "LmsRubricTemplate",

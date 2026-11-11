@@ -391,8 +391,13 @@ async def update_status(db: AsyncSession, exam_id: int, status: str, user_id: in
             learning_item.status = "draft" if status == "draft" else "published"
     await db.commit()
     if status == "published":
-        await notification_service.notify_assessment_published(db, assignment, "assignment" if exam.assessment_kind == "graded_mcq" else "exam")
+        await notification_service.notify_assessment_published(db, assignment, _notification_kind(exam))
     return await get_editor(db, exam_id, user_id)
+
+
+
+def _notification_kind(exam) -> str:
+    return {"graded_mcq": "assignment", "practice_test": "practice_test"}.get(exam.assessment_kind, "exam")
 
 
 async def update_schedule(
@@ -422,7 +427,7 @@ async def update_schedule(
     await db.commit()
     if assignment.status == "published" and assignment.available_from != previous_available_from:
         await notification_service.notify_assessment_published(
-            db, assignment, "assignment" if exam.assessment_kind == "graded_mcq" else "exam"
+            db, assignment, _notification_kind(exam)
         )
     return await get_editor(db, exam_id, user_id)
 
