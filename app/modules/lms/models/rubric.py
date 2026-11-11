@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, SmallInteger, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -71,7 +71,7 @@ class LmsRubricAssessment(Base):
 
     __tablename__ = "lms_rubric_assessments"
     __table_args__ = (
-        UniqueConstraint("submission_id", "assessor_role", name="uq_lms_rubric_assessments_submission_role"),
+        UniqueConstraint("submission_id", "assessor_role", "attempt_no", name="uq_lms_rubric_assessments_submission_role_attempt"),
         Index("idx_lms_rubric_assessments_assignment", "assignment_id", "assessor_role"),
     )
 
@@ -83,6 +83,8 @@ class LmsRubricAssessment(Base):
         ForeignKey("lms_coursework_submissions.submission_id", ondelete="CASCADE"), nullable=False
     )
     assessor_role: Mapped[str] = mapped_column(String(10), nullable=False)
+    attempt_no: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, server_default="1")
+    resubmission_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     assessor_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     criteria_results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     actions_needed: Mapped[str | None] = mapped_column(Text)
@@ -93,5 +95,35 @@ class LmsRubricAssessment(Base):
     grade_summary: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class LmsRubricResubmission(Base):
+    """A further attempt a student may hand in after a Resubmission grade, up to their own deadline."""
+
+    __tablename__ = "lms_rubric_resubmissions"
+    __table_args__ = (
+        UniqueConstraint("submission_id", "attempt_no", name="uq_lms_rubric_resubmissions_attempt"),
+        Index("idx_lms_rubric_resubmissions_assignment", "assignment_id", "status"),
+        Index("idx_lms_rubric_resubmissions_student", "student_user_id", "status"),
+    )
+
+    resubmission_id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_coursework_assignments.assignment_id", ondelete="CASCADE"), nullable=False
+    )
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("lms_coursework_submissions.submission_id", ondelete="CASCADE"), nullable=False
+    )
+    student_user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    attempt_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # open -> submitted (student handed in) -> marked (1st form completed) -> released (student sees the new result)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    answer_text: Mapped[str | None] = mapped_column(Text)
+    attachment_asset_id: Mapped[int | None] = mapped_column(ForeignKey("media_assets.media_asset_id", ondelete="SET NULL"))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

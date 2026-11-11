@@ -324,6 +324,10 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
     await db.commit()
     if released:
         await notification_service.notify_grade_release(db, assignment)
+        if assignment.submission_type != "mcq":
+            from app.modules.lms import rubric_service
+            if await rubric_service.get_assignment_rubric(db, assignment_id) is not None:
+                await rubric_service.open_resubmissions(db, assignment)
     context = await CourseworkRepository(db).get_assignment_context(assignment_id)
     return _assignment_item(context)
 

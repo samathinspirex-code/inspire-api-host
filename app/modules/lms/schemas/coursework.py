@@ -79,6 +79,8 @@ class CourseworkAssignmentItem(BaseModel):
     exam_id: int | None = None
     is_athe: bool = False
     has_rubric: bool = False
+    # Students only: an open or handed-in ATHE resubmission ({attempt_no, due_at, status, is_open}).
+    resubmission: dict | None = None
     answer_text: str | None = None
     attachment_asset_id: int | None = None
     attachment_url: str | None = None
@@ -238,6 +240,9 @@ class AssignmentSubmissionCounts(BaseModel):
     to_mark: int = 0
     marked: int = 0
     in_progress: int = 0
+    resubmissions_open: int = 0
+    resubmissions_to_mark: int = 0
+    resubmissions_ready: int = 0
 
 
 class CourseworkReviewSummaryResponse(BaseModel):
