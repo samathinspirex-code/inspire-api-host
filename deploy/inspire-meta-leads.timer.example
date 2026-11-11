@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for new Meta lead form submissions every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=inspire-meta-leads.service
+
+[Install]
+WantedBy=timers.target

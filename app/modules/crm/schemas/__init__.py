@@ -137,10 +137,13 @@ class CrmAssignmentSettingsOut(BaseModel):
     next_counsellor_id: Optional[int] = None
     next_counsellor_name: Optional[str] = None
     rotation: list[CrmCounsellorOut] = []
+    meta_counsellor_ids: list[int] = []
+    meta_setting_ready: bool = False
 
 
 class CrmAssignmentSettingsUpdate(BaseModel):
-    auto_assign_enabled: bool
+    auto_assign_enabled: Optional[bool] = None
+    meta_counsellor_ids: Optional[list[int]] = Field(None, max_length=50)
 
 
 class CrmCounsellorOrderUpdate(BaseModel):

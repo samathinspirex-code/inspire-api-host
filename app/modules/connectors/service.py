@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.modules.connectors.capi import status as capi_status
+from app.modules.crm.meta_leads import status as meta_leads_status
 from app.modules.connectors.registry import REQUIREMENTS, account_state, platforms_for, tracking_plan
 from app.modules.connectors.providers import ProviderFailure, fetch_report, ga4_realtime
 from app.modules.insights.website import latest_report
@@ -61,7 +62,8 @@ async def reporting(db: AsyncSession) -> dict:
     lms = await load_lms(db)
     finance = await load_finance(db)
     capi = await capi_status(db)
-    return {"accounts": accounts, "platforms": platforms_for(accounts, whatsapp, lms, finance, capi), "events": tracking_plan(ga4_events(accounts)), "whatsapp": whatsapp, "lms": lms, "finance": finance, "capi": capi}
+    meta_leads = await meta_leads_status(db)
+    return {"accounts": accounts, "platforms": platforms_for(accounts, whatsapp, lms, finance, capi), "events": tracking_plan(ga4_events(accounts)), "whatsapp": whatsapp, "lms": lms, "finance": finance, "capi": capi, "meta_leads": meta_leads}
 
 
 _REALTIME_TTL = 60.0

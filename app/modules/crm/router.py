@@ -113,7 +113,7 @@ async def update_assignment_settings(
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmAssignmentSettingsOut:
     _require_management(current_user)
-    return await service.update_assignment_settings(db, payload.auto_assign_enabled)
+    return await service.update_assignment_settings(db, payload.auto_assign_enabled, payload.meta_counsellor_ids)
 
 
 @router.put("/counsellors/order", response_model=list[CrmCounsellorRosterItem])
