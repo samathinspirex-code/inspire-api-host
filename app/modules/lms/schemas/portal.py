@@ -7,6 +7,9 @@ from app.modules.lms.schemas.module import ModuleItem
 
 
 class PortalCourseItem(CourseItem):
+    awarding_body: str | None = None
+    school_name: str | None = None
+    programme_name: str | None = None
     module_count: int
     class_count: int
     people_count: int
