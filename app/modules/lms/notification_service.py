@@ -405,6 +405,22 @@ async def notify_grade_release(db: AsyncSession, assignment: LmsCourseworkAssign
     await db.commit(); return created
 
 
+async def notify_resubmission_opened(db: AsyncSession, assignment: LmsCourseworkAssignment, student_user_id: int, due_at: datetime) -> int:
+    created = await _enqueue(db, [student_user_id], f"resubmission:{assignment.assignment_id}:{student_user_id}:{due_at.isoformat()}",
+        "resubmission_opened", f"Resubmission open: {assignment.title}",
+        f"Your feedback for {assignment.title} asks for a resubmission. Read the feedback form and hand in your resubmission by {local_time(due_at)}.",
+        f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments", "important", utc_now(), True, event_at=due_at)
+    await db.commit(); return created
+
+
+async def notify_resubmission_result(db: AsyncSession, assignment: LmsCourseworkAssignment, student_user_id: int, attempt_no: int) -> int:
+    created = await _enqueue(db, [student_user_id], f"resubmission:{assignment.assignment_id}:{student_user_id}:attempt{attempt_no}:released",
+        "grade_released", f"Resubmission result: {assignment.title}",
+        f"Your resubmitted work for {assignment.title} has been marked. The new feedback form is in Assignments and Grades.",
+        f"{settings.LMS_UI_URL.rstrip('/')}?view=assignments", "important", utc_now(), True)
+    await db.commit(); return created
+
+
 async def notify_assessment_published(db: AsyncSession, assignment: LmsCourseworkAssignment, kind: str) -> int:
     users = await _student_audience_user_ids(db, assignment.target_type, assignment.target_id)
     deadline = f" It is due on {local_time(assignment.due_at)}." if assignment.due_at else ""

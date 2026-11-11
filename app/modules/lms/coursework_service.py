@@ -419,6 +419,7 @@ async def list_assignments(
         material = await db.get(MediaAsset, assignment.question_paper_asset_id) if assignment.question_paper_asset_id else None
         data.append(_assignment_item((assignment, course, target_class), submission, asset, material, expose_grade=False, material=await _assignment_material(db, assignment), exam_id=exam_ids.get(assignment.assignment_id)))
     await db.commit()
+    await rubric_service.annotate_student_resubmissions(db, data, user_id)
     return CourseworkAssignmentListResponse(data=data)
 
 
@@ -779,4 +780,13 @@ async def review_summary(db: AsyncSession, user_id: int, role: str, class_id: in
                 item.in_progress += total
             if status in {"reviewed", "returned"} or (assignment_id in mcq_ids and is_marked):
                 item.marked += total
+        from app.modules.lms.models import LmsRubricResubmission
+        resubmission_rows = (await db.execute(
+            select(LmsRubricResubmission.assignment_id, LmsRubricResubmission.status, func.count())
+            .where(LmsRubricResubmission.assignment_id.in_(ids), LmsRubricResubmission.status.in_(("open", "submitted", "marked")))
+            .group_by(LmsRubricResubmission.assignment_id, LmsRubricResubmission.status)
+        )).all()
+        fields = {"open": "resubmissions_open", "submitted": "resubmissions_to_mark", "marked": "resubmissions_ready"}
+        for assignment_id, status, total in resubmission_rows:
+            setattr(counts[assignment_id], fields[status], getattr(counts[assignment_id], fields[status]) + total)
     return CourseworkReviewSummaryResponse(data=assignments, counts=list(counts.values()))

@@ -38,6 +38,7 @@ from app.modules.lms.models.notification import LmsAnnouncement, LmsNotification
 from app.modules.lms.models.rubric import (
     LmsAssignmentRubric,
     LmsRubricAssessment,
+    LmsRubricResubmission,
     LmsRubricTemplate,
     LmsRubricTemplateCriterion,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "LmsNotificationPreference",
     "LmsAssignmentRubric",
     "LmsRubricAssessment",
+    "LmsRubricResubmission",
     "LmsRubricTemplate",
     "LmsRubricTemplateCriterion",
     "LmsSimInvite",

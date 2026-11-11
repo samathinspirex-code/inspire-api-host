@@ -23,18 +23,20 @@ from app.modules.lms.models import (
     LmsCourseworkAssignment,
     LmsCourseworkSubmission,
     LmsRubricAssessment,
+    LmsRubricResubmission,
     LmsRubricTemplate,
     LmsRubricTemplateCriterion,
     StudentProfile,
 )
 from app.modules.lms.repository import CourseworkRepository
-from app.modules.lms.rubric_grading import compute_rubric_grade, display_grade, grade_band
+from app.modules.lms.rubric_grading import NOT_YET_ACHIEVED, compute_rubric_grade, display_grade, grade_band
 from app.modules.lms.schemas.rubric import (
     AssignmentRubricItem,
     AssignmentRubricWrite,
     ClassRubricContext,
     RubricAssessmentItem,
     RubricAssessmentWrite,
+    RubricAttemptSummary,
     RubricCriterionItem,
     RubricMarkingResponse,
     RubricOverviewResponse,
@@ -45,6 +47,9 @@ from app.modules.lms.schemas.rubric import (
     RubricTemplateListResponse,
     RubricTemplateUpdate,
     RubricTemplateWrite,
+    ResubmissionReleaseResult,
+    StudentResubmission,
+    StudentResubmissionWrite,
     StudentRubricFeedback,
 )
 
@@ -397,9 +402,9 @@ async def get_rubric(db: AsyncSession, assignment_id: int, user_id: int) -> Assi
 
 # --------------------------------------------------------------------------- assessor forms
 
-def _form_item(form: LmsRubricAssessment | None, submission_id: int, role: str, people) -> RubricAssessmentItem:
+def _form_item(form: LmsRubricAssessment | None, submission_id: int, role: str, people, attempt_no: int = 1) -> RubricAssessmentItem:
     if form is None:
-        return RubricAssessmentItem(submission_id=submission_id, assessor_role=role, status="not_started")
+        return RubricAssessmentItem(submission_id=submission_id, assessor_role=role, status="not_started", attempt_no=attempt_no)
     return RubricAssessmentItem(
         assessment_id=form.assessment_id,
         submission_id=form.submission_id,
@@ -413,15 +418,94 @@ def _form_item(form: LmsRubricAssessment | None, submission_id: int, role: str, 
         assessment_date=form.assessment_date,
         overall_grade=display_grade(form.overall_grade),
         grade_summary=form.grade_summary,
+        attempt_no=form.attempt_no or 1,
+        resubmission_due_at=form.resubmission_due_at,
         status=form.status,
         completed_at=form.completed_at,
         updated_at=form.updated_at,
     )
 
 
-async def _forms(db: AsyncSession, submission_id: int) -> dict[str, LmsRubricAssessment]:
-    rows = (await db.execute(select(LmsRubricAssessment).where(LmsRubricAssessment.submission_id == submission_id))).scalars().all()
+async def _forms(db: AsyncSession, submission_id: int, attempt_no: int = 1) -> dict[str, LmsRubricAssessment]:
+    rows = (await db.execute(select(LmsRubricAssessment).where(
+        LmsRubricAssessment.submission_id == submission_id,
+        LmsRubricAssessment.attempt_no == attempt_no,
+    ))).scalars().all()
     return {item.assessor_role: item for item in rows}
+
+
+# --------------------------------------------------------------------------- resubmission attempts
+# Attempt 1 is the original submission. Each Resubmission grade with a deadline opens the next attempt,
+# which is handed in on lms_rubric_resubmissions and marked on its own forms (attempt_no), so the
+# feedback a student already received is never overwritten.
+
+async def _resubmissions(db: AsyncSession, submission_id: int) -> list[LmsRubricResubmission]:
+    return list((await db.execute(
+        select(LmsRubricResubmission)
+        .where(LmsRubricResubmission.submission_id == submission_id)
+        .order_by(LmsRubricResubmission.attempt_no)
+    )).scalars().all())
+
+
+def _marking_attempt(resubmissions) -> tuple[int, LmsRubricResubmission | None]:
+    """The attempt assessors are working on: the newest handed-in resubmission, else the original."""
+    handed_in = [item for item in resubmissions if item.status in {"submitted", "marked", "released"}]
+    return (handed_in[-1].attempt_no, handed_in[-1]) if handed_in else (1, None)
+
+
+def _released_attempt(resubmissions) -> int:
+    released = [item.attempt_no for item in resubmissions if item.status == "released"]
+    return max(released) if released else 1
+
+
+def _resubmission_open(item: LmsRubricResubmission | None, now=None) -> bool:
+    return bool(item and item.status == "open" and cw.as_utc(item.due_at) > (now or cw.utc_now()))
+
+
+def _student_resubmission(item: LmsRubricResubmission, asset=None) -> StudentResubmission:
+    return StudentResubmission(
+        attempt_no=item.attempt_no,
+        due_at=item.due_at,
+        status=item.status,
+        is_open=_resubmission_open(item),
+        answer_text=item.answer_text,
+        attachment_asset_id=item.attachment_asset_id,
+        attachment_url=cw._asset_url(asset),
+        attachment_name=asset.original_filename if asset else None,
+        submitted_at=item.submitted_at,
+    )
+
+
+async def open_resubmissions(db: AsyncSession, assignment, submission_ids=None) -> int:
+    """After results are released, open the next attempt for every student whose released 1st assessor
+    form says Resubmission and carries a deadline. Safe to call again: existing attempts are kept."""
+    stmt = select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment.assignment_id)
+    if submission_ids is not None:
+        stmt = stmt.where(LmsCourseworkSubmission.submission_id.in_(list(submission_ids) or [0]))
+    opened = []
+    for submission in (await db.execute(stmt)).scalars().all():
+        resubmissions = await _resubmissions(db, submission.submission_id)
+        attempt = _released_attempt(resubmissions)
+        if any(item.attempt_no > attempt for item in resubmissions):
+            continue
+        form = (await _forms(db, submission.submission_id, attempt)).get("first")
+        if form is None or form.status != "completed" or grade_band(form.overall_grade) != "fail" or form.resubmission_due_at is None:
+            continue
+        db.add(LmsRubricResubmission(
+            assignment_id=assignment.assignment_id,
+            submission_id=submission.submission_id,
+            student_user_id=submission.student_user_id,
+            attempt_no=attempt + 1,
+            due_at=form.resubmission_due_at,
+            status="open",
+        ))
+        opened.append((submission.student_user_id, form.resubmission_due_at))
+    if opened:
+        await db.commit()
+        from app.modules.lms import notification_service
+        for student_user_id, due_at in opened:
+            await notification_service.notify_resubmission_opened(db, assignment, student_user_id, due_at)
+    return len(opened)
 
 
 async def _submission_context(db: AsyncSession, submission_id: int, user_id: int):
@@ -434,19 +518,21 @@ async def _submission_context(db: AsyncSession, submission_id: int, user_id: int
     return submission, assignment, rubric
 
 
-async def _submission_info(db: AsyncSession, submission: LmsCourseworkSubmission, assignment) -> RubricSubmissionInfo:
+async def _submission_info(db: AsyncSession, submission: LmsCourseworkSubmission, assignment, resubmission=None) -> RubricSubmissionInfo:
     student = await db.get(User, submission.student_user_id)
     profile = await db.get(StudentProfile, submission.student_user_id)
-    asset = await db.get(cw.MediaAsset, submission.attachment_asset_id) if submission.attachment_asset_id else None
+    source = resubmission or submission
+    asset = await db.get(cw.MediaAsset, source.attachment_asset_id) if source.attachment_asset_id else None
     return RubricSubmissionInfo(
         submission_id=submission.submission_id,
         student_user_id=submission.student_user_id,
         student_name=_person_name(student),
         student_number=(profile.student_number if profile else "") or "",
-        status=submission.status,
-        submitted_at=submission.submitted_at,
-        is_late=cw.submission_is_late(submission, assignment.due_at),
-        answer_text=submission.answer_text,
+        status=submission.status if resubmission is None else f"resubmission_{resubmission.status}",
+        submitted_at=source.submitted_at,
+        is_late=cw.submission_is_late(submission, assignment.due_at) if resubmission is None
+        else bool(resubmission.submitted_at and cw.as_utc(resubmission.submitted_at) > cw.as_utc(resubmission.due_at)),
+        answer_text=source.answer_text,
         attachment_url=cw._asset_url(asset),
         attachment_name=asset.original_filename if asset else None,
     )
@@ -457,16 +543,41 @@ async def get_marking(db: AsyncSession, submission_id: int, user_id: int) -> Rub
     role = viewer_role(rubric, user_id, await is_global_admin(db, user_id))
     if role == "viewer":
         raise ForbiddenError("Only the assigned assessors or an admin can open these rubric forms")
-    forms = await _forms(db, submission_id)
+    resubmissions = await _resubmissions(db, submission_id)
+    attempt, resubmission = _marking_attempt(resubmissions)
+    forms = await _forms(db, submission_id, attempt)
     people = await _people(db, [item.assessor_user_id for item in forms.values()])
+    previous = []
+    if can_read_form(role, "first"):
+        for number in range(1, attempt):
+            form = (await _forms(db, submission_id, number)).get("first")
+            earlier = next((item for item in resubmissions if item.attempt_no == number), None)
+            previous.append(RubricAttemptSummary(
+                attempt_no=number,
+                overall_grade=display_grade(form.overall_grade) if form else None,
+                status=form.status if form else "not_started",
+                submitted_at=earlier.submitted_at if earlier else submission.submitted_at,
+                completed_at=form.completed_at if form else None,
+                resubmission_due_at=form.resubmission_due_at if form else None,
+                released=number <= _released_attempt(resubmissions) and assignment.grades_released,
+            ))
     return RubricMarkingResponse(
         rubric=await _rubric_item(db, rubric, role),
-        submission=await _submission_info(db, submission, assignment),
+        submission=await _submission_info(db, submission, assignment, resubmission),
         grades_released=assignment.grades_released,
-        first=_form_item(forms.get("first"), submission_id, "first", people) if can_read_form(role, "first") else None,
-        second=_form_item(forms.get("second"), submission_id, "second", people)
+        attempt_no=attempt,
+        can_edit=_attempt_editable(assignment, resubmission),
+        previous_attempts=previous,
+        first=_form_item(forms.get("first"), submission_id, "first", people, attempt) if can_read_form(role, "first") else None,
+        second=_form_item(forms.get("second"), submission_id, "second", people, attempt)
         if can_read_form(role, "second") and rubric.second_assessor_user_id else None,
     )
+
+
+def _attempt_editable(assignment, resubmission: LmsRubricResubmission | None) -> bool:
+    if resubmission is None:
+        return not assignment.grades_released
+    return resubmission.status in {"submitted", "marked"}
 
 
 def _clean_results(criteria, results) -> list[dict]:
@@ -514,9 +625,13 @@ async def save_assessment(
     if not can_write_form(role, form_role):
         raise ForbiddenError("Only the assigned 1st assessor can fill the 1st assessor form" if form_role == "first"
                              else "Only the assigned 2nd assessor can fill the 2nd assessor form")
-    if assignment.grades_released:
+    resubmissions = await _resubmissions(db, submission_id)
+    attempt, resubmission = _marking_attempt(resubmissions)
+    if not _attempt_editable(assignment, resubmission):
+        if resubmission is not None:
+            raise ValidationError("This resubmission result has already been released to the student.")
         raise ValidationError("Results have been released. Withdraw the release before changing feedback.")
-    if submission.status not in MARKABLE_STATUSES:
+    if resubmission is None and submission.status not in MARKABLE_STATUSES:
         raise ValidationError("The student has not finished this submission yet")
 
     criteria = rubric.criteria_snapshot or []
@@ -527,8 +642,14 @@ async def save_assessment(
             raise ValidationError("Mark every assessment criterion as Achieved or Not Achieved before completing the form")
         if form_role == "first" and not (payload.overall_comment or "").strip():
             raise ValidationError("Add the overall comment and feedback before completing the form")
+    due_at = cw.as_utc(payload.resubmission_due_at) if form_role == "first" and summary["overall_grade"] == NOT_YET_ACHIEVED else None
+    if payload.complete and form_role == "first" and summary["overall_grade"] == NOT_YET_ACHIEVED:
+        if due_at is None:
+            raise ValidationError("Set the resubmission deadline for this student before completing the form")
+        if due_at <= cw.utc_now():
+            raise ValidationError("The resubmission deadline must be in the future")
 
-    forms = await _forms(db, submission_id)
+    forms = await _forms(db, submission_id, attempt)
     form = forms.get(form_role)
     if form is None:
         form = LmsRubricAssessment(
@@ -536,8 +657,10 @@ async def save_assessment(
             submission_id=submission_id,
             assessor_role=form_role,
             assessor_user_id=user_id,
+            attempt_no=attempt,
         )
         db.add(form)
+    form.resubmission_due_at = due_at
     form.assessor_user_id = user_id
     form.criteria_results = results
     form.actions_needed = (payload.actions_needed or "").strip() or None
@@ -548,8 +671,11 @@ async def save_assessment(
     form.grade_summary = summary
     form.status = "completed" if payload.complete else "draft"
     form.completed_at = cw.utc_now() if payload.complete else None
-    if form_role == "first":
+    if form_role == "first" and resubmission is None:
         _apply_first_result(submission, assignment, form, user_id)
+    elif form_role == "first":
+        # A re-marked attempt reaches the student only when the lecturer releases re-marked results.
+        resubmission.status = "marked" if form.status == "completed" else "submitted"
     await db.commit()
     return await get_marking(db, submission_id, user_id)
 
@@ -561,16 +687,32 @@ async def overview(db: AsyncSession, assignment_id: int, user_id: int) -> Rubric
     rubric = await _load_rubric(db, assignment_id)
     role = viewer_role(rubric, user_id, await is_global_admin(db, user_id))
     forms = (await db.execute(select(LmsRubricAssessment).where(LmsRubricAssessment.assignment_id == assignment_id))).scalars().all()
+    resubmission_rows = (await db.execute(
+        select(LmsRubricResubmission).where(LmsRubricResubmission.assignment_id == assignment_id).order_by(LmsRubricResubmission.attempt_no)
+    )).scalars().all()
+    resubmissions_by_submission: dict[int, list[LmsRubricResubmission]] = {}
+    for item in resubmission_rows:
+        resubmissions_by_submission.setdefault(item.submission_id, []).append(item)
+    # Attempt-1 forms decide the first release; the current attempt's forms are what each row shows.
     by_submission: dict[int, dict[str, LmsRubricAssessment]] = {}
+    current_forms: dict[int, dict[str, LmsRubricAssessment]] = {}
+    current_attempt = {key: _marking_attempt(value)[0] for key, value in resubmissions_by_submission.items()}
     for form in forms:
-        by_submission.setdefault(form.submission_id, {})[form.assessor_role] = form
+        if (form.attempt_no or 1) == 1:
+            by_submission.setdefault(form.submission_id, {})[form.assessor_role] = form
+        if (form.attempt_no or 1) == current_attempt.get(form.submission_id, 1):
+            current_forms.setdefault(form.submission_id, {})[form.assessor_role] = form
     show_first = can_read_form(role, "first")
     show_second = can_read_form(role, "second") and rubric.second_assessor_user_id is not None
     rows = []
     for submission, user, profile, _asset in await CourseworkRepository(db).list_submissions(assignment_id):
         needs = submission.status in NEEDS_MARKING_STATUSES
-        own = by_submission.get(submission.submission_id, {})
+        own = current_forms.get(submission.submission_id, {})
         first, second = own.get("first"), own.get("second")
+        latest = (resubmissions_by_submission.get(submission.submission_id) or [None])[-1]
+        resubmission_status = None
+        if latest is not None:
+            resubmission_status = "expired" if latest.status == "open" and not _resubmission_open(latest) else latest.status
         rows.append(RubricOverviewRow(
             submission_id=submission.submission_id,
             student_user_id=submission.student_user_id,
@@ -584,6 +726,9 @@ async def overview(db: AsyncSession, assignment_id: int, user_id: int) -> Rubric
             first_grade=display_grade(first.overall_grade) if first and show_first else None,
             second_status=(second.status if second else "not_started") if (show_second or (role == "viewer" and rubric.second_assessor_user_id)) else None,
             second_grade=display_grade(second.overall_grade) if second and show_second else None,
+            attempt_no=current_attempt.get(submission.submission_id, 1),
+            resubmission_status=resubmission_status,
+            resubmission_due_at=latest.due_at if latest is not None else None,
         ))
     to_mark = [row for row in rows if row.needs_marking]
 
@@ -605,7 +750,41 @@ async def overview(db: AsyncSession, assignment_id: int, user_id: int) -> Rubric
         second_completed=second_done if has_second else None,
         missing_first=len(to_mark) - first_done,
         missing_second=(len(to_mark) - second_done) if has_second else None,
+        resubmissions_open=sum(1 for row in rows if row.resubmission_status == "open"),
+        resubmissions_to_mark=sum(1 for row in rows if row.resubmission_status == "submitted"),
+        resubmissions_ready=sum(1 for row in rows if row.resubmission_status == "marked"),
     )
+
+
+async def release_resubmissions(db: AsyncSession, assignment_id: int, user_id: int) -> ResubmissionReleaseResult:
+    """Send re-marked resubmission results to the students and open a further attempt where needed."""
+    assignment = await _load_assignment(db, assignment_id, user_id)
+    rubric = await _load_rubric(db, assignment_id)
+    if not await can_manage_release(db, rubric, user_id):
+        raise ForbiddenError("Only the 1st assessor or an admin can release rubric results")
+    if not assignment.grades_released:
+        raise ValidationError("Release the original results before releasing re-marked resubmissions")
+    ready = (await db.execute(select(LmsRubricResubmission).where(
+        LmsRubricResubmission.assignment_id == assignment_id, LmsRubricResubmission.status == "marked",
+    ))).scalars().all()
+    if not ready:
+        raise ValidationError("There are no re-marked resubmissions to release")
+    released = []
+    for item in ready:
+        submission = await db.get(LmsCourseworkSubmission, item.submission_id)
+        form = (await _forms(db, item.submission_id, item.attempt_no)).get("first")
+        if submission is None or form is None or form.status != "completed":
+            continue
+        _apply_first_result(submission, assignment, form, form.assessor_user_id)
+        item.status = "released"
+        item.released_at = cw.utc_now()
+        released.append(item)
+    await db.commit()
+    from app.modules.lms import notification_service
+    for item in released:
+        await notification_service.notify_resubmission_result(db, assignment, item.student_user_id, item.attempt_no)
+    reopened = await open_resubmissions(db, assignment, [item.submission_id for item in released])
+    return ResubmissionReleaseResult(released=len(released), reopened=reopened)
 
 
 async def can_manage_release(db: AsyncSession, rubric: LmsAssignmentRubric, user_id: int) -> bool:
@@ -631,6 +810,7 @@ async def ensure_release_allowed(db: AsyncSession, assignment, user_id: int) -> 
         select(LmsRubricAssessment.submission_id).where(
             LmsRubricAssessment.assignment_id == assignment.assignment_id,
             LmsRubricAssessment.assessor_role == "first",
+            LmsRubricAssessment.attempt_no == 1,
             LmsRubricAssessment.status == "completed",
         )
     )).scalars().all())
@@ -644,7 +824,7 @@ async def ensure_release_allowed(db: AsyncSession, assignment, user_id: int) -> 
 
 # --------------------------------------------------------------------------- downloads
 
-def _form_dict(rubric: LmsAssignmentRubric, form: LmsRubricAssessment | None, learner: User | None, profile, submission, people) -> dict:
+def _form_dict(rubric: LmsAssignmentRubric, form: LmsRubricAssessment | None, learner: User | None, profile, submission, people, resubmission=None) -> dict:
     results = {str(item.get("criterion_id")): item for item in (form.criteria_results if form else []) or []}
     criteria = []
     for item in rubric.criteria_snapshot or []:
@@ -660,8 +840,11 @@ def _form_dict(rubric: LmsAssignmentRubric, form: LmsRubricAssessment | None, le
         "unit_code_title": rubric.unit_code_title or "",
         "assignment_title": rubric.assignment_title or "",
         "issued": rubric.issued_at,
-        "submitted": submission.submitted_at,
-        "resubmission": form.resubmission if form else None,
+        "submitted": (resubmission or submission).submitted_at,
+        "resubmission": (form.resubmission if form and form.resubmission else None)
+        or (f"Yes - attempt {resubmission.attempt_no}" if resubmission is not None else None),
+        "attempt_no": resubmission.attempt_no if resubmission is not None else 1,
+        "resubmission_due_at": form.resubmission_due_at if form and grade_band(form.overall_grade) == "fail" else None,
         "first_assessor": _person_name(people.get(rubric.first_assessor_user_id)),
         "second_assessor": _person_name(people.get(rubric.second_assessor_user_id)),
         "assessment_date": form.assessment_date if form else None,
@@ -676,14 +859,20 @@ def _rubric_title(rubric) -> str:
     return rubric.template_name or rubric.form_title or rubric.assignment_title or "Feedback"
 
 
-async def _feedback_file_for(db: AsyncSession, rubric, submission, form_role: str) -> tuple[str, bytes]:
-    forms = await _forms(db, submission.submission_id)
+async def _feedback_file_for(db: AsyncSession, rubric, submission, form_role: str, attempt: int | None = None) -> tuple[str, bytes]:
+    resubmissions = await _resubmissions(db, submission.submission_id)
+    if attempt is None:
+        attempt = _marking_attempt(resubmissions)[0]
+    resubmission = next((item for item in resubmissions if item.attempt_no == attempt), None)
+    forms = await _forms(db, submission.submission_id, attempt)
     form = forms.get(form_role)
     learner = await db.get(User, submission.student_user_id)
     profile = await db.get(StudentProfile, submission.student_user_id)
     people = await _people(db, [rubric.first_assessor_user_id, rubric.second_assessor_user_id])
-    content = rubric_pdf.build_feedback_pdf(_form_dict(rubric, form, learner, profile, submission, people))
-    suffix = None if form_role == "first" else "2nd Assessor"
+    content = rubric_pdf.build_feedback_pdf(_form_dict(rubric, form, learner, profile, submission, people, resubmission))
+    suffix = " - ".join(part for part in (
+        f"Attempt {attempt}" if attempt > 1 else None, None if form_role == "first" else "2nd Assessor",
+    ) if part) or None
     return rubric_excel.feedback_file_name(_rubric_title(rubric), _person_name(learner), suffix, ".pdf"), content
 
 
@@ -708,13 +897,17 @@ async def export_all(db: AsyncSession, assignment_id: int, user_id: int) -> tupl
         select(LmsRubricAssessment.submission_id).where(
             LmsRubricAssessment.assignment_id == assignment_id,
             LmsRubricAssessment.assessor_role == form_role,
+            LmsRubricAssessment.attempt_no == 1,
             LmsRubricAssessment.status == "completed",
         )
     )).scalars().all())
     files = []
     for submission, _user, _profile, _asset in await CourseworkRepository(db).list_submissions(assignment_id):
         if submission.submission_id in completed:
-            files.append(await _feedback_file_for(db, rubric, submission, form_role))
+            files.append(await _feedback_file_for(db, rubric, submission, form_role, 1))
+            for item in await _resubmissions(db, submission.submission_id):
+                if (await _forms(db, submission.submission_id, item.attempt_no)).get(form_role) is not None:
+                    files.append(await _feedback_file_for(db, rubric, submission, form_role, item.attempt_no))
     if not files:
         raise ValidationError("No completed feedback forms to download yet")
     safe_title = rubric_excel.feedback_file_name(_rubric_title(rubric), assignment.title, "Feedback Forms", ".zip")
@@ -734,11 +927,19 @@ async def _student_context(db: AsyncSession, assignment_id: int, user_id: int):
     submission = await CourseworkRepository(db).get_submission(assignment_id, user_id)
     if submission is None:
         raise NotFoundError("You do not have a submission for this assignment")
-    forms = await _forms(db, submission.submission_id)
-    form = forms.get("first")
+    resubmissions = await _resubmissions(db, submission.submission_id)
+    attempt = _released_attempt(resubmissions)
+    form = (await _forms(db, submission.submission_id, attempt)).get("first")
     if form is None or form.status != "completed":
         raise NotFoundError("Feedback is not available for this submission")
     return assignment, rubric, submission, form
+
+
+async def _next_resubmission(db: AsyncSession, submission_id: int) -> LmsRubricResubmission | None:
+    resubmissions = await _resubmissions(db, submission_id)
+    released = _released_attempt(resubmissions)
+    later = [item for item in resubmissions if item.attempt_no > released]
+    return later[-1] if later else None
 
 
 async def student_feedback(db: AsyncSession, assignment_id: int, user_id: int) -> StudentRubricFeedback:
@@ -753,13 +954,70 @@ async def student_feedback(db: AsyncSession, assignment_id: int, user_id: int) -
         learner_name=_person_name(learner),
         learner_id=(profile.student_number if profile else "") or "",
         submitted_at=submission.submitted_at,
-        feedback=_form_item(form, submission.submission_id, "first", people),
+        feedback=_form_item(form, submission.submission_id, "first", people, form.attempt_no or 1),
+        attempt_no=form.attempt_no or 1,
+        resubmission=await _student_resubmission_item(db, await _next_resubmission(db, submission.submission_id)),
     )
 
 
+async def _student_resubmission_item(db: AsyncSession, item: LmsRubricResubmission | None) -> StudentResubmission | None:
+    if item is None:
+        return None
+    asset = await db.get(cw.MediaAsset, item.attachment_asset_id) if item.attachment_asset_id else None
+    return _student_resubmission(item, asset)
+
+
 async def student_feedback_export(db: AsyncSession, assignment_id: int, user_id: int) -> tuple[str, bytes]:
-    _assignment, rubric, submission, _form = await _student_context(db, assignment_id, user_id)
-    return await _feedback_file_for(db, rubric, submission, "first")
+    _assignment, rubric, submission, form = await _student_context(db, assignment_id, user_id)
+    return await _feedback_file_for(db, rubric, submission, "first", form.attempt_no or 1)
+
+
+async def _open_student_resubmission(db: AsyncSession, assignment_id: int, user_id: int) -> LmsRubricResubmission:
+    _assignment, _rubric, submission, _form = await _student_context(db, assignment_id, user_id)
+    item = await _next_resubmission(db, submission.submission_id)
+    if item is None:
+        raise NotFoundError("There is no resubmission open for this assignment")
+    if item.status != "open":
+        raise ValidationError("You have already handed in this resubmission")
+    if not _resubmission_open(item):
+        raise ValidationError("The resubmission deadline has passed")
+    return item
+
+
+async def save_student_resubmission(db: AsyncSession, assignment_id: int, payload: StudentResubmissionWrite, user_id: int, submit: bool) -> StudentResubmission:
+    item = await _open_student_resubmission(db, assignment_id, user_id)
+    asset = await cw._validate_attachment(db, payload.attachment_asset_id, user_id)
+    answer = (payload.answer_text or "").strip()
+    if submit and not answer and asset is None:
+        raise ValidationError("Add an answer or attachment before handing in your resubmission")
+    item.answer_text = answer or None
+    item.attachment_asset_id = asset.media_asset_id if asset else None
+    if submit:
+        item.status = "submitted"
+        item.submitted_at = cw.utc_now()
+    await db.commit()
+    await db.refresh(item)
+    return _student_resubmission(item, asset)
+
+
+async def annotate_student_resubmissions(db: AsyncSession, items, user_id: int) -> None:
+    """Add the open or handed-in resubmission to each released ATHE assignment card for the student."""
+    submission_ids = [item.submission_id for item in items if item.submission_id and item.has_rubric and item.grades_released]
+    if not submission_ids:
+        return
+    rows = (await db.execute(select(LmsRubricResubmission).where(
+        LmsRubricResubmission.submission_id.in_(submission_ids), LmsRubricResubmission.student_user_id == user_id,
+    ).order_by(LmsRubricResubmission.attempt_no))).scalars().all()
+    by_submission: dict[int, list[LmsRubricResubmission]] = {}
+    for row in rows:
+        by_submission.setdefault(row.submission_id, []).append(row)
+    for item in items:
+        current = by_submission.get(item.submission_id) or []
+        released = _released_attempt(current)
+        pending = [row for row in current if row.attempt_no > released]
+        if pending:
+            row = pending[-1]
+            item.resubmission = {"attempt_no": row.attempt_no, "due_at": row.due_at.isoformat(), "status": row.status, "is_open": _resubmission_open(row)}
 
 
 async def class_rubric_context(db: AsyncSession, class_id: int, user_id: int) -> ClassRubricContext:

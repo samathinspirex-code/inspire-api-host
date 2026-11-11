@@ -115,6 +115,8 @@ class RubricAssessmentWrite(BaseModel):
     overall_comment: str | None = Field(None, max_length=20_000)
     resubmission: str | None = Field(None, max_length=100)
     assessment_date: date | None = None
+    # Required when a completed 1st assessor form gives "Resubmission": the student's own deadline.
+    resubmission_due_at: datetime | None = None
     complete: bool = False
 
 
@@ -131,6 +133,8 @@ class RubricAssessmentItem(BaseModel):
     assessment_date: date | None = None
     overall_grade: str | None = None
     grade_summary: dict | None = None
+    attempt_no: int = 1
+    resubmission_due_at: datetime | None = None
     status: Literal["not_started", "draft", "completed"] = "not_started"
     completed_at: datetime | None = None
     updated_at: datetime | None = None
@@ -149,10 +153,23 @@ class RubricSubmissionInfo(BaseModel):
     attachment_name: str | None = None
 
 
+class RubricAttemptSummary(BaseModel):
+    attempt_no: int
+    overall_grade: str | None = None
+    status: str = "not_started"
+    submitted_at: datetime | None = None
+    completed_at: datetime | None = None
+    resubmission_due_at: datetime | None = None
+    released: bool = False
+
+
 class RubricMarkingResponse(BaseModel):
     rubric: AssignmentRubricItem
     submission: RubricSubmissionInfo
     grades_released: bool = False
+    attempt_no: int = 1
+    can_edit: bool = True
+    previous_attempts: list[RubricAttemptSummary] = []
     first: RubricAssessmentItem | None = None
     second: RubricAssessmentItem | None = None
 
@@ -170,6 +187,9 @@ class RubricOverviewRow(BaseModel):
     first_grade: str | None = None
     second_status: str | None = None
     second_grade: str | None = None
+    attempt_no: int = 1
+    resubmission_status: str | None = None
+    resubmission_due_at: datetime | None = None
 
 
 class RubricOverviewResponse(BaseModel):
@@ -183,6 +203,9 @@ class RubricOverviewResponse(BaseModel):
     second_completed: int | None = None
     missing_first: int = 0
     missing_second: int | None = None
+    resubmissions_open: int = 0
+    resubmissions_to_mark: int = 0
+    resubmissions_ready: int = 0
 
 
 class StudentRubricFeedback(BaseModel):
@@ -193,6 +216,30 @@ class StudentRubricFeedback(BaseModel):
     learner_id: str = ""
     submitted_at: datetime | None = None
     feedback: RubricAssessmentItem
+    attempt_no: int = 1
+    resubmission: "StudentResubmission | None" = None
+
+
+class StudentResubmission(BaseModel):
+    attempt_no: int
+    due_at: datetime
+    status: Literal["open", "submitted", "marked", "released"]
+    is_open: bool = False
+    answer_text: str | None = None
+    attachment_asset_id: int | None = None
+    attachment_url: str | None = None
+    attachment_name: str | None = None
+    submitted_at: datetime | None = None
+
+
+class StudentResubmissionWrite(BaseModel):
+    answer_text: str | None = Field(None, max_length=200_000)
+    attachment_asset_id: int | None = Field(None, gt=0)
+
+
+class ResubmissionReleaseResult(BaseModel):
+    released: int
+    reopened: int = 0
 
 
 class ClassRubricContext(BaseModel):
@@ -202,3 +249,4 @@ class ClassRubricContext(BaseModel):
     current_user_id: int
     is_admin: bool = False
     lecturers: list[RubricPerson] = []
+StudentRubricFeedback.model_rebuild()

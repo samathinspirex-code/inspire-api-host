@@ -67,6 +67,9 @@ from app.modules.lms.schemas.rubric import (
     RubricTemplateListResponse,
     RubricTemplateUpdate,
     RubricTemplateWrite,
+    ResubmissionReleaseResult,
+    StudentResubmission,
+    StudentResubmissionWrite,
     StudentRubricFeedback,
 )
 from app.modules.lms.schemas.dashboard import AdminDashboardResponse, StudentPopulationResponse
@@ -696,6 +699,15 @@ async def remove_assignment_rubric(
     return Response(status_code=204)
 
 
+@router.post("/coursework/assignments/{assignment_id}/rubric/release-resubmissions", response_model=ResubmissionReleaseResult)
+async def release_rubric_resubmissions(
+    assignment_id: int,
+    current_user: CurrentUser = Depends(lecturer_access),
+    db: AsyncSession = Depends(get_db),
+) -> ResubmissionReleaseResult:
+    return await rubric_service.release_resubmissions(db, assignment_id, current_user.user_id)
+
+
 @router.get("/coursework/assignments/{assignment_id}/rubric/overview", response_model=RubricOverviewResponse)
 async def get_assignment_rubric_overview(
     assignment_id: int,
@@ -753,6 +765,26 @@ async def get_my_rubric_feedback(
     db: AsyncSession = Depends(get_db),
 ) -> StudentRubricFeedback:
     return await rubric_service.student_feedback(db, assignment_id, current_user.user_id)
+
+
+@router.put("/my/coursework/assignments/{assignment_id}/resubmission", response_model=StudentResubmission)
+async def save_my_resubmission(
+    assignment_id: int,
+    payload: StudentResubmissionWrite,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentResubmission:
+    return await rubric_service.save_student_resubmission(db, assignment_id, payload, current_user.user_id, submit=False)
+
+
+@router.post("/my/coursework/assignments/{assignment_id}/resubmission/submit", response_model=StudentResubmission)
+async def submit_my_resubmission(
+    assignment_id: int,
+    payload: StudentResubmissionWrite,
+    current_user: CurrentUser = Depends(student_access),
+    db: AsyncSession = Depends(get_db),
+) -> StudentResubmission:
+    return await rubric_service.save_student_resubmission(db, assignment_id, payload, current_user.user_id, submit=True)
 
 
 @router.get("/my/coursework/assignments/{assignment_id}/feedback/export")

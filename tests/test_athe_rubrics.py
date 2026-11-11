@@ -209,22 +209,66 @@ class RubricSaveTests(unittest.IsolatedAsyncioTestCase):
         rubric = SimpleNamespace(assignment_id=7, first_assessor_user_id=1, second_assessor_user_id=2, criteria_snapshot=CRITERIA)
         return submission, assignment, rubric
 
-    async def save(self, user_id, form_role, payload, released=False, admin=False):
+    async def save(self, user_id, form_role, payload, released=False, admin=False, resubmissions=(), keep=None):
         submission, assignment, rubric = self.context(released)
         db = SimpleNamespace(add=MagicMock(), commit=AsyncMock())
+        forms = AsyncMock(return_value={})
         with (patch.object(rubric_service, "_submission_context", new=AsyncMock(return_value=(submission, assignment, rubric))),
               patch.object(rubric_service, "is_global_admin", new=AsyncMock(return_value=admin)),
-              patch.object(rubric_service, "_forms", new=AsyncMock(return_value={})),
+              patch.object(rubric_service, "_resubmissions", new=AsyncMock(return_value=list(resubmissions))),
+              patch.object(rubric_service, "_forms", new=forms),
               patch.object(rubric_service, "get_marking", new=AsyncMock(return_value="ok"))):
             await rubric_service.save_assessment(db, 50, form_role, payload, user_id)
+        if keep is not None:
+            keep["forms_attempt"] = forms.call_args[0][2] if len(forms.call_args[0]) > 2 else 1
         return submission, db.add.call_args[0][0]
 
-    def payload(self, complete=True, comment="Good work", **kwargs):
+    def payload(self, complete=True, comment="Good work", due=None, **kwargs):
         return RubricAssessmentWrite(
             criteria_results=[RubricCriterionResult(**item) for item in results(**kwargs)],
             overall_comment=comment,
             complete=complete,
+            resubmission_due_at=due,
         )
+
+    async def test_resubmission_grade_needs_a_future_deadline(self):
+        from datetime import datetime, timedelta, timezone
+        with self.assertRaises(ValidationError):
+            await self.save(1, "first", self.payload(not_achieved={"1.1"}))
+        with self.assertRaises(ValidationError):
+            await self.save(1, "first", self.payload(not_achieved={"1.1"}, due=datetime.now(timezone.utc) - timedelta(days=1)))
+        due = datetime.now(timezone.utc) + timedelta(days=14)
+        submission, form = await self.save(1, "first", self.payload(not_achieved={"1.1"}, due=due))
+        self.assertEqual(form.overall_grade, "Resubmission")
+        self.assertEqual(form.resubmission_due_at, due)
+        self.assertEqual(submission.grade_band, "fail")
+
+    async def test_deadline_is_dropped_when_the_grade_is_not_resubmission(self):
+        from datetime import datetime, timedelta, timezone
+        _, form = await self.save(1, "first", self.payload(due=datetime.now(timezone.utc) + timedelta(days=3)))
+        self.assertEqual(form.overall_grade, "Distinction")
+        self.assertIsNone(form.resubmission_due_at)
+
+    async def test_resubmitted_attempt_is_marked_on_new_forms_after_release(self):
+        resubmission = SimpleNamespace(attempt_no=2, status="submitted")
+        keep = {}
+        submission, form = await self.save(1, "first", self.payload(), released=True, resubmissions=[resubmission], keep=keep)
+        self.assertEqual(keep["forms_attempt"], 2)
+        self.assertEqual(form.attempt_no, 2)
+        self.assertEqual(form.overall_grade, "Distinction")
+        self.assertEqual(resubmission.status, "marked")
+        self.assertIsNone(submission.grade_band)  # the student keeps the released result until re-marks are released
+
+    async def test_released_resubmission_result_is_locked(self):
+        with self.assertRaises(ValidationError):
+            await self.save(1, "first", self.payload(), released=True, resubmissions=[SimpleNamespace(attempt_no=2, status="released")])
+
+    def test_attempt_helpers(self):
+        rows = [SimpleNamespace(attempt_no=2, status="released"), SimpleNamespace(attempt_no=3, status="open")]
+        self.assertEqual(rubric_service._marking_attempt(rows)[0], 2)
+        self.assertEqual(rubric_service._released_attempt(rows), 2)
+        self.assertEqual(rubric_service._marking_attempt([])[0], 1)
+        self.assertEqual(rubric_service._released_attempt([SimpleNamespace(attempt_no=2, status="submitted")]), 1)
 
     async def test_first_assessor_completion_sets_final_grade_on_submission(self):
         submission, form = await self.save(1, "first", self.payload(not_achieved={"1M1", "2D1"}))
