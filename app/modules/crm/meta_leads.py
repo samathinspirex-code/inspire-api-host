@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 SOURCE = "meta_lead_forms"
 LEAD_FIELDS = "id,created_time,field_data,ad_name,campaign_name,form_id,platform,is_organic"
 LOCK_MINUTES = 10
-PROGRAMME_QUESTION = re.compile(r"programme|program|course|interest|which|study", re.I)
 PLATFORMS = {"fb": "Facebook", "ig": "Instagram", "msgr": "Messenger", "messenger": "Messenger", "wa": "WhatsApp", "whatsapp": "WhatsApp"}
 
 
@@ -35,30 +34,49 @@ def _clean(value, limit: int = 255) -> str | None:
     return text_value[:limit] or None
 
 
+def _key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+PHONE_KEY = re.compile(r"phone|mobile|whatsapp|contact_number|telephone")
+PROGRAMME_KEY = re.compile(r"programme|program|course|diploma|degree_you")
+QUALIFICATION_KEY = re.compile(r"qualification")
+
+
 def map_lead(lead: dict, form_name: str | None) -> dict:
-    """Meta's answers to CRM fields. Unknown questions go into the message as plain text."""
+    """Meta's answers to CRM fields. Forms name their questions differently, so keys are matched loosely.
+    Unknown questions go into the message as plain text, one per line."""
     answers = {}
     for item in lead.get("field_data") or []:
         values = [str(value) for value in item.get("values") or [] if str(value).strip()]
         if item.get("name") and values:
-            answers[str(item["name"])] = ", ".join(values)
-    known = {"full_name", "first_name", "last_name", "phone_number", "email", "city"}
+            answers[_key(str(item["name"]))] = ", ".join(values)
     name = answers.get("full_name") or " ".join(filter(None, (answers.get("first_name"), answers.get("last_name"))))
-    programme = next((value for key, value in answers.items() if key not in known and PROGRAMME_QUESTION.search(key)), None)
-    extra = [f"{key.replace('_', ' ')}: {value}" for key, value in answers.items() if key not in known and value != programme]
-    platform = PLATFORMS.get(str(lead.get("platform") or "").lower(), _clean(lead.get("platform"), 30) or "Meta")
+    phone_key = "phone_number" if "phone_number" in answers else next((key for key in answers if PHONE_KEY.search(key)), None)
+    # Prefer the question that asks which programme they want, over ones like "field of study".
+    programme_key = next((key for key in answers if PROGRAMME_KEY.search(key) and "interest" in key), None) \
+        or next((key for key in answers if PROGRAMME_KEY.search(key)), None)
+    qualification_key = next((key for key in answers if QUALIFICATION_KEY.search(key)), None)
+    inbox = answers.get("inbox_url") if str(answers.get("inbox_url", "")).startswith("https://") else None
+    used = {"full_name", "first_name", "last_name", "email", "city", "inbox_url", phone_key, programme_key, qualification_key}
+    extra = [f"{key.replace('_', ' ')}: {_clean(value, 300)}" for key, value in answers.items() if key not in used]
+    raw_platform = str(lead.get("platform") or "").lower()
+    platform = PLATFORMS.get(raw_platform) or ("Messenger" if inbox else _clean(lead.get("platform"), 30) or "Meta")
     notes = [f"Meta lead form: {_clean(form_name, 120) or lead.get('form_id')}", f"Platform: {platform}"]
     if lead.get("ad_name"):
         notes.append(f"Ad: {_clean(lead['ad_name'], 120)}")
     if lead.get("is_organic"):
         notes.append("Organic (not from an ad)")
+    if inbox:
+        notes.append(f"Messenger conversation: {_clean(inbox, 300)}")
     return {
         "full_name": _clean(name) or "Meta lead",
-        "phone": _clean(answers.get("phone_number"), 50),
+        "phone": _clean(answers.get(phone_key), 50) if phone_key else None,
         "email": (_clean(answers.get("email")) or "").lower() or None,
         "city": _clean(answers.get("city"), 100),
-        "interested_programme": _clean(programme),
-        "message": _clean("\n".join(extra), 2000) if extra else None,
+        "interested_programme": _clean(answers.get(programme_key)) if programme_key else None,
+        "highest_qualification": _clean(answers.get(qualification_key), 120) if qualification_key else None,
+        "message": "\n".join(extra)[:2000] if extra else None,
         "campaign": _clean(lead.get("campaign_name")),
         "notes": ". ".join(notes) + ".",
         "social_lead_id": str(lead["id"]),

@@ -128,3 +128,22 @@ def test_page_token_comes_from_the_system_user_token():
     with pytest.raises(meta_leads.ProviderFailure) as exc:
         run(go("404"))
     assert "Assign the Page" in str(exc.value)
+
+
+def test_real_form_question_names_map_correctly():
+    # Question names from the live "PG athe Lead form".
+    mapped = meta_leads.map_lead({"id": "9", "is_organic": True, "field_data": [
+        {"name": "full_name", "values": ["Kasun"]}, {"name": "email", "values": ["k@x.lk"]},
+        {"name": "what_is_your_highest_qualification?", "values": ["Degree"]}, {"name": "are_you_currently_employed?", "values": ["Yes"]},
+        {"name": "what_was_your_field_of_study?", "values": ["Biology"]},
+        {"name": "which_postgraduate_programme_are_you_interested_in?", "values": ["ATHE Level 7"]},
+        {"name": "phone", "values": ["0771234567"]}, {"name": "job_title", "values": ["Teacher"]},
+        {"name": "inbox_url", "values": ["https://business.facebook.com/latest/inbox/123"]}]}, "PG athe Lead form")
+    assert mapped["phone"] == "0771234567" and mapped["interested_programme"] == "ATHE Level 7" and mapped["highest_qualification"] == "Degree"
+    assert mapped["message"].split("\n") == ["are you currently employed: Yes", "what was your field of study: Biology", "job title: Teacher"]
+    assert mapped["platform"] == "Messenger" and "Messenger conversation: https://business.facebook.com/latest/inbox/123" in mapped["notes"]
+
+
+def test_a_non_link_inbox_value_is_not_trusted_as_a_link():
+    mapped = meta_leads.map_lead({"id": "9", "field_data": [{"name": "inbox_url", "values": ["javascript:alert(1)"]}]}, None)
+    assert "Messenger conversation" not in mapped["notes"] and mapped["platform"] == "Meta"
