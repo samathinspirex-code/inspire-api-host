@@ -551,7 +551,10 @@ async def get_assignment_settings(db: AsyncSession) -> CrmAssignmentSettingsOut:
         if settings.auto_assign_enabled
         else None
     )
+    from app.modules.crm import source_assignment
     return CrmAssignmentSettingsOut(
+        meta_counsellor_ids=await source_assignment.meta_counsellor_ids(db),
+        meta_setting_ready=await source_assignment.ready(db),
         auto_assign_enabled=settings.auto_assign_enabled,
         last_counsellor_id=settings.last_counsellor_id,
         last_assigned_on=settings.last_assigned_on.isoformat() if settings.last_assigned_on else None,
@@ -561,9 +564,14 @@ async def get_assignment_settings(db: AsyncSession) -> CrmAssignmentSettingsOut:
     )
 
 
-async def update_assignment_settings(db: AsyncSession, enabled: bool) -> CrmAssignmentSettingsOut:
+async def update_assignment_settings(db: AsyncSession, enabled: Optional[bool], meta_counsellor_ids: Optional[list[int]] = None) -> CrmAssignmentSettingsOut:
     settings = await _settings_row(db)
-    settings.auto_assign_enabled = enabled
+    if enabled is not None:
+        settings.auto_assign_enabled = enabled
+    if meta_counsellor_ids is not None:
+        from app.modules.crm.source_assignment import set_meta_counsellor_ids
+        known = {user.user_id for user, _status in _dedupe_counsellor_rows((await db.execute(_counsellor_users_stmt(True))).all())}
+        await set_meta_counsellor_ids(db, meta_counsellor_ids, known)
     await db.commit()
     return await get_assignment_settings(db)
 
@@ -940,9 +948,13 @@ async def create_lead(
     if explicit_id is None and not assign_to_creator and not auto_assign:
         assignment_note = " Round robin skipped for this source."
     if explicit_id is None and not assign_to_creator and auto_assign:
-        picked = await apply_auto_assignment(db, lead.lead_id, commit=False)
+        from app.modules.crm.source_assignment import assign_by_source
+        # Admins can send a source, such as Meta lead forms, to chosen counsellors. Otherwise the normal rotation applies.
+        picked, how = await assign_by_source(db, lead.lead_id, data.get("source")), "Meta lead setting"
+        if picked is None:
+            picked, how = await apply_auto_assignment(db, lead.lead_id, commit=False), "daily rotation"
         if picked:
-            assignment_note = f" Auto-assigned to {picked.name} (daily rotation)."
+            assignment_note = f" Auto-assigned to {picked.name} ({how})."
             if backdated_created_at is not None:
                 await db.execute(
                     text("UPDATE crm_leads SET assigned_at=:assigned_at WHERE lead_id=:id"),

@@ -17,8 +17,9 @@ from app.modules.lms.schemas import (
 )
 
 
-def _course_item(row, role: str) -> PortalCourseItem:
+def _course_item(row, role: str, academic_pathway=None) -> PortalCourseItem:
     course, program_title, program_code, module_count, class_count, people_count = row
+    academic_pathway = academic_pathway or {}
     return PortalCourseItem(
         course_id=course.course_id,
         program_id=course.program_id,
@@ -34,6 +35,9 @@ def _course_item(row, role: str) -> PortalCourseItem:
         status=course.status,
         created_at=course.created_at,
         updated_at=course.updated_at,
+        awarding_body=academic_pathway.get("awarding_body"),
+        school_name=academic_pathway.get("school_name"),
+        programme_name=academic_pathway.get("programme_name"),
         module_count=module_count,
         class_count=class_count,
         people_count=people_count,
@@ -76,6 +80,30 @@ def _class_item(row, role: str, academic_pathway=None) -> PortalClassItem:
     )
 
 
+async def _academic_course_pathways(db: AsyncSession, rows) -> dict[int, dict]:
+    """Return the CMS pathway a reusable Course page carries into new classes.
+
+    This matches list_lms_course_study_options: the lowest academic course
+    linked to the template's legacy programme supplies the pathway.
+    """
+    course_ids = sorted({row[0].course_id for row in rows if not row[0].is_orientation and row[0].program_id})
+    if not course_ids:
+        return {}
+    statement = text("""
+        SELECT lc.course_id, ac.awarding_body, s.name AS school_name, p.name AS programme_name
+        FROM lms_courses lc
+        JOIN academic_courses ac ON ac.course_id = (
+            SELECT min(first_ac.course_id) FROM academic_courses first_ac
+            WHERE first_ac.legacy_program_id = lc.program_id
+        )
+        LEFT JOIN academic_schools s ON s.school_id = ac.school_id
+        LEFT JOIN academic_programmes p ON p.programme_id = ac.programme_id
+        WHERE lc.course_id IN :course_ids
+    """).bindparams(bindparam("course_ids", expanding=True))
+    result = await db.execute(statement, {"course_ids": course_ids})
+    return {row["course_id"]: dict(row) for row in result.mappings()}
+
+
 async def _academic_class_pathways(db: AsyncSession, rows) -> dict[int, dict]:
     class_ids = sorted({row[0].class_id for row in rows})
     if not class_ids:
@@ -98,7 +126,8 @@ async def _academic_class_pathways(db: AsyncSession, rows) -> dict[int, dict]:
 
 async def list_my_courses(db: AsyncSession, user_id: int, role: str) -> PortalCourseListResponse:
     rows = await PortalRepository(db).list_courses(user_id, role)
-    return PortalCourseListResponse(data=[_course_item(row, role) for row in rows])
+    pathways = await _academic_course_pathways(db, rows) if role != "STUDENT" else {}
+    return PortalCourseListResponse(data=[_course_item(row, role, pathways.get(row[0].course_id)) for row in rows])
 
 
 async def get_my_course(

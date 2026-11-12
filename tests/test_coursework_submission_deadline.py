@@ -11,7 +11,7 @@ from app.modules.lms import coursework_service, notification_service
 class SubmissionDeadlineTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_submits_saved_file_and_expires_empty_draft(self):
         now = datetime(2026, 10, 23, 12, tzinfo=timezone.utc)
-        assignment = SimpleNamespace(due_at=now, submission_type="written", status="published")
+        assignment = SimpleNamespace(due_at=now, submission_type="written", status="published", allow_late=False)
         saved = SimpleNamespace(status="in_progress", started_at=now - timedelta(hours=1), expires_at=None,
                                 answer_text=None, attachment_asset_id=17, submitted_at=None)
         empty = SimpleNamespace(status="in_progress", started_at=now - timedelta(hours=1), expires_at=None,
@@ -74,7 +74,7 @@ class SubmissionDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_withdrawal_is_rejected_at_deadline(self):
         now = datetime.now(timezone.utc)
-        assignment = SimpleNamespace(submission_type="written", grades_released=False, due_at=now)
+        assignment = SimpleNamespace(submission_type="written", grades_released=False, due_at=now, allow_late=False)
         submission = SimpleNamespace(status="submitted", expires_at=None)
         repo = MagicMock()
         repo.get_submission = AsyncMock(return_value=submission)
@@ -84,6 +84,112 @@ class SubmissionDeadlineTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValidationError):
                 await coursework_service.withdraw_submission(db, 4, 2)
         db.commit.assert_not_awaited()
+
+    async def test_late_allowed_keeps_draft_started_before_deadline_open(self):
+        now = datetime(2026, 11, 9, 13, tzinfo=timezone.utc)
+        assignment = SimpleNamespace(due_at=now - timedelta(minutes=1), submission_type="written",
+                                     status="published", allow_late=True)
+        draft = SimpleNamespace(status="in_progress", started_at=now - timedelta(days=3), expires_at=None,
+                                answer_text=None, attachment_asset_id=None, submitted_at=None)
+        result = MagicMock()
+        result.all.return_value = [(draft, assignment)]
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), commit=AsyncMock())
+
+        count = await coursework_service.finalize_due_drafts(db, now)
+
+        self.assertEqual(count, 0)
+        self.assertEqual(draft.status, "in_progress")
+        db.commit.assert_not_awaited()
+
+    async def test_late_allowed_lets_early_starter_submit_after_deadline(self):
+        now = datetime.now(timezone.utc)
+        assignment = SimpleNamespace(submission_type="written", due_at=now - timedelta(hours=1), allow_late=True)
+        submission = SimpleNamespace(status="in_progress", started_at=now - timedelta(days=2), expires_at=None)
+        repo = MagicMock()
+        repo.get_submission = AsyncMock(return_value=submission)
+        with (patch.object(coursework_service, "_student_context", new=AsyncMock(return_value=(assignment,))),
+              patch.object(coursework_service, "CourseworkRepository", return_value=repo)):
+            _, returned = await coursework_service._active_submission(SimpleNamespace(commit=AsyncMock()), 4, 2)
+        self.assertIs(returned, submission)
+        self.assertEqual(submission.status, "in_progress")
+
+    async def test_late_not_allowed_closes_draft_at_deadline(self):
+        now = datetime.now(timezone.utc)
+        due = now - timedelta(minutes=5)
+        assignment = SimpleNamespace(submission_type="written", due_at=due, allow_late=False)
+        submission = SimpleNamespace(status="in_progress", started_at=now - timedelta(days=2), expires_at=None,
+                                     answer_text=None, attachment_asset_id=31, submitted_at=None)
+        repo = MagicMock()
+        repo.get_submission = AsyncMock(return_value=submission)
+        db = SimpleNamespace(commit=AsyncMock())
+        with (patch.object(coursework_service, "_student_context", new=AsyncMock(return_value=(assignment,))),
+              patch.object(coursework_service, "CourseworkRepository", return_value=repo)):
+            with self.assertRaises(ValidationError):
+                await coursework_service._active_submission(db, 4, 2)
+        self.assertEqual(submission.status, "submitted")
+        self.assertEqual(submission.submitted_at, due)
+
+
+class ReopenAfterEditTests(unittest.IsolatedAsyncioTestCase):
+    def assignment(self, **changes):
+        now = datetime.now(timezone.utc)
+        values = dict(assignment_id=4, status="published", submission_type="written", assignment_type="regular",
+                      grades_released=False, due_at=now - timedelta(hours=1), allow_late=True)
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    def db_with(self, rows):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = rows
+        return SimpleNamespace(execute=AsyncMock(return_value=result))
+
+    async def test_reopens_auto_zero_and_auto_submitted_draft_but_not_student_or_marked_work(self):
+        old_due = datetime(2026, 11, 9, 12, 29, tzinfo=timezone.utc)
+        auto_zero = SimpleNamespace(status="expired", feedback=coursework_service.AUTO_ZERO_FEEDBACK, marked_by=None,
+                                    submitted_at=old_due, expires_at=None, marks_awarded=Decimal("0"),
+                                    grade_band="fail", marked_at=old_due, started_at=old_due)
+        auto_draft = SimpleNamespace(status="submitted", feedback=None, marked_by=None, submitted_at=old_due,
+                                     expires_at=None, marks_awarded=None, grade_band=None, marked_at=None,
+                                     started_at=old_due - timedelta(days=1))
+        handed_in = SimpleNamespace(status="submitted", feedback=None, marked_by=None,
+                                    submitted_at=old_due - timedelta(hours=2), expires_at=None)
+        marked = SimpleNamespace(status="expired", feedback=coursework_service.AUTO_ZERO_FEEDBACK, marked_by=9,
+                                 submitted_at=old_due, expires_at=None)
+        db = self.db_with([auto_zero, auto_draft, handed_in, marked])
+
+        count = await coursework_service.reopen_closed_submissions(db, self.assignment(), old_due)
+
+        self.assertEqual(count, 2)
+        for row in (auto_zero, auto_draft):
+            self.assertEqual(row.status, "in_progress")
+            self.assertIsNone(row.marks_awarded)
+            self.assertIsNone(row.feedback)
+            self.assertIsNone(row.submitted_at)
+        self.assertEqual(handed_in.status, "submitted")
+        self.assertEqual(marked.status, "expired")
+
+    async def test_nothing_reopens_while_deadline_passed_and_late_not_allowed(self):
+        db = self.db_with([])
+        count = await coursework_service.reopen_closed_submissions(db, self.assignment(allow_late=False), None)
+        self.assertEqual(count, 0)
+        db.execute.assert_not_awaited()
+
+    async def test_extended_deadline_reopens_without_late_submissions(self):
+        now = datetime.now(timezone.utc)
+        old_due = now - timedelta(hours=1)
+        auto_zero = SimpleNamespace(status="expired", feedback=coursework_service.AUTO_ZERO_FEEDBACK, marked_by=None,
+                                    submitted_at=old_due, expires_at=None)
+        db = self.db_with([auto_zero])
+        count = await coursework_service.reopen_closed_submissions(
+            db, self.assignment(allow_late=False, due_at=now + timedelta(days=2)), old_due)
+        self.assertEqual(count, 1)
+        self.assertEqual(auto_zero.status, "in_progress")
+
+    async def test_released_grades_are_never_reopened(self):
+        db = self.db_with([])
+        count = await coursework_service.reopen_closed_submissions(db, self.assignment(grades_released=True), None)
+        self.assertEqual(count, 0)
+        db.execute.assert_not_awaited()
 
 
 class AssignmentFollowupTests(unittest.IsolatedAsyncioTestCase):

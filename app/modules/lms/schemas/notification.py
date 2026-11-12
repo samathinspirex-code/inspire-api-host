@@ -90,3 +90,25 @@ class NotificationDispatchSummary(BaseModel):
     announcements_published: int
     emails_sent: int
     emails_failed: int
+
+
+class NotificationPreferenceItem(BaseModel):
+    category: str
+    label: str
+    description: str
+    in_app_enabled: bool
+    email_enabled: bool
+
+
+class NotificationPreferencesResponse(BaseModel):
+    data: list[NotificationPreferenceItem]
+
+
+class NotificationPreferenceChange(BaseModel):
+    category: str = Field(..., min_length=2, max_length=40)
+    in_app_enabled: bool
+    email_enabled: bool
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    data: list[NotificationPreferenceChange] = Field(..., min_length=1, max_length=20)

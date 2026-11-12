@@ -17,6 +17,7 @@ from app.modules.lms import service
 from app.modules.lms import student_import_service
 from app.modules.lms.student_excel_import import MAX_EXCEL_BYTES, parse_excel_students
 from app.modules.lms.schemas.student_import import StudentImportRequest, StudentImportResponse
+from app.modules.lms.schemas.notification import NotificationPreferencesResponse, NotificationPreferencesUpdate
 from app.modules.lms import assignment_service
 from app.modules.lms import portal_service
 from app.modules.lms import meeting_service
@@ -196,6 +197,7 @@ from app.modules.lms.schemas import (
     MyProfileResponse,
     LecturerDirectoryProfileResponse,
     MyProfileUpdate,
+    ProfileAvatarUpdate,
     StudentAcademicProfileResponse,
     AnalyticsDashboardResponse,
     VimeoCourseLibraryResponse,
@@ -331,6 +333,17 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
 ) -> MyProfileResponse:
     return await profile_service.update_my_profile(
+        db, current_user.user_id, service.resolve_role(current_user.access), payload
+    )
+
+
+@router.put("/profile/avatar", response_model=MyProfileResponse)
+async def set_my_profile_avatar(
+    payload: ProfileAvatarUpdate,
+    current_user: CurrentUser = Depends(profile_access),
+    db: AsyncSession = Depends(get_db),
+) -> MyProfileResponse:
+    return await profile_service.set_profile_avatar(
         db, current_user.user_id, service.resolve_role(current_user.access), payload
     )
 
@@ -1097,6 +1110,27 @@ async def mark_all_notifications_read(
     db: AsyncSession = Depends(get_db),
 ) -> NotificationListResponse:
     return await notification_service.mark_all_read(db, current_user.user_id)
+
+
+@router.get("/notifications/preferences", response_model=NotificationPreferencesResponse)
+async def get_notification_preferences(
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationPreferencesResponse:
+    return await notification_service.get_notification_preferences(
+        db, current_user.user_id, service.resolve_role(current_user.access) or "",
+    )
+
+
+@router.put("/notifications/preferences", response_model=NotificationPreferencesResponse)
+async def update_notification_preferences(
+    payload: NotificationPreferencesUpdate,
+    current_user: CurrentUser = Depends(notification_access),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationPreferencesResponse:
+    return await notification_service.update_notification_preferences(
+        db, payload, current_user.user_id, service.resolve_role(current_user.access) or "",
+    )
 
 
 @router.get("/announcements", response_model=AnnouncementListResponse)

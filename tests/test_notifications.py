@@ -46,6 +46,7 @@ class NotificationTests(unittest.TestCase):
             SimpleNamespace(all=lambda: [(item, user)]),
             SimpleNamespace(all=lambda: [(42, start)]),
             SimpleNamespace(all=lambda: [(7, "America/Toronto")]),
+            SimpleNamespace(all=lambda: []),
         ]), commit=AsyncMock())
         with patch("app.modules.lms.notification_service.send_notification_email", new_callable=AsyncMock,
                    return_value=EmailDeliveryResult(True)) as send_email:

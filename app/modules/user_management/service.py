@@ -10,6 +10,7 @@ from app.modules.auth.schemas import AuthenticatorInvitationResponse
 from app.modules.crm.models.activity import CrmActivity
 from app.modules.crm.models.counsellor_status import CrmCounsellorStatus
 from app.modules.crm.models.lead import CrmLead
+from app.modules.lms.models import LecturerProfile, StudentProfile
 from app.modules.user_management.repository import UserManagementRepository
 from app.modules.user_management.schemas import UserCreate, UserDetail, UserListResponse, UserUpdate
 
@@ -23,6 +24,21 @@ def _to_detail(user: User, authenticator_configured: bool = False) -> UserDetail
         access=access,
         authenticator_configured=authenticator_configured,
     )
+
+
+LMS_PROFILE_MODELS = (("STUDENT", StudentProfile), ("LECTURER", LecturerProfile))
+
+
+async def ensure_lms_profiles(db: AsyncSession, user_id: int, access: list[str]) -> bool:
+    """The LMS Students and Lecturers lists show people with a profile row, so
+    granting STUDENT or LECTURER access to an existing account must create one.
+    Profiles are never removed here, so enrolment history is kept if access is withdrawn."""
+    created = False
+    for key, model in LMS_PROFILE_MODELS:
+        if key in access and await db.get(model, user_id) is None:
+            db.add(model(user_id=user_id))
+            created = True
+    return created
 
 
 async def list_users(db: AsyncSession) -> UserListResponse:
@@ -45,6 +61,8 @@ async def create_user(db: AsyncSession, payload: UserCreate) -> UserDetail:
 
     access_levels = await repo.get_access_levels_by_keys(payload.access)
     user = await repo.create(payload.name, email, access_levels)
+    if await ensure_lms_profiles(db, user.user_id, [level.access_key for level in access_levels]):
+        await db.commit()
     return _to_detail(user)
 
 
@@ -82,6 +100,7 @@ async def update_user(db: AsyncSession, user_id: int, payload: UserUpdate) -> Us
         .where(CrmActivity.counsellor_id == user_id)
         .values(counsellor_name=payload.name)
     )
+    await ensure_lms_profiles(db, user.user_id, [level.access_key for level in access_levels])
     await db.commit()
     configured = await AuthenticatorRepository(db).configured_user_ids([user.user_id])
     return _to_detail(user, user.user_id in configured)

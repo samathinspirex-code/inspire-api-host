@@ -92,12 +92,28 @@ def submission_is_late(submission, due_at: datetime | None) -> bool:
     )
 
 
+AUTO_ZERO_FEEDBACK = "Automatically graded zero because the submission deadline passed."
+
+
+def deadline_closes(assignment: LmsCourseworkAssignment, now: datetime | None = None) -> bool:
+    """The due date closes work only when late submissions are not allowed.
+
+    With late submissions allowed, every attempt stays open after the due date,
+    including attempts started before it; work handed in after it is labelled late.
+    """
+    return bool(
+        assignment.due_at
+        and as_utc(assignment.due_at) <= (as_utc(now) or utc_now())
+        and not assignment.allow_late
+    )
+
+
 def _expire_with_zero(submission: LmsCourseworkSubmission, closed_at: datetime | None = None) -> None:
     submission.status = "expired"
     submission.submitted_at = as_utc(closed_at) or utc_now()
     submission.marks_awarded = Decimal("0")
     submission.grade_band = "fail"
-    submission.feedback = "Automatically graded zero because the submission deadline passed."
+    submission.feedback = AUTO_ZERO_FEEDBACK
     submission.marked_at = utc_now()
 
 
@@ -111,12 +127,64 @@ def _finalize_saved_draft(submission: LmsCourseworkSubmission, closed_at: dateti
 
 
 def _can_change_submission(assignment: LmsCourseworkAssignment, submission: LmsCourseworkSubmission, now: datetime) -> bool:
+    # After the due date, late-allowed work can still be changed until the lecturer marks it.
     return (
         assignment.submission_type != "mcq"
         and not assignment.grades_released
-        and (assignment.due_at is None or as_utc(assignment.due_at) > now)
+        and (
+            assignment.due_at is None or as_utc(assignment.due_at) > now
+            or (assignment.allow_late and submission.marked_by is None)
+        )
         and (submission.expires_at is None or as_utc(submission.expires_at) > now)
     )
+
+
+def _was_closed_by_system(submission: LmsCourseworkSubmission, previous_due_at: datetime | None) -> bool:
+    """Work the deadline closed automatically, never work the student or lecturer finished."""
+    if submission.marked_by is not None:
+        return False
+    if submission.status == "expired":
+        return submission.feedback in (None, AUTO_ZERO_FEEDBACK)
+    # Saved drafts handed in automatically carry the old due date as their hand-in time.
+    return bool(
+        submission.status == "submitted" and previous_due_at and submission.submitted_at
+        and submission.expires_at is None
+        and as_utc(submission.submitted_at) == as_utc(previous_due_at)
+    )
+
+
+def _reopen_submission(submission: LmsCourseworkSubmission, now: datetime) -> None:
+    submission.status = "in_progress"
+    submission.started_at = now
+    submission.submitted_at = None
+    submission.marks_awarded = None
+    submission.grade_band = None
+    submission.feedback = None
+    submission.marked_by = None
+    submission.marked_at = None
+
+
+async def reopen_closed_submissions(
+    db: AsyncSession, assignment: LmsCourseworkAssignment, previous_due_at: datetime | None, now: datetime | None = None,
+) -> int:
+    """Reopen work the deadline closed once the lecturer's settings let students submit again."""
+    now = as_utc(now) or utc_now()
+    if (
+        assignment.status != "published" or assignment.submission_type == "mcq"
+        or assignment.assignment_type == "timed" or assignment.grades_released
+        or deadline_closes(assignment, now)
+    ):
+        return 0
+    rows = (await db.execute(select(LmsCourseworkSubmission).where(
+        LmsCourseworkSubmission.assignment_id == assignment.assignment_id,
+        LmsCourseworkSubmission.status.in_(("expired", "submitted")),
+    ).with_for_update())).scalars().all()
+    reopened = 0
+    for submission in rows:
+        if _was_closed_by_system(submission, previous_due_at):
+            _reopen_submission(submission, now)
+            reopened += 1
+    return reopened
 
 
 async def _ensure_lecturer_course(db: AsyncSession, course_id: int, user_id: int) -> None:
@@ -273,10 +341,12 @@ async def update_assignment(
     )
     was_published = assignment.status == "published"
     previous_available_from = assignment.available_from
+    previous_due_at = assignment.due_at
     for field, value in payload.model_dump().items():
         setattr(assignment, field, value)
     if assignment.status == "published" and assignment.available_from is None:
         assignment.available_from = utc_now()
+    await reopen_closed_submissions(db, assignment, previous_due_at)
     if assignment.submission_type == "mcq":
         exam = await db.scalar(select(LmsExam).where(
             LmsExam.assignment_id == assignment_id,
@@ -395,9 +465,7 @@ async def list_assignments(
         if not assignment_is_available(assignment.available_from, now) and not (submission and submission.status == "in_progress"):
             continue
         timer_finished = submission and submission.expires_at and remaining_seconds(submission.expires_at) == 0
-        deadline_finished = bool(
-            assignment.due_at and as_utc(assignment.due_at) <= now and not assignment.allow_late
-        )
+        deadline_finished = deadline_closes(assignment, now)
         if submission is None and deadline_finished:
             submission = LmsCourseworkSubmission(
                 assignment_id=assignment.assignment_id,
@@ -408,7 +476,7 @@ async def list_assignments(
             _expire_with_zero(submission, assignment.due_at)
             db.add(submission)
             await db.flush()
-        elif submission and submission.status == "in_progress" and (timer_finished or (assignment.due_at and as_utc(assignment.due_at) <= now and as_utc(submission.started_at) < as_utc(assignment.due_at))):
+        elif submission and submission.status == "in_progress" and (timer_finished or deadline_finished):
             cutoff = min((time for time in (as_utc(submission.expires_at), as_utc(assignment.due_at)) if time is not None), default=now)
             _finalize_saved_draft(submission, cutoff)
         elif submission and submission.status == "withdrawn" and deadline_finished:
@@ -445,7 +513,7 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
         now = utc_now()
         if assignment.available_from and as_utc(assignment.available_from) > now:
             raise ValidationError("This assignment is not available yet")
-        if assignment.due_at and as_utc(assignment.due_at) <= now and not assignment.allow_late:
+        if deadline_closes(assignment, now):
             submission = LmsCourseworkSubmission(
                 assignment_id=assignment_id,
                 student_user_id=user_id,
@@ -473,9 +541,7 @@ async def start_assignment(db: AsyncSession, assignment_id: int, user_id: int):
         await db.commit()
         await db.refresh(submission)
     elif submission.status == "in_progress" and (
-        remaining_seconds(submission.expires_at) == 0
-        or (assignment.due_at and as_utc(assignment.due_at) <= utc_now()
-            and as_utc(submission.started_at) < as_utc(assignment.due_at))
+        remaining_seconds(submission.expires_at) == 0 or deadline_closes(assignment)
     ):
         _finalize_saved_draft(submission, submission.expires_at or assignment.due_at)
         await db.commit()
@@ -509,11 +575,7 @@ async def _active_submission(db: AsyncSession, assignment_id: int, user_id: int)
         _finalize_saved_draft(submission, submission.expires_at)
         await db.commit()
         raise ValidationError("The assignment timer has expired")
-    if (
-        assignment.due_at
-        and as_utc(assignment.due_at) <= utc_now()
-        and (not assignment.allow_late or as_utc(submission.started_at) < as_utc(assignment.due_at))
-    ):
+    if deadline_closes(assignment):
         _finalize_saved_draft(submission, assignment.due_at)
         await db.commit()
         raise ValidationError("The deadline for this assignment has passed")
@@ -613,7 +675,7 @@ async def finalize_due_drafts(db: AsyncSession, now: datetime | None = None) -> 
     changed = 0
     for submission, assignment in rows:
         timer_ended = submission.expires_at is not None and as_utc(submission.expires_at) <= now
-        deadline_ended = assignment.due_at is not None and as_utc(assignment.due_at) <= now and as_utc(submission.started_at) < as_utc(assignment.due_at)
+        deadline_ended = deadline_closes(assignment, now)
         if not timer_ended and not deadline_ended:
             continue
         cutoff = min((time for time in (as_utc(submission.expires_at), as_utc(assignment.due_at)) if time is not None), default=now)

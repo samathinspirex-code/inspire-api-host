@@ -14,11 +14,14 @@ from app.modules.cms.models import MediaAsset
 from app.modules.auth.models import AccessLevel, User, UserAccessLevel
 from app.modules.lms.models import (
     ClassLecturer, ClassStudent, CourseEnrollment, CourseLecturer, LmsAnnouncement, LmsClass,
-    LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission, LmsExam, LmsNotification, OnlineMeeting, StudentProfile,
+    LmsCourse, LmsCourseworkAssignment, LmsCourseworkSubmission, LmsExam, LmsNotification, LmsNotificationPreference,
+    OnlineMeeting, StudentProfile,
 )
 from app.modules.lms.notification_email import send_notification_email
 from app.modules.lms.schemas import AnnouncementItem, AnnouncementListResponse, NotificationDispatchSummary, NotificationItem, NotificationListResponse
-from app.modules.lms.schemas.notification import AnnouncementAttachment
+from app.modules.lms.schemas.notification import (
+    AnnouncementAttachment, NotificationPreferenceItem, NotificationPreferencesResponse, NotificationPreferencesUpdate,
+)
 
 COLOMBO = timezone(timedelta(hours=5, minutes=30), "Asia/Colombo")
 logger = logging.getLogger(__name__)
@@ -26,6 +29,101 @@ ASSIGNMENT_REMINDERS = (1440, 60)
 # 1 day, 30 minutes, 15 minutes before, and at start time.
 MEETING_REMINDERS = (1440, 30, 15, 0)
 MEETING_TIME_PATTERN = re.compile(r"\b\d{2} [A-Za-z]+ \d{4} at \d{2}:\d{2} [AP]M \([^)]+\)")
+
+
+STAFF_ROLES = frozenset({"SUPER_ADMIN", "ADMIN", "LECTURER"})
+ALL_ROLES = STAFF_ROLES | {"STUDENT"}
+# Each category groups the notification types a person can switch on or off
+# in their profile. Types not listed here are always delivered.
+NOTIFICATION_CATEGORIES = (
+    {"key": "classes", "label": "Online classes", "roles": ALL_ROLES,
+     "types": ("class_schedule", "class_reminder"),
+     "description": "Classes scheduled, rescheduled or cancelled, and reminders before a class starts."},
+    {"key": "announcements", "label": "Announcements", "roles": ALL_ROLES,
+     "types": ("announcement",),
+     "description": "Messages published to your courses, classes or the whole LMS."},
+    {"key": "assignments", "label": "Assignments", "roles": frozenset({"LECTURER", "STUDENT"}),
+     "types": ("assignment_published", "assignment_deadline", "resubmission_opened",
+               "assignment_deadline_summary", "assignment_release_reminder"),
+     "description": "New assignments, deadline reminders and resubmission requests.",
+     "staff_description": "Submission summaries after a deadline and reminders to release marked results."},
+    {"key": "exams", "label": "Exams", "roles": frozenset({"STUDENT"}),
+     "types": ("exam_published", "exam_deadline"),
+     "description": "New exams and reminders before an exam closes."},
+    {"key": "practice_tests", "label": "Practice tests", "roles": frozenset({"STUDENT"}),
+     "types": ("practice_test_published", "practice_test_deadline"),
+     "description": "New practice tests and reminders before a practice test closes."},
+    {"key": "grades", "label": "Grades and results", "roles": frozenset({"STUDENT"}),
+     "types": ("grade_released",),
+     "description": "When marked assignments, exams or resubmissions are released to you."},
+    {"key": "simulators", "label": "Simulators", "roles": frozenset({"STUDENT"}),
+     "types": ("simulator",),
+     "description": "New simulators, team invites and simulator score updates."},
+)
+CATEGORY_BY_TYPE = {notification_type: item["key"] for item in NOTIFICATION_CATEGORIES for notification_type in item["types"]}
+TYPES_BY_CATEGORY = {item["key"]: item["types"] for item in NOTIFICATION_CATEGORIES}
+
+
+def notification_category(notification_type: str) -> str | None:
+    return CATEGORY_BY_TYPE.get(notification_type)
+
+
+def _categories_for_role(role: str) -> list[dict]:
+    return [item for item in NOTIFICATION_CATEGORIES if role in item["roles"]]
+
+
+async def _muted_types(db: AsyncSession, user_ids, channel: str) -> dict[int, set[str]]:
+    """Notification types each user switched off for a channel ("in_app" or "email")."""
+    user_ids = list(user_ids)
+    if not user_ids:
+        return {}
+    column = LmsNotificationPreference.in_app_enabled if channel == "in_app" else LmsNotificationPreference.email_enabled
+    rows = (await db.execute(select(LmsNotificationPreference.user_id, LmsNotificationPreference.category).where(
+        LmsNotificationPreference.user_id.in_(user_ids), column.is_(False),
+    ))).all()
+    muted: dict[int, set[str]] = {}
+    for user_id, category in rows:
+        muted.setdefault(user_id, set()).update(TYPES_BY_CATEGORY.get(category, ()))
+    return muted
+
+
+async def get_notification_preferences(db: AsyncSession, user_id: int, role: str) -> NotificationPreferencesResponse:
+    saved = {item.category: item for item in (await db.execute(
+        select(LmsNotificationPreference).where(LmsNotificationPreference.user_id == user_id)
+    )).scalars().all()}
+    data = []
+    for item in _categories_for_role(role):
+        row = saved.get(item["key"])
+        description = item["staff_description"] if role in STAFF_ROLES and item.get("staff_description") else item["description"]
+        data.append(NotificationPreferenceItem(
+            category=item["key"], label=item["label"], description=description,
+            in_app_enabled=row.in_app_enabled if row else True,
+            email_enabled=row.email_enabled if row else True,
+        ))
+    return NotificationPreferencesResponse(data=data)
+
+
+async def update_notification_preferences(db: AsyncSession, payload: NotificationPreferencesUpdate, user_id: int, role: str) -> NotificationPreferencesResponse:
+    allowed = {item["key"] for item in _categories_for_role(role)}
+    keys = [change.category for change in payload.data]
+    if len(keys) != len(set(keys)):
+        raise ValidationError("Each notification category can appear only once")
+    unknown = [key for key in keys if key not in allowed]
+    if unknown:
+        raise ValidationError(f"Unknown notification category: {unknown[0]}")
+    statement = insert(LmsNotificationPreference).values([{
+        "user_id": user_id, "category": change.category,
+        "in_app_enabled": change.in_app_enabled, "email_enabled": change.email_enabled,
+    } for change in payload.data])
+    statement = statement.on_conflict_do_update(
+        index_elements=["user_id", "category"],
+        set_={"in_app_enabled": statement.excluded.in_app_enabled,
+              "email_enabled": statement.excluded.email_enabled,
+              "updated_at": func.now()},
+    )
+    await db.execute(statement)
+    await db.commit()
+    return await get_notification_preferences(db, user_id, role)
 
 
 def utc_now() -> datetime:
@@ -331,16 +429,21 @@ async def notify_assessment_published(db: AsyncSession, assignment: LmsCoursewor
     if available_from is not None and available_from.tzinfo is None:
         available_from = available_from.replace(tzinfo=timezone.utc)
     release_at = max(now, available_from) if available_from else now
+    label = kind.replace("_", " ")
     created = await _enqueue(db, users, f"{kind}:{assignment.assignment_id}:published", f"{kind}_published",
-        f"New {kind}: {assignment.title}", f"A new {kind} has been published for your course.{deadline}",
-        f"{settings.LMS_UI_URL.rstrip('/')}?view={'exams' if kind == 'exam' else 'assignments'}",
+        f"New {label}: {assignment.title}", f"A new {label} has been published for your course.{deadline}",
+        f"{settings.LMS_UI_URL.rstrip('/')}?view={'assignments' if kind == 'assignment' else 'exams'}",
         "important", release_at, True, event_at=assignment.due_at, update_existing=True)
     await db.commit(); return created
 
 
 async def list_notifications(db: AsyncSession, user_id: int) -> NotificationListResponse:
     now = utc_now()
-    rows = list((await db.execute(select(LmsNotification).where(LmsNotification.user_id == user_id, LmsNotification.scheduled_for <= now).order_by(LmsNotification.created_at.desc()).limit(200))).scalars().all())
+    muted = (await _muted_types(db, [user_id], "in_app")).get(user_id)
+    statement = select(LmsNotification).where(LmsNotification.user_id == user_id, LmsNotification.scheduled_for <= now)
+    if muted:
+        statement = statement.where(LmsNotification.notification_type.not_in(muted))
+    rows = list((await db.execute(statement.order_by(LmsNotification.created_at.desc()).limit(200))).scalars().all())
     return NotificationListResponse(unread_count=sum(item.read_at is None for item in rows), data=[NotificationItem(
         notification_id=item.notification_id,
         announcement_id=int(item.event_key.split(":", 1)[1]) if item.notification_type == "announcement" and item.event_key.startswith("announcement:") and item.event_key.split(":", 1)[1].isdigit() else None,
@@ -453,7 +556,8 @@ async def generate_reminders(db: AsyncSession, now: datetime | None = None) -> t
             if reminder_due(exam.due_at, offset, now):
                 label = "24 hours" if offset == 1440 else "1 hour"
                 key = f"exam:{exam.exam_id}:due:{exam.due_at.isoformat()}:{offset}"
-                created += await _enqueue(db, users, key, "exam_deadline", f"Exam deadline in {label}: {exam.title}", f"{course.code} assessment is due on {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view={'assignments' if exam.assessment_kind == 'graded_mcq' else 'exams'}", "important" if offset == 60 else "normal", now, True, event_at=exam.due_at)
+                deadline_type = {"graded_mcq": "assignment_deadline", "practice_test": "practice_test_deadline"}.get(exam.assessment_kind, "exam_deadline")
+                created += await _enqueue(db, users, key, deadline_type, f"{'Practice test' if exam.assessment_kind == 'practice_test' else 'Exam'} deadline in {label}: {exam.title}", f"{course.code} assessment is due on {local_time(exam.due_at)}. Your timer cannot be reset after starting.", f"{settings.LMS_UI_URL.rstrip('/')}?view={'assignments' if exam.assessment_kind == 'graded_mcq' else 'exams'}", "important" if offset == 60 else "normal", now, True, event_at=exam.due_at)
 
     meeting_rows = (await db.execute(select(OnlineMeeting, LmsClass, LmsCourse).join(LmsClass, LmsClass.class_id == OnlineMeeting.class_id).join(LmsCourse, LmsCourse.course_id == LmsClass.course_id).where(OnlineMeeting.status == "scheduled", OnlineMeeting.start_time >= now - timedelta(minutes=10), OnlineMeeting.start_time <= now + timedelta(minutes=max(MEETING_REMINDERS) + 10)))).all()
     for meeting, class_, course in meeting_rows:
@@ -480,7 +584,13 @@ async def deliver_pending_emails(db: AsyncSession, now: datetime | None = None, 
     meeting_times = dict((await db.execute(select(OnlineMeeting.meeting_id, OnlineMeeting.start_time).where(OnlineMeeting.meeting_id.in_(meeting_ids)))).all()) if meeting_ids else {}
     student_ids = {item.user_id for item, _ in meeting_rows}
     student_zones = dict((await db.execute(select(StudentProfile.user_id, StudentProfile.time_zone).where(StudentProfile.user_id.in_(student_ids)))).all()) if student_ids else {}
+    muted = await _muted_types(db, {item.user_id for item, _ in rows}, "email")
     for item, user in rows:
+        if item.notification_type in muted.get(item.user_id, ()):
+            # The person switched this email category off in their profile.
+            item.email_status = "disabled"; item.email_error = None
+            await db.commit()
+            continue
         message = item.message
         start_time = meeting_times.get(_meeting_id(item.event_key)) if item.notification_type in {"class_schedule", "class_reminder"} else None
         if start_time:

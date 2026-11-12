@@ -250,11 +250,16 @@ async def submit_whatsapp_lead(
 @router.post("/integrations/meta", status_code=201)
 async def submit_meta_lead(
     payload: MetaLeadSubmission,
+    x_webhook_secret: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Ready webhook intake for Meta Lead Ads (Facebook & Instagram).
+    Webhook intake for Meta Lead Ads. It was open to anyone; it now needs X-Webhook-Secret equal to
+    CRM_INTEGRATION_API_TOKEN. Running forms are brought in by scripts/run_meta_lead_intake.py instead.
     """
+    configured = settings.CRM_INTEGRATION_API_TOKEN
+    if not x_webhook_secret or len(configured) < 32 or not compare_digest(x_webhook_secret, configured):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
     create_payload = CrmLeadCreate(
         full_name=payload.full_name.strip(),
         email=payload.email.strip().lower() if payload.email else None,

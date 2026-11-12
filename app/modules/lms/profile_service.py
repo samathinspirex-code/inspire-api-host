@@ -38,9 +38,11 @@ from app.modules.lms.models import (
 )
 from app.modules.lms.repository.meeting import MEETING_AUDIENCE
 from app.modules.lms.repository import ContentRepository
+from app.modules.lms.schemas.profile import default_avatar_url
 from app.modules.lms.schemas import (
     MyProfileResponse,
     MyProfileUpdate,
+    ProfileAvatarUpdate,
     LecturerDirectoryProfileResponse,
     LecturerTeachingClass,
     ProfileStatistics,
@@ -814,6 +816,26 @@ async def complete_profile_upload(
     if profile is None:
         raise NotFoundError("Profile not found")
     profile.profile_image_url = completed.public_url
+    await db.commit()
+    return await get_my_profile(db, user_id, role)
+
+
+async def set_profile_avatar(
+    db: AsyncSession, user_id: int, role: str, payload: ProfileAvatarUpdate
+) -> MyProfileResponse:
+    if role == "STUDENT":
+        profile = await db.get(StudentProfile, user_id)
+        if profile is None:
+            profile = StudentProfile(user_id=user_id)
+            db.add(profile)
+    elif role == "LECTURER":
+        profile = await db.get(LecturerProfile, user_id)
+        if profile is None:
+            profile = LecturerProfile(user_id=user_id)
+            db.add(profile)
+    else:
+        raise ValidationError("Profiles are available to students and lecturers")
+    profile.profile_image_url = default_avatar_url(payload.avatar_key)
     await db.commit()
     return await get_my_profile(db, user_id, role)
 

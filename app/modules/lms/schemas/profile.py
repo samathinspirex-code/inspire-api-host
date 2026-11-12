@@ -5,6 +5,28 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, field_validator
 
 
+# Default avatars bundled with LMS-UI under public/avatars/<key>.svg.
+DEFAULT_AVATAR_KEYS = (
+    "sunrise", "ocean", "meadow", "lilac", "amber", "coral",
+    "slate", "mint", "berry", "sky", "sand", "teal",
+)
+
+
+def default_avatar_url(key: str) -> str:
+    return f"/avatars/{key}.svg"
+
+
+class ProfileAvatarUpdate(BaseModel):
+    avatar_key: str = Field(..., min_length=1, max_length=40)
+
+    @field_validator("avatar_key")
+    @classmethod
+    def known_avatar(cls, value: str) -> str:
+        if value not in DEFAULT_AVATAR_KEYS:
+            raise ValueError("Choose one of the default avatars")
+        return value
+
+
 class MyProfileUpdate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     preferred_name: str | None = Field(None, max_length=150)
