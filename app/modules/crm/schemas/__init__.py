@@ -297,6 +297,7 @@ class CrmLeadCreate(BaseModel):
     delay_reason: Optional[str] = None
     campaign: Optional[str] = None
     academic_course_id: Optional[int] = None
+    programme_id: Optional[int] = None
     programme_fee: Optional[float] = None
     registration_fee: Optional[float] = None
     programme_duration: Optional[str] = None
@@ -345,6 +346,7 @@ class CrmLeadUpdate(BaseModel):
     delay_reason: Optional[str] = None
     campaign: Optional[str] = None
     academic_course_id: Optional[int] = None
+    programme_id: Optional[int] = None
     programme_fee: Optional[float] = None
     registration_fee: Optional[float] = None
     programme_duration: Optional[str] = None
