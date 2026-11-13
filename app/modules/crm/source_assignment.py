@@ -52,9 +52,20 @@ async def set_group_counsellor_ids(db: AsyncSession, group: str, ids: list[int],
     """), {"group": group, "ids": ordered})
 
 
-async def pick_for_group(db: AsyncSession, group: str, commit_turn: bool = True):
-    """Next of the group's chosen counsellors who is still active, taking turns. None if nobody is set.
+async def counsellors_including_paused(db: AsyncSession):
+    """Everyone with counsellor access, whether or not they are paused in the round robin."""
+    from app.modules.crm.schemas import CrmCounsellorOut
+    from app.modules.crm.service import _counsellor_users_stmt, _dedupe_counsellor_rows
+    rows = _dedupe_counsellor_rows((await db.execute(_counsellor_users_stmt(True))).all())
+    return [CrmCounsellorOut(user_id=user.user_id, name=user.full_name or user.email, email=user.email) for user, _status in rows]
 
+
+async def pick_for_group(db: AsyncSession, group: str, commit_turn: bool = True):
+    """Next of the group's chosen counsellors, taking turns. None if nobody is set.
+
+    Meta leads skip counsellors paused in the rotation. WhatsApp bot leads do not:
+    ticking someone for them is an explicit choice, so a counsellor paused in the
+    round robin still gets them (as long as they keep counsellor access).
     With commit_turn=False it only previews the pick and leaves the turn pointer alone.
     """
     if group not in GROUPS or not await ready(db):
@@ -65,8 +76,12 @@ async def pick_for_group(db: AsyncSession, group: str, commit_turn: bool = True)
     if not row or not row["counsellor_ids"]:
         return None
     from app.modules.crm.service import _next_in_rotation, list_counsellors
-    chosen = set(row["counsellor_ids"])
-    queue = [person for person in await list_counsellors(db) if person.user_id in chosen]
+    chosen = row["counsellor_ids"]
+    if group == WHATSAPP_BOT_GROUP:
+        people = {person.user_id: person for person in await counsellors_including_paused(db)}
+        queue = [people[user_id] for user_id in chosen if user_id in people]
+    else:
+        queue = [person for person in await list_counsellors(db) if person.user_id in set(chosen)]
     today = datetime.now(timezone.utc).date()
     picked = _next_in_rotation(queue, row["last_counsellor_id"], row["last_assigned_on"], today)
     if picked is not None and commit_turn:
