@@ -1,6 +1,7 @@
 """Page payloads for the Admissions Studio."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,43 +142,92 @@ def _gap(snap: dict, forecast: dict) -> str:
     return f"That's {forecast['short']} short.{where}"
 
 
-async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int) -> dict:
-    snap = await load_snapshot(db, counsellor_id)
+async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int, start: datetime | None = None, end: datetime | None = None) -> dict:
+    base = await load_snapshot(db, counsellor_id)
+    snap = await load_snapshot(db, counsellor_id, start, end) if start or end else base
     bot = await load_whatsapp(db, counsellor_id)
     goal = await get_mission(db)
-    today = date.today()
-    monthly = snap["month_enrolled"]
-    forecast = mission_forecast(current=snap["students"], target=goal["target"], today=today, end=goal["end"], recent_monthly=monthly)
+    today = datetime.now(ZoneInfo("Asia/Colombo")).date()
+    # The mission is all-time; a date filter narrows lead analysis, not the student target.
+    monthly = base["month_enrolled"]
+    if db is not None:
+        history_since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+        history = (await db.execute(text(
+            "SELECT date_trunc('month', enrolled_at) AS month, count(*) FROM crm_leads "
+            "WHERE is_archived = false AND stage = 'enrolled' AND enrolled_at >= :since "
+            + ("AND assigned_counsellor_id = :cid " if counsellor_id is not None else "")
+            + "GROUP BY 1 ORDER BY 1"
+        ), {"since": history_since, **({"cid": counsellor_id} if counsellor_id is not None else {})})).all()
+        monthly = round(sum(int(count) for _, count in history) / 3, 1) if history else 0
+    forecast = mission_forecast(current=base["students"], target=goal["target"], today=today, end=goal["end"], recent_monthly=monthly)
     sparks = [point["count"] for point in snap["daily"][-14:]]
+    # Daily history behind the four KPI sparklines comes from the CRM, not a shared sample series.
+    stage_sparks: dict[str, list[int]] = {}
+    enrol_spark = [0] * 14
+    if db is not None:
+        first_day = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=13)
+        rows = (await db.execute(text(
+            "SELECT date(created_at), stage, count(*) FROM crm_leads "
+            "WHERE is_archived = false AND created_at >= :first "
+            + ("AND assigned_counsellor_id = :cid " if counsellor_id is not None else "")
+            + ("AND created_at >= :period_start " if start is not None else "")
+            + ("AND created_at < :period_end " if end is not None else "")
+            + "GROUP BY 1, 2"
+        ), {"first": first_day.replace(hour=0, minute=0, second=0, microsecond=0),
+            **({"cid": counsellor_id} if counsellor_id is not None else {}),
+            **({"period_start": start} if start is not None else {}),
+            **({"period_end": end} if end is not None else {})})).all()
+        for day, stage, count in rows:
+            offset = (day - first_day.date()).days
+            if 0 <= offset < 14:
+                stage_sparks.setdefault(stage, [0] * 14)[offset] += int(count)
+        enrolled_rows = (await db.execute(text(
+            "SELECT date(enrolled_at), count(*) FROM crm_leads WHERE is_archived = false AND stage = 'enrolled' "
+            "AND enrolled_at >= :first "
+            + ("AND assigned_counsellor_id = :cid " if counsellor_id is not None else "")
+            + ("AND created_at >= :period_start " if start is not None else "")
+            + ("AND created_at < :period_end " if end is not None else "")
+            + "GROUP BY 1"
+        ), {"first": first_day.replace(hour=0, minute=0, second=0, microsecond=0),
+            **({"cid": counsellor_id} if counsellor_id is not None else {}),
+            **({"period_start": start} if start is not None else {}),
+            **({"period_end": end} if end is not None else {})})).all()
+        for day, count in enrolled_rows:
+            offset = (day - first_day.date()).days
+            if 0 <= offset < 14:
+                enrol_spark[offset] = int(count)
+        sparks = [sum(values[index] for values in stage_sparks.values()) for index in range(14)]
+    queue_spark = [sum(stage_sparks.get(key, [0] * 14)[index] for key in ("contacted", "follow_up", "potential", "future_prospect")) for index in range(14)] if stage_sparks else sparks
     return {
         "generated_at": snap["generated_at"],
         "mission": {
             "target": goal["target"],
-            "current": snap["students"],
+            "current": base["students"],
             "start": goal["start"].isoformat(),
             "end": goal["end"].isoformat(),
             "days_left": forecast["days_left"],
             "need_per_month": forecast["need_per_month"],
-            "conversion": snap["conversion"],
+            "conversion": base["conversion"],
             "landing": forecast["landing"],
             "on_track": forecast["on_track"],
-            "gap": _gap(snap, forecast),
-            "uncontactable": snap["uncontactable"],
-            "month_enrolled": snap["month_enrolled"],
+            "gap": _gap(base, forecast),
+            "uncontactable": base["uncontactable"],
+            "month_enrolled": base["month_enrolled"],
+            "forecast_rate": monthly,
             "source_students": "cms",
             "source_forecast": "modelled",
-            "milestones": milestone_plan(goal["start"], goal["end"], goal["target"], snap["students"]),
+            "milestones": milestone_plan(goal["start"], goal["end"], goal["target"], base["students"]),
         },
         "kpis": [
             {"label": "CRM leads", "value": snap["total"], "detail": f"{snap['awaiting']} awaiting first contact", "tone": "brand", "spark": sparks, "source": "cms"},
-            {"label": "Active this month", "value": snap["active_month"], "detail": "new enquiries in 30 days", "tone": "con", "spark": [point["count"] for point in snap["daily"][-30:]], "source": "cms"},
-            {"label": "Counselling queue", "value": snap["in_progress"], "detail": "open stages before a decision", "tone": "ca", "spark": sparks, "source": "cms"},
-            {"label": "Enrolments", "value": snap["enrolled"], "detail": f"{snap['conversion']}% of all leads", "tone": "enr", "spark": sparks, "source": "cms"},
+            {"label": "New enquiries", "value": snap["total"] if start is not None else snap["active_month"], "detail": "selected period" if start is not None else "last 30 days", "tone": "con", "spark": [point["count"] for point in snap["daily"][-30:]], "source": "cms"},
+            {"label": "Counselling queue", "value": snap["in_progress"], "detail": "open stages before a decision", "tone": "ca", "spark": queue_spark, "source": "cms"},
+            {"label": "Enrolments", "value": snap["enrolled"], "detail": f"{snap['conversion']}% of selected leads", "tone": "enr", "spark": enrol_spark if db is not None else sparks, "source": "cms"},
         ],
         "stages": snap["stages"],
         "total": snap["total"],
         "biggest": {"label": "Contacted", "count": snap["contacted"]},
-        "cumulative": _cumulative(snap["daily"], days),
+        "cumulative": _cumulative(snap["daily"], 0 if start is not None else days),
         "forecast": forecast,
         "sources": snap["sources"],
         "programmes": snap["programmes"],

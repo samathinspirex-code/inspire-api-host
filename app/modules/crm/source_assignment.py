@@ -1,4 +1,4 @@
-"""Who gets leads from a given source, set by admins. Meta lead forms only, for now.
+"""Who gets leads from a given source, set by admins: Meta lead forms and WhatsApp bot handovers.
 
 Kept in its own raw-SQL table, so CRM pages work even before the migration has run.
 """
@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ValidationError
 
 META_GROUP = "meta"
+# WhatsApp bot imports pick from this group themselves (app.modules.whatsapp_bot.sync);
+# it is deliberately not in SOURCE_GROUPS, so leads typed in with source "whatsapp" are unaffected.
+WHATSAPP_BOT_GROUP = "whatsapp_bot"
+GROUPS = {META_GROUP, WHATSAPP_BOT_GROUP}
 SOURCE_GROUPS = {"meta_lead_forms": META_GROUP}
 
 
@@ -18,16 +22,26 @@ async def ready(db: AsyncSession) -> bool:
     return bool(await db.scalar(text("SELECT to_regclass('public.crm_source_assignment') IS NOT NULL")))
 
 
-async def meta_counsellor_ids(db: AsyncSession) -> list[int]:
+async def group_counsellor_ids(db: AsyncSession, group: str) -> list[int]:
     if not await ready(db):
         return []
-    ids = await db.scalar(text("SELECT counsellor_ids FROM crm_source_assignment WHERE source_group = :group"), {"group": META_GROUP})
+    ids = await db.scalar(text("SELECT counsellor_ids FROM crm_source_assignment WHERE source_group = :group"), {"group": group})
     return list(ids or [])
 
 
+async def meta_counsellor_ids(db: AsyncSession) -> list[int]:
+    return await group_counsellor_ids(db, META_GROUP)
+
+
 async def set_meta_counsellor_ids(db: AsyncSession, ids: list[int], known_ids: set[int]) -> None:
+    await set_group_counsellor_ids(db, META_GROUP, ids, known_ids)
+
+
+async def set_group_counsellor_ids(db: AsyncSession, group: str, ids: list[int], known_ids: set[int]) -> None:
+    if group not in GROUPS:
+        raise ValidationError("Unknown lead source group")
     if not await ready(db):
-        raise ValidationError("The Meta assignment setting needs a database update first. Ask your developer to run it.")
+        raise ValidationError("The lead assignment setting needs a database update first. Ask your developer to run it.")
     unknown = [item for item in ids if item not in known_ids]
     if unknown:
         raise ValidationError("Choose only registered counsellors")
@@ -35,13 +49,15 @@ async def set_meta_counsellor_ids(db: AsyncSession, ids: list[int], known_ids: s
     await db.execute(text("""
         INSERT INTO crm_source_assignment (source_group, counsellor_ids) VALUES (:group, :ids)
         ON CONFLICT (source_group) DO UPDATE SET counsellor_ids = EXCLUDED.counsellor_ids, updated_at = now()
-    """), {"group": META_GROUP, "ids": ordered})
+    """), {"group": group, "ids": ordered})
 
 
-async def assign_by_source(db: AsyncSession, lead_id: int, source: Optional[str]):
-    """Assigns from the source's chosen counsellors who are still active. None means use the normal rotation."""
-    group = SOURCE_GROUPS.get(source or "")
-    if not group or not await ready(db):
+async def pick_for_group(db: AsyncSession, group: str, commit_turn: bool = True):
+    """Next of the group's chosen counsellors who is still active, taking turns. None if nobody is set.
+
+    With commit_turn=False it only previews the pick and leaves the turn pointer alone.
+    """
+    if group not in GROUPS or not await ready(db):
         return None
     row = (await db.execute(text(
         "SELECT counsellor_ids, last_counsellor_id, last_assigned_on FROM crm_source_assignment WHERE source_group = :group FOR UPDATE"
@@ -53,10 +69,20 @@ async def assign_by_source(db: AsyncSession, lead_id: int, source: Optional[str]
     queue = [person for person in await list_counsellors(db) if person.user_id in chosen]
     today = datetime.now(timezone.utc).date()
     picked = _next_in_rotation(queue, row["last_counsellor_id"], row["last_assigned_on"], today)
+    if picked is not None and commit_turn:
+        await db.execute(text("UPDATE crm_source_assignment SET last_counsellor_id = :cid, last_assigned_on = :today WHERE source_group = :group"),
+                         {"cid": picked.user_id, "today": today, "group": group})
+    return picked
+
+
+async def assign_by_source(db: AsyncSession, lead_id: int, source: Optional[str]):
+    """Assigns from the source's chosen counsellors who are still active. None means use the normal rotation."""
+    group = SOURCE_GROUPS.get(source or "")
+    if not group:
+        return None
+    picked = await pick_for_group(db, group)
     if picked is None:
         return None
-    await db.execute(text("UPDATE crm_source_assignment SET last_counsellor_id = :cid, last_assigned_on = :today WHERE source_group = :group"),
-                     {"cid": picked.user_id, "today": today, "group": group})
     await db.execute(text("UPDATE crm_leads SET assigned_counsellor_id = :cid, counsellor_name = :name, assigned_at = now() WHERE lead_id = :lead_id"),
                      {"cid": picked.user_id, "name": picked.name, "lead_id": lead_id})
     return picked

@@ -132,5 +132,32 @@ def public_round(content: dict, round_index: int, team_id: int) -> dict:
     return {"round_index": round_index, "title": round_["title"], "brief": round_["brief"], "event": round_.get("event"), "decisions": decisions}
 
 
+def default_how_it_works(tone: str, roles: list[dict], max_team_size: int, allow_solo: bool, round_count: int) -> list[dict]:
+    """The design's four "How it works" rows, worded from the class's real settings."""
+    names = ", ".join(role["name"] for role in roles)
+    mates = max(max_team_size - 1, 1)
+    if tone == "student":
+        team = ("Solo or squad", f"Play alone, or with up to {mates} {"classmate" if mates == 1 else "classmates"} in roles: {names}.") if allow_solo else ("Squad up", f"Team up with up to {mates} {"classmate" if mates == 1 else "classmates"} in roles: {names}.")
+        return [
+            {"title": f"{round_count} rounds across the term", "text": "Each round brings a new situation and a plot twist."},
+            {"title": team[0], "text": team[1]},
+            {"title": "Your mentor debriefs you", "text": "After every round you see what moved your KPIs and why."},
+            {"title": "It counts", "text": "Every round earns XP and points for your class leaderboard. Your score maps to Pass, Merit or Distinction."},
+        ]
+    team = ("Individual or syndicate", f"Work individually, or with up to {mates} {"colleague" if mates == 1 else "colleagues"} in roles: {names}.") if allow_solo else ("Syndicate", f"Work with up to {mates} {"colleague" if mates == 1 else "colleagues"} in roles: {names}.")
+    return [
+        {"title": f"{round_count} decision rounds", "text": "Each round brings a new situation and an external shock."},
+        {"title": team[0], "text": team[1]},
+        {"title": "Mentor debrief", "text": "After every round you see what moved your KPIs and why."},
+        {"title": "Assessed outcome", "text": "Each round earns XP and points. Your final score maps to Pass, Merit or Distinction."},
+    ]
+
+
+def rank(rows: list[dict]) -> list[dict]:
+    """Orders started teams by live score, then rounds completed, then who started first."""
+    ordered = sorted(rows, key=lambda row: (-row["score"], -row["rounds_done"], row["started_at"]))
+    return [{**row, "rank": index} for index, row in enumerate(ordered, start=1)]
+
+
 def completion_rewards(final_score: int) -> tuple[int, int]:
     return final_score * 2, COMPLETION_POINTS[band(final_score)]

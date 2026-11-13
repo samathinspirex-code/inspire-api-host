@@ -147,6 +147,8 @@ def _template_item(template: LmsSimTemplate, user_id: int, admin: bool, include_
         "is_starter": template.starter_key is not None, "is_archived": template.is_archived,
         "can_edit": template.created_by == user_id or (admin and template.starter_key is None),
         "can_archive": template.created_by == user_id or admin,
+        "how_it_works": template.how_it_works or [],
+        "how_it_works_default": engine.default_how_it_works(template.tone, template.roles, min(4, len(template.roles)), True, len(template.content["rounds"])),
         "round_count": len(template.content["rounds"]), "kpi_count": len(template.content["kpis"]),
         "roles": template.roles, "updated_at": template.updated_at,
     }
@@ -185,6 +187,7 @@ async def create_template(db: AsyncSession, payload, user_id: int) -> dict:
     template = LmsSimTemplate(
         title=payload.title.strip(), tagline=payload.tagline.strip(), cover_image_url=payload.cover_image_url, programme=payload.programme.strip(), level=payload.level,
         tone=payload.tone, content=payload.content.model_dump(), roles=_normalise_roles(payload.roles), created_by=user_id,
+        how_it_works=[step.model_dump() for step in payload.how_it_works],
     )
     db.add(template)
     await db.commit()
@@ -202,6 +205,7 @@ async def update_template(db: AsyncSession, template_id: int, payload, user_id: 
     template.cover_image_url = payload.cover_image_url
     template.level, template.tone = payload.level, payload.tone
     template.content, template.roles = payload.content.model_dump(), _normalise_roles(payload.roles)
+    template.how_it_works = [step.model_dump() for step in payload.how_it_works]
     await db.commit()
     await db.refresh(template)
     return _template_item(template, user_id, admin, True)
@@ -211,7 +215,7 @@ async def copy_template(db: AsyncSession, template_id: int, user_id: int) -> dic
     source, admin = await _readable_template(db, template_id, user_id)
     template = LmsSimTemplate(
         source_template_id=source.template_id, title=f"{source.title} (copy)"[:160], tagline=source.tagline, cover_image_url=source.cover_image_url, programme=source.programme,
-        level=source.level, tone=source.tone, content=source.content, roles=source.roles, created_by=user_id,
+        level=source.level, tone=source.tone, content=source.content, roles=source.roles, created_by=user_id, how_it_works=source.how_it_works or [],
     )
     db.add(template)
     await db.commit()
@@ -229,6 +233,17 @@ async def archive_template(db: AsyncSession, template_id: int, is_archived: bool
     return _template_item(template, user_id, admin)
 
 
+async def delete_template(db: AsyncSession, template_id: int, user_id: int) -> None:
+    """Delete a lecturer's own template. Class simulators made from it keep their own copy and carry on."""
+    template, admin = await _readable_template(db, template_id, user_id)
+    if template.starter_key is not None:
+        raise ForbiddenError("Starter templates can't be deleted")
+    if template.created_by != user_id and not admin:
+        raise ForbiddenError("Only the lecturer who created this template or an admin can delete it")
+    await db.delete(template)
+    await db.commit()
+
+
 # --------------------------------------------------------------------------- lecturer: runs and results
 
 def _run_item(run: LmsSimRun) -> dict:
@@ -237,6 +252,8 @@ def _run_item(run: LmsSimRun) -> dict:
         "tone": run.tone, "roles": run.roles, "min_team_size": run.min_team_size, "max_team_size": run.max_team_size,
         "allow_solo": run.allow_solo, "opens_at": run.opens_at, "closes_at": run.closes_at, "xp_per_round": run.xp_per_round,
         "points_per_round": run.points_per_round, "status": run.status, "window": _window(run), "total_rounds": len(run.content["rounds"]),
+        "how_it_works": run.how_it_works or engine.default_how_it_works(run.tone, run.roles, run.max_team_size, run.allow_solo, len(run.content["rounds"])),
+        "how_it_works_custom": run.how_it_works or [],
     }
 
 
@@ -250,6 +267,7 @@ async def apply_template(db: AsyncSession, class_id: int, payload, user_id: int)
         content=template.content, roles=_normalise_roles(payload.roles), min_team_size=payload.min_team_size, max_team_size=payload.max_team_size,
         allow_solo=payload.allow_solo, opens_at=payload.opens_at, closes_at=payload.closes_at, xp_per_round=payload.xp_per_round,
         points_per_round=payload.points_per_round, created_by=user_id,
+        how_it_works=[step.model_dump() for step in payload.how_it_works] if payload.how_it_works is not None else (template.how_it_works or []),
     )
     db.add(run)
     await db.commit()
@@ -289,14 +307,54 @@ async def update_run(db: AsyncSession, run_id: int, payload, user_id: int) -> di
         raise ConflictError("A role students have already chosen can be renamed but not removed")
     run.roles, run.min_team_size, run.max_team_size, run.allow_solo = roles, payload.min_team_size, payload.max_team_size, payload.allow_solo
     run.opens_at, run.closes_at, run.xp_per_round, run.points_per_round, run.status = payload.opens_at, payload.closes_at, payload.xp_per_round, payload.points_per_round, payload.status
+    if payload.how_it_works is not None:
+        run.how_it_works = [step.model_dump() for step in payload.how_it_works]
     await db.commit()
     await db.refresh(run)
     return _run_item(run)
 
 
+async def delete_run(db: AsyncSession, run_id: int, user_id: int) -> None:
+    """Remove a simulator from a class with its teams, votes and chat. XP already awarded stays in the ledger."""
+    run = await _get_run(db, run_id)
+    await _ensure_class_manager(db, run.class_id, user_id)
+    await db.delete(run)
+    await db.commit()
+
+
+async def _leaderboard(db: AsyncSession, run: LmsSimRun, viewer_id: int | None) -> list[dict]:
+    """Started teams and solo players ranked together by live score."""
+    teams = (await db.execute(select(LmsSimTeam).where(LmsSimTeam.run_id == run.run_id, LmsSimTeam.status != "forming"))).scalars().all()
+    mine = None
+    if viewer_id is not None:
+        mine = await db.scalar(select(LmsSimTeamMember.team_id).where(LmsSimTeamMember.run_id == run.run_id, LmsSimTeamMember.student_user_id == viewer_id))
+    total = len(run.content["rounds"])
+    rows = []
+    for team in teams:
+        current_score = _team_score(team, run)
+        label = f"Solo · {team.name.split()[0]}" if team.is_solo and team.name.strip() else team.name
+        rows.append({"team_id": team.team_id, "label": label, "is_solo": team.is_solo, "status": _team_status(team, run), "rounds_done": min(team.current_round, total),
+                     "total_rounds": total, "score": current_score, "band": team.final_band or engine.band(current_score), "mine": team.team_id == mine,
+                     "started_at": team.started_at or team.created_at})
+    return [{key: value for key, value in row.items() if key != "started_at"} for row in engine.rank(rows)]
+
+
+async def student_leaderboard(db: AsyncSession, run_id: int, user_id: int) -> dict:
+    run = await _get_run(db, run_id)
+    await _ensure_class_student(db, run.class_id, user_id)
+    return {"data": await _leaderboard(db, run, user_id)}
+
+
 async def _ledger_totals(db: AsyncSession, run_id: int) -> dict[int, tuple[int, int]]:
     rows = await db.execute(select(LmsXpLedger.student_user_id, func.sum(LmsXpLedger.xp), func.sum(LmsXpLedger.points)).where(LmsXpLedger.run_id == run_id).group_by(LmsXpLedger.student_user_id))
     return {student: (int(xp or 0), int(points or 0)) for student, xp, points in rows.all()}
+
+
+async def run_preview(db: AsyncSession, run_id: int, user_id: int) -> dict:
+    """The class simulator with its option effects, so its lecturer can play it through without saving anything."""
+    run = await _get_run(db, run_id)
+    await _ensure_class_manager(db, run.class_id, user_id)
+    return {**_run_item(run), "content": run.content}
 
 
 async def run_results(db: AsyncSession, run_id: int, user_id: int) -> dict:
@@ -314,6 +372,7 @@ async def run_results(db: AsyncSession, run_id: int, user_id: int) -> dict:
     placed = {row.student_user_id for row in rows}
     return {
         "run": _run_item(run),
+        "leaderboard": await _leaderboard(db, run, None),
         "teams": [{"team_id": team.team_id, "name": team.name, "is_solo": team.is_solo, "status": _team_status(team, run), "current_round": team.current_round,
                    "total_rounds": len(run.content["rounds"]), "score": _team_score(team, run), "band": team.final_band or engine.band(_team_score(team, run)), "members": by_team[team.team_id]} for team in teams],
         "without_team": sorted((names.get(student, f"Student {student}") for student in students if student not in placed), key=str.lower),
@@ -409,7 +468,9 @@ async def student_run_detail(db: AsyncSession, run_id: int, user_id: int) -> dic
     await _ensure_class_student(db, run.class_id, user_id)
     student_ids = await _class_student_ids(db, run.class_id)
     placed = {student: team_id for student, team_id in (await db.execute(select(LmsSimTeamMember.student_user_id, LmsSimTeamMember.team_id).where(LmsSimTeamMember.run_id == run_id))).all()}
-    team_names = dict((await db.execute(select(LmsSimTeam.team_id, LmsSimTeam.name).where(LmsSimTeam.run_id == run_id))).all())
+    team_rows = (await db.execute(select(LmsSimTeam.team_id, LmsSimTeam.name, LmsSimTeam.is_solo).where(LmsSimTeam.run_id == run_id))).all()
+    team_names = {team_id: name for team_id, name, _ in team_rows}
+    solo_teams = {team_id for team_id, _, is_solo in team_rows if is_solo}
     my_team_id = placed.get(user_id)
     pending = (await db.execute(select(LmsSimInvite).where(LmsSimInvite.run_id == run_id, LmsSimInvite.status == "pending"))).scalars().all()
     names = await _names(db, set(student_ids) | {invite.invited_by for invite in pending})
@@ -422,7 +483,7 @@ async def student_run_detail(db: AsyncSession, run_id: int, user_id: int) -> dic
             continue
         team_id = placed.get(student)
         status = "in_team" if team_id else "invited" if student in my_invited else "available"
-        classmates.append({"student_user_id": student, "name": names.get(student, f"Student {student}"), "status": status, "team_name": team_names.get(team_id), "invite_id": my_invited.get(student)})
+        classmates.append({"student_user_id": student, "name": names.get(student, f"Student {student}"), "status": status, "team_name": team_names.get(team_id), "solo": team_id in solo_teams, "invite_id": my_invited.get(student)})
     classmates.sort(key=lambda item: (item["status"] == "in_team", item["name"].lower()))
 
     my_team = None
@@ -648,6 +709,33 @@ async def cast_vote(db: AsyncSession, team_id: int, payload, user_id: int) -> di
         set_={"option_index": statement.excluded.option_index, "voted_at": statement.excluded.voted_at},
         where=LmsSimVote.option_index != statement.excluded.option_index,
     ))
+    members = await _active_member_ids(db, team, run)
+    ballots = await _ballots(db, team_id, team.current_round, members)
+    if engine.should_auto_close(len(decisions), members, ballots):
+        await _close_round(db, team, run, user_id, ballots)
+    await db.commit()
+    return await _team_state(db, team, run, user_id)
+
+
+async def lock_votes(db: AsyncSession, team_id: int, payload, user_id: int) -> dict:
+    """Saves all of a member's picks for the round at once. Re-locking changes them until the round closes."""
+    team, run, _ = await _member_context(db, team_id, user_id, lock=True)
+    _ensure_open(run)
+    if team.status != "playing":
+        raise ValidationError("This team is not playing right now")
+    decisions = run.content["rounds"][team.current_round]["decisions"]
+    if len(payload.votes) != len(decisions):
+        raise ValidationError("Make a call on every decision first")
+    for vote in payload.votes:
+        if vote.decision_index >= len(decisions) or vote.option_index >= len(decisions[vote.decision_index]["options"]):
+            raise ValidationError("That option does not exist")
+    for vote in payload.votes:
+        statement = insert(LmsSimVote).values(team_id=team_id, round_index=team.current_round, decision_index=vote.decision_index, student_user_id=user_id, option_index=vote.option_index, voted_at=_now())
+        await db.execute(statement.on_conflict_do_update(
+            index_elements=["team_id", "round_index", "decision_index", "student_user_id"],
+            set_={"option_index": statement.excluded.option_index, "voted_at": statement.excluded.voted_at},
+            where=LmsSimVote.option_index != statement.excluded.option_index,
+        ))
     members = await _active_member_ids(db, team, run)
     ballots = await _ballots(db, team_id, team.current_round, members)
     if engine.should_auto_close(len(decisions), members, ballots):

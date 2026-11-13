@@ -13,7 +13,7 @@ REQUIREMENTS = {
     "gads": ("Customer ID, developer token and Google Ads consent", "Search campaigns and offline conversions"),
     "gsc": ("Verified site URL or sc-domain property and webmasters.readonly consent", "Organic search clicks and impressions"),
     "tiktok": ("Advertiser ID and approved TikTok Business app", "Paid video campaigns and lead forms"),
-    "wa": ("The WhatsApp bot's INSPIRE_CRM_API_URL and INSPIRE_CRM_API_KEY, and counsellor emails matching CRM users", "Bot handovers, chat timelines and logged reply times"),
+    "wa": ("The bot's Supabase URL and service key in the API env (WABOT_SUPABASE_URL, WABOT_SUPABASE_SERVICE_ROLE_KEY), the inspire-wabot-sync timer, and bot counsellor emails matching CRM users", "CRM -> WhatsApp Bot section, bot handovers pulled into CRM leads, chat timelines and logged reply times"),
     "ig": ("Professional Instagram account and approved insights permissions", "Organic content performance"),
     "li": ("Ad account ID and approved LinkedIn Marketing API access", "Professional audience campaigns"),
     "yt": ("Channel ID and Google yt-analytics.readonly consent", "Video views and watch time"),
@@ -76,9 +76,13 @@ def platforms_for(accounts: list[dict], whatsapp: dict | None = None, lms: dict 
         source = "connector" if healthy else "unavailable"
         requirements, feeds = REQUIREMENTS[platform]
         if platform == "wa" and whatsapp is not None:
-            # The bot pushes into the CRM, so its evidence is handovers rather than a saved account.
-            if whatsapp["receiving"]:
-                status, tone, source = "Receiving handovers", "good", "cms"
+            # The API pulls handovers from the bot's Supabase; evidence is the pull plus CRM handovers.
+            if not whatsapp.get("configured"):
+                status, tone = "Bot DB not configured", "warn"
+            elif whatsapp.get("last_error"):
+                status, tone = "Bot DB unreachable", "bad"
+            elif whatsapp["receiving"]:
+                status, tone, source = "Syncing handovers", "good", "cms"
             elif whatsapp["total"]:
                 status, tone, source = "No recent handovers", "warn", "cms"
             else:

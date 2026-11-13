@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import ConflictError, ForbiddenError, ValidationError
 from app.modules.lms import simulator_engine as engine, simulator_service as service
-from app.modules.lms.schemas.simulator import SimContent, SimRunCreate, SimTemplateWrite, SimVote, SimXpAdjustment
+from app.modules.lms.schemas.simulator import SimContent, SimRunCreate, SimTemplateWrite, SimVote, SimVoteLock, SimXpAdjustment
 
 NOW = datetime(2026, 11, 9, 8, 0, tzinfo=timezone.utc)
 STARTERS = json.loads((Path(__file__).resolve().parents[1] / "app/modules/lms/data/simulator_starters.json").read_text(encoding="utf-8"))
@@ -105,7 +105,11 @@ class Schemas(unittest.TestCase):
     def test_all_starters_are_valid(self):
         self.assertEqual(len(STARTERS), 14)
         for item in STARTERS:
-            SimTemplateWrite(**{key: item[key] for key in ("title", "tagline", "programme", "level", "tone", "content", "roles")})
+            SimTemplateWrite(**{key: item[key] for key in ("title", "tagline", "cover_image_url", "programme", "level", "tone", "content", "roles")})
+
+    def test_each_starter_has_its_own_banner(self):
+        for item in STARTERS:
+            self.assertEqual(item["cover_image_url"], f"/simulator-banners/{item['starter_key']}.webp")
 
     def test_option_cannot_change_unknown_kpi(self):
         broken = json.loads(json.dumps(CONTENT))
@@ -181,6 +185,47 @@ class Access(unittest.IsolatedAsyncioTestCase):
         db.get = AsyncMock(return_value=SimpleNamespace(starter_key="found", created_by=None))
         with patch.object(service, "is_global_admin", AsyncMock(return_value=True)), self.assertRaises(ForbiddenError):
             await service.update_template(db, 2, MagicMock(), 42)
+
+    async def test_starter_cannot_be_deleted(self):
+        db = MagicMock()
+        db.get, db.delete, db.commit = AsyncMock(return_value=SimpleNamespace(starter_key="found", created_by=None)), AsyncMock(), AsyncMock()
+        with patch.object(service, "is_global_admin", AsyncMock(return_value=True)), self.assertRaises(ForbiddenError):
+            await service.delete_template(db, 1, 42)
+        db.delete.assert_not_awaited()
+
+    async def test_owner_deletes_own_template(self):
+        template = SimpleNamespace(starter_key=None, created_by=42)
+        db = MagicMock()
+        db.get, db.delete, db.commit = AsyncMock(return_value=template), AsyncMock(), AsyncMock()
+        with patch.object(service, "is_global_admin", AsyncMock(return_value=False)):
+            await service.delete_template(db, 15, 42)
+        db.delete.assert_awaited_once_with(template)
+        db.commit.assert_awaited_once()
+
+    async def test_admin_deletes_lecturers_template(self):
+        template = SimpleNamespace(starter_key=None, created_by=7)
+        db = MagicMock()
+        db.get, db.delete, db.commit = AsyncMock(return_value=template), AsyncMock(), AsyncMock()
+        with patch.object(service, "is_global_admin", AsyncMock(return_value=True)):
+            await service.delete_template(db, 15, 42)
+        db.delete.assert_awaited_once_with(template)
+
+    async def test_class_manager_deletes_run(self):
+        run = SimpleNamespace(run_id=3, class_id=10)
+        db = MagicMock()
+        db.delete, db.commit = AsyncMock(), AsyncMock()
+        with patch.object(service, "_get_run", AsyncMock(return_value=run)), patch.object(service, "_ensure_class_manager", AsyncMock()) as manager:
+            await service.delete_run(db, 3, 42)
+        manager.assert_awaited_once_with(db, 10, 42)
+        db.delete.assert_awaited_once_with(run)
+
+    async def test_outsider_cannot_delete_run(self):
+        db = MagicMock()
+        db.delete = AsyncMock()
+        with patch.object(service, "_get_run", AsyncMock(return_value=SimpleNamespace(run_id=3, class_id=10))), \
+                patch.object(service, "_ensure_class_manager", AsyncMock(side_effect=ForbiddenError("no"))), self.assertRaises(ForbiddenError):
+            await service.delete_run(db, 3, 99)
+        db.delete.assert_not_awaited()
 
 
 class Invites(unittest.IsolatedAsyncioTestCase):
@@ -323,6 +368,90 @@ class AdminAccess(unittest.IsolatedAsyncioTestCase):
         from app.modules.lms.service import ROLE_NAVIGATION
         for role in ("SUPER_ADMIN", "ADMIN", "LECTURER", "STUDENT"):
             self.assertEqual([key for key, _, _ in ROLE_NAVIGATION[role]].count("simulators"), 1, role)
+
+
+class HowItWorks(unittest.TestCase):
+    ROLES = [{"key": "a", "name": "CEO"}, {"key": "b", "name": "CFO"}, {"key": "c", "name": "CMO"}]
+
+    def test_student_default_uses_class_settings(self):
+        rows = engine.default_how_it_works("student", self.ROLES, 3, True, 5)
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows[0]["title"], "5 rounds across the term")
+        self.assertIn("up to 2 classmates in roles: CEO, CFO, CMO", rows[1]["text"])
+        self.assertEqual(rows[1]["title"], "Solo or squad")
+
+    def test_professional_default_without_solo(self):
+        rows = engine.default_how_it_works("professional", self.ROLES, 4, False, 4)
+        self.assertEqual(rows[0]["title"], "4 decision rounds")
+        self.assertEqual(rows[1]["title"], "Syndicate")
+
+    def test_run_shows_lecturer_rows_or_defaults(self):
+        custom = [{"title": "Week one", "text": "Meet your squad"}]
+        self.assertEqual(service._run_item(make_run(how_it_works=custom, cover_image_url=None, tagline="", template_id=1))["how_it_works"], custom)
+        default = service._run_item(make_run(how_it_works=[], cover_image_url=None, tagline="", template_id=1))
+        self.assertEqual(len(default["how_it_works"]), 4)
+        self.assertEqual(default["how_it_works_custom"], [])
+
+    def test_limits(self):
+        step = {"title": "Step", "text": "Text"}
+        base = {"template_id": 1, "roles": [{"name": "A"}, {"name": "B"}], "max_team_size": 2, "opens_at": NOW, "closes_at": NOW + timedelta(days=1)}
+        self.assertEqual(len(SimRunCreate(**base, how_it_works=[step] * 6).how_it_works), 6)
+        with self.assertRaises(SchemaError):
+            SimRunCreate(**base, how_it_works=[step] * 7)
+        with self.assertRaises(SchemaError):
+            SimRunCreate(**base, how_it_works=[{"title": "", "text": "x"}])
+        self.assertIsNone(SimRunCreate(**base).how_it_works)
+
+
+class Leaderboard(unittest.TestCase):
+    def row(self, team_id, score, rounds, started, solo=False):
+        return {"team_id": team_id, "score": score, "rounds_done": rounds, "started_at": NOW + timedelta(minutes=started), "is_solo": solo}
+
+    def test_score_then_rounds_then_start(self):
+        ranked = engine.rank([self.row(1, 60, 2, 0), self.row(2, 72, 1, 5, solo=True), self.row(3, 60, 3, 9), self.row(4, 60, 3, 1)])
+        self.assertEqual([item["team_id"] for item in ranked], [2, 4, 3, 1])
+        self.assertEqual([item["rank"] for item in ranked], [1, 2, 3, 4])
+
+    def test_solo_ranks_with_teams(self):
+        ranked = engine.rank([self.row(1, 50, 1, 0), self.row(2, 90, 4, 3, solo=True)])
+        self.assertTrue(ranked[0]["is_solo"])
+
+
+class LockIn(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.db = MagicMock()
+        self.db.execute, self.db.commit = AsyncMock(), AsyncMock()
+        self.clock = patch.object(service, "_now", return_value=NOW)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+
+    def context(self, run=None):
+        return patch.object(service, "_member_context", AsyncMock(return_value=(make_team(status="playing"), run or make_run(), SimpleNamespace())))
+
+    def test_one_choice_per_decision(self):
+        with self.assertRaises(SchemaError):
+            SimVoteLock(votes=[{"decision_index": 0, "option_index": 0}, {"decision_index": 0, "option_index": 1}])
+
+    async def test_saves_every_pick_then_auto_closes(self):
+        with self.context(), patch.object(service, "_active_member_ids", AsyncMock(return_value=[1])), \
+                patch.object(service, "_ballots", AsyncMock(return_value=[ballot(1, 0, 2, 0)])), \
+                patch.object(service, "_close_round", AsyncMock()) as close, patch.object(service, "_team_state", AsyncMock(return_value={"ok": 1})):
+            await service.lock_votes(self.db, 5, SimVoteLock(votes=[{"decision_index": 0, "option_index": 2}]), 1)
+        self.assertEqual(self.db.execute.await_count, 1)
+        close.assert_awaited_once()
+        self.db.commit.assert_awaited_once()
+
+    async def test_needs_every_decision(self):
+        run = make_run(content={**CONTENT, "rounds": [{**CONTENT["rounds"][0], "decisions": CONTENT["rounds"][0]["decisions"] * 2}]})
+        with self.context(run), self.assertRaisesRegex(ValidationError, "every decision"):
+            await service.lock_votes(self.db, 5, SimVoteLock(votes=[{"decision_index": 0, "option_index": 0}]), 1)
+        self.db.execute.assert_not_awaited()
+
+    async def test_unknown_option_saves_nothing(self):
+        with self.context(), self.assertRaisesRegex(ValidationError, "does not exist"):
+            await service.lock_votes(self.db, 5, SimVoteLock(votes=[{"decision_index": 0, "option_index": 9}]), 1)
+        self.db.execute.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -52,12 +52,14 @@ def test_empty_bot_summary_invents_nothing():
     assert "no logged replies yet" in context_line(bot)
 
 
-def test_whatsapp_platform_status_comes_from_handovers():
-    def status(bot):
-        return next(p for p in registry.platforms_for([], bot) if p["id"] == "wa")["status"]
-    assert status(summarize([lead()], {}, NOW)) == "Receiving handovers"
+def test_whatsapp_platform_status_comes_from_bot_pull_and_handovers():
+    def status(bot, **extra):
+        return next(p for p in registry.platforms_for([], {**bot, "configured": True, **extra}) if p["id"] == "wa")["status"]
+    assert status(summarize([lead()], {}, NOW)) == "Syncing handovers"
     assert status(summarize([lead(hours=24 * 20)], {}, NOW)) == "No recent handovers"
     assert status(summarize([], {}, NOW)) == "Waiting for first handover"
+    assert status(summarize([lead()], {}, NOW), last_error="WhatsApp bot database is unreachable") == "Bot DB unreachable"
+    assert status(summarize([lead()], {}, NOW), configured=False) == "Bot DB not configured"
 
 
 def test_crm_backed_channel_rows_are_live_and_other_rows_stay_demo():

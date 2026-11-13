@@ -74,6 +74,8 @@ class StudentAttendanceResponse(BaseModel):
     present_count: int
     absent_count: int
     attendance_percentage: float
+    points: int = 0
+    points_per_class: int = 0
     data: list[StudentAttendanceItem]
 
 

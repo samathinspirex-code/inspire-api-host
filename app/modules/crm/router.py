@@ -113,7 +113,7 @@ async def update_assignment_settings(
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmAssignmentSettingsOut:
     _require_management(current_user)
-    return await service.update_assignment_settings(db, payload.auto_assign_enabled, payload.meta_counsellor_ids)
+    return await service.update_assignment_settings(db, payload.auto_assign_enabled, payload.meta_counsellor_ids, payload.whatsapp_bot_counsellor_ids)
 
 
 @router.put("/counsellors/order", response_model=list[CrmCounsellorRosterItem])
@@ -161,6 +161,7 @@ async def list_leads(
     country: Optional[str] = Query(None),
     campaign: Optional[str] = Query(None),
     intake: Optional[str] = Query(None),
+    free_foundation: Optional[bool] = Query(None),
     modified_from: Optional[date] = Query(None),
     modified_to: Optional[date] = Query(None),
     contacted_from: Optional[date] = Query(None),
@@ -176,7 +177,7 @@ async def list_leads(
         counsellor_id, unassigned = current_user.user_id, False
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
-    extra = {"city": city, "country": country, "campaign": campaign, "intake": intake, "priority": priority, "sort": sort,
+    extra = {"city": city, "country": country, "campaign": campaign, "intake": intake, "free_foundation": free_foundation, "priority": priority, "sort": sort,
              "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes,
              "days_since_contact": days_since_contact, "followup_state": followup_state}
     for field, start, end in (
@@ -353,6 +354,7 @@ async def export_leads_csv(
     date_to: Optional[date] = Query(None),
     city: Optional[str] = Query(None),
     intake: Optional[str] = Query(None),
+    free_foundation: Optional[bool] = Query(None),
     followup_state: Optional[str] = Query(None),
     modified_from: Optional[date] = Query(None),
     modified_to: Optional[date] = Query(None),
@@ -368,7 +370,7 @@ async def export_leads_csv(
         counsellor_id, unassigned = current_user.user_id, False
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
-    extra = {"priority": priority, "city": city, "intake": intake, "followup_state": followup_state,
+    extra = {"priority": priority, "city": city, "intake": intake, "free_foundation": free_foundation, "followup_state": followup_state,
              "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes}
     for field, start, end in (
         ("updated_at", modified_from, modified_to),
@@ -499,14 +501,20 @@ class ArenaClaimIn(BaseModel):
 async def arena(
     counsellor_id: Optional[int] = Query(None),
     mine: bool = Query(False),
+    period: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ):
     from app.modules.crm.arena_service import arena as build_arena
+    from app.modules.insights.period import period_bounds
     locked_to_self = _counsellor_only(current_user)
     can_claim = "COUNSELLOR" in current_user.access
     focus = current_user.user_id if locked_to_self or (mine and can_claim) else counsellor_id
-    return await build_arena(db, current_user.user_id, can_claim, focus, full_detail=not locked_to_self)
+    start, end = period_bounds(period, start_date, end_date)
+    bounds = {"period_start": start, "period_end": end} if start is not None else {}
+    return await build_arena(db, current_user.user_id, can_claim, focus, full_detail=not locked_to_self, **bounds)
 
 
 @router.post("/arena/claim")
@@ -566,12 +574,17 @@ async def arena_collect_reward(
 
 @router.get("/arena/rewards")
 async def arena_list_rewards(
+    period: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ):
     from app.modules.crm import arena_rewards
+    from app.modules.insights.period import period_bounds
     _require_arena_admin(current_user)
-    return await arena_rewards.list_rewards(db)
+    start, end = period_bounds(period, start_date, end_date)
+    return await arena_rewards.list_rewards(db, start, end)
 
 
 @router.post("/arena/rewards", status_code=201)
@@ -634,12 +647,17 @@ async def arena_award_reward(
 
 @router.get("/arena/reward-collections")
 async def arena_reward_collections(
+    period: str = Query("all"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
     current_user: CurrentUser = Depends(require_crm_staff),
     db: AsyncSession = Depends(get_db),
 ):
     from app.modules.crm import arena_rewards
+    from app.modules.insights.period import period_bounds
     _require_arena_admin(current_user)
-    return await arena_rewards.list_collections(db)
+    start, end = period_bounds(period, start_date, end_date)
+    return await arena_rewards.list_collections(db, start, end)
 
 
 @router.post("/arena/reward-collections/{collection_id}/distribute")

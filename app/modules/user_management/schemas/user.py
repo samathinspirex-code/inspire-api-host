@@ -14,6 +14,7 @@ AccessKey = Literal[
     "ADMIN",
     "LECTURER",
     "STUDENT",
+    "WHATSAPP_BOT",
 ]
 
 

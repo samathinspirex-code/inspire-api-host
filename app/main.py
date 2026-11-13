@@ -28,6 +28,7 @@ from app.modules.insights.router import router as insights_router
 from app.modules.partners.router import router as partners_router
 from app.modules.partners.public_router import router as partner_public_router
 from app.modules.connectors.router import router as connectors_router
+from app.modules.whatsapp_bot.router import router as whatsapp_bot_router
 from app.modules.ai_copilot.router import router as copilot_router
 from app.modules.payments.db import close_pool as close_payments_pool
 
@@ -84,5 +85,6 @@ app.include_router(insights_router)
 app.include_router(partners_router)
 app.include_router(partner_public_router)
 app.include_router(connectors_router)
+app.include_router(whatsapp_bot_router)
 app.include_router(copilot_router)
 

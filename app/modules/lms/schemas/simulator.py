@@ -62,15 +62,21 @@ def _check_roles(roles: list[SimRole]) -> None:
         raise ValueError("Each role needs its own name")
 
 
+class SimStep(BaseModel):
+    title: str = Field(min_length=1, max_length=60)
+    text: str = Field(default="", max_length=300)
+
+
 class SimTemplateWrite(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     tagline: str = Field(default="", max_length=400)
-    cover_image_url: str | None = Field(default=None, max_length=1000, pattern=r"^https://\S+$")
+    cover_image_url: str | None = Field(default=None, max_length=1000, pattern=r"^(https://\S+|/simulator-banners/[a-z0-9-]+\.webp)$")
     programme: str = Field(default="", max_length=120)
     level: Literal["ug", "pg", "cpd"] = "ug"
     tone: Literal["student", "professional"] = "student"
     content: SimContent
     roles: list[SimRole] = Field(min_length=1, max_length=8)
+    how_it_works: list[SimStep] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def check_roles(self):
@@ -95,6 +101,7 @@ class _RunSettings(BaseModel):
     closes_at: datetime
     xp_per_round: int = Field(default=100, ge=0, le=1000)
     points_per_round: int = Field(default=30, ge=0, le=1000)
+    how_it_works: list[SimStep] | None = Field(default=None, max_length=6)
 
     @model_validator(mode="after")
     def check_settings(self):
@@ -159,6 +166,17 @@ class SimRoleChoice(BaseModel):
 class SimVote(BaseModel):
     decision_index: int = Field(ge=0)
     option_index: int = Field(ge=0)
+
+
+class SimVoteLock(BaseModel):
+    votes: list[SimVote] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def check_unique(self):
+        indexes = [vote.decision_index for vote in self.votes]
+        if len(set(indexes)) != len(indexes):
+            raise ValueError("Choose one option per decision")
+        return self
 
 
 class SimMessageCreate(BaseModel):

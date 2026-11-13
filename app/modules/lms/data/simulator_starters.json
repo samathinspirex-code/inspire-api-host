@@ -6,6 +6,7 @@
   "tone": "student",
   "title": "Pop-Up Café Challenge",
   "tagline": "Run a campus café for one term. Don’t go broke. Make it the vibe.",
+  "cover_image_url": "/simulator-banners/found.webp",
   "roles": [
    {
     "key": "role_1",
@@ -327,6 +328,7 @@
   "tone": "student",
   "title": "Startup Studio: Colombo Drop",
   "tagline": "Launch a sustainable streetwear brand from zero. Build the hype, keep the cash.",
+  "cover_image_url": "/simulator-banners/hndbus.webp",
   "roles": [
    {
     "key": "role_1",
@@ -645,6 +647,7 @@
   "tone": "student",
   "title": "Ship It: App Studio",
   "tagline": "Build a study app, survive launch day and keep the bugs (mostly) away.",
+  "cover_image_url": "/simulator-banners/hndcom.webp",
   "roles": [
    {
     "key": "role_1",
@@ -958,6 +961,7 @@
   "tone": "student",
   "title": "Contract Clash",
   "tagline": "Your client’s bakery got burned by a supplier. Win it, settle it, or lose it.",
+  "cover_image_url": "/simulator-banners/hndlaw.webp",
   "roles": [
    {
     "key": "role_1",
@@ -1264,6 +1268,7 @@
   "tone": "student",
   "title": "Ward Manager",
   "tagline": "Run a busy outpatient clinic. Keep patients safe and your team sane.",
+  "cover_image_url": "/simulator-banners/hndhealth.webp",
   "roles": [
    {
     "key": "role_1",
@@ -1572,6 +1577,7 @@
   "tone": "student",
   "title": "Classroom Lab",
   "tagline": "Teach a class of 30 very different learners. Make them want to come back.",
+  "cover_image_url": "/simulator-banners/hndedu.webp",
   "roles": [
    {
     "key": "role_1",
@@ -1875,6 +1881,7 @@
   "tone": "student",
   "title": "Go Global: Market Entry",
   "tagline": "Take a Sri Lankan snack brand abroad. Pick the market, the model and the moves.",
+  "cover_image_url": "/simulator-banners/topup.webp",
   "roles": [
    {
     "key": "role_1",
@@ -2187,6 +2194,7 @@
   "tone": "professional",
   "title": "The Boardroom",
   "tagline": "You are CEO of Lanka Fresh, a mid-sized FMCG company facing retail and regulatory disruption.",
+  "cover_image_url": "/simulator-banners/pgd.webp",
   "roles": [
    {
     "key": "role_1",
@@ -2503,6 +2511,7 @@
   "tone": "professional",
   "title": "Turnaround CEO",
   "tagline": "Serendib Hospitality Group is losing money after a tourism downturn. You have 24 months.",
+  "cover_image_url": "/simulator-banners/masters.webp",
   "roles": [
    {
     "key": "role_1",
@@ -2809,6 +2818,7 @@
   "tone": "professional",
   "title": "People Ops AI Lab",
   "tagline": "Introduce AI into HR at a 500-person company without losing your people’s trust.",
+  "cover_image_url": "/simulator-banners/cpdhr.webp",
   "roles": [
    {
     "key": "role_1",
@@ -3113,6 +3123,7 @@
   "tone": "professional",
   "title": "AI CFO",
   "tagline": "Modernise a finance function: faster close, better forecasts, tighter controls.",
+  "cover_image_url": "/simulator-banners/cpdfin.webp",
   "roles": [
    {
     "key": "role_1",
@@ -3413,6 +3424,7 @@
   "tone": "professional",
   "title": "Growth Sprint",
   "tagline": "Six weeks, one budget, one goal: more qualified leads at a lower cost.",
+  "cover_image_url": "/simulator-banners/cpddm.webp",
   "roles": [
    {
     "key": "role_1",
@@ -3715,6 +3727,7 @@
   "tone": "professional",
   "title": "Pitch to Launch",
   "tagline": "Take an idea to a funded launch. Validate, build, pitch.",
+  "cover_image_url": "/simulator-banners/cpdie.webp",
   "roles": [
    {
     "key": "role_1",
@@ -4015,6 +4028,7 @@
   "tone": "professional",
   "title": "Deadline Rescue",
   "tagline": "Take over a late, over-budget IT project and land it.",
+  "cover_image_url": "/simulator-banners/cpdpm.webp",
   "roles": [
    {
     "key": "role_1",
