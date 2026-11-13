@@ -1,6 +1,7 @@
-"""CRM -> WhatsApp Bot: sync state tables and the WHATSAPP_BOT access level. Safe to re-run.
+"""CRM -> WhatsApp Bot: sync state tables. Safe to re-run.
 
-The access level is created but granted to nobody; grant it in People & Access.
+Access comes from CRM & Admissions and Admissions Counsellor, so the earlier separate
+WHATSAPP_BOT access level is removed from every user and switched off.
 """
 
 import asyncio
@@ -26,13 +27,12 @@ async def main() -> None:
             for statement in [s.strip() for s in sql.split(";")]:
                 if statement:
                     await connection.execute(text(statement))
-            await connection.execute(text(
-                "INSERT INTO access_levels (access_key, display_name, description, is_active) "
-                "VALUES ('WHATSAPP_BOT', 'WhatsApp Bot', 'Access the WhatsApp Bot section in CRM', true) "
-                "ON CONFLICT (access_key) DO UPDATE SET display_name = EXCLUDED.display_name, "
-                "description = EXCLUDED.description, is_active = true"
-            ))
-        print("WhatsApp bot sync tables and WHATSAPP_BOT access level are ready.")
+            removed = (await connection.execute(text(
+                "DELETE FROM user_access_levels WHERE access_level_id IN "
+                "(SELECT access_level_id FROM access_levels WHERE access_key = 'WHATSAPP_BOT')"
+            ))).rowcount
+            await connection.execute(text("UPDATE access_levels SET is_active = false WHERE access_key = 'WHATSAPP_BOT'"))
+        print(f"WhatsApp bot sync tables are ready. Removed the old WhatsApp Bot role from {removed} user(s).")
     finally:
         await engine.dispose()
 
