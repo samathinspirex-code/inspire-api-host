@@ -67,6 +67,8 @@ class CrmLeadRepository:
             filters.append(CrmLead.assigned_counsellor_id.is_(None))
         elif counsellor_id is not None:
             filters.append(CrmLead.assigned_counsellor_id == counsellor_id)
+        if extra.get("free_foundation") is not None:
+            filters.append(CrmLead.free_foundation == extra["free_foundation"])
         selected_bodies = set(extra.get("awarding_bodies") or []) | ({awarding_body} if awarding_body else set())
         if selected_bodies:
             filters.append(CrmLead.awarding_body.in_(selected_bodies))

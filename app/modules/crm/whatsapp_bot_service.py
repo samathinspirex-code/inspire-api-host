@@ -1,17 +1,18 @@
 """WhatsApp bot (insbot) -> CRM sync.
 
 The WhatsApp bot qualifies students and hands each one to a counsellor itself.
-Once that handover happens the bot pushes the lead here. Rules agreed with the
+Once that handover happens the API pulls the lead from the bot's Supabase
+(app.modules.whatsapp_bot.sync) and records it here. Rules agreed with the
 business:
 
 * The bot's chosen counsellor is recorded as-is. The CRM round robin is never
   run for WhatsApp bot leads (other sources keep using it).
-* Only leads that reached a handover are pushed; nothing is backfilled.
+* Only leads that reached a handover are synced.
 * If the phone already belongs to a CRM lead (website, Meta, ...), the bot data
   and chat are merged into that lead instead of creating a duplicate, and the
   existing counsellor is kept.
 * Bot leads are keyed by ``external_record_id = "wabot:<supabase lead id>"`` so
-  repeated pushes update the same CRM lead.
+  repeated syncs update the same CRM lead.
 """
 
 from datetime import datetime, timedelta, timezone

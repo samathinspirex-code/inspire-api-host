@@ -52,6 +52,7 @@ from app.modules.lms.schemas.simulator import (
     SimTemplateUpdate,
     SimTemplateWrite,
     SimVote,
+    SimVoteLock,
     SimXpAdjustment,
 )
 from app.modules.lms.schemas.coursework import CourseworkReviewSummaryResponse
@@ -2699,6 +2700,12 @@ async def archive_simulator_template(template_id: int, payload: SimTemplateArchi
     return await simulator_service.archive_template(db, template_id, payload.is_archived, current_user.user_id)
 
 
+@router.delete("/simulator-templates/{template_id}", status_code=204)
+async def delete_simulator_template(template_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> Response:
+    await simulator_service.delete_template(db, template_id, current_user.user_id)
+    return Response(status_code=204)
+
+
 @router.get("/classes/{class_id}/simulators")
 async def list_class_simulators(class_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
     return await simulator_service.list_class_runs(db, class_id, current_user.user_id)
@@ -2712,6 +2719,17 @@ async def apply_simulator_to_class(class_id: int, payload: SimRunCreate, current
 @router.put("/simulator-runs/{run_id}")
 async def update_simulator_run(run_id: int, payload: SimRunUpdate, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
     return await simulator_service.update_run(db, run_id, payload, current_user.user_id)
+
+
+@router.delete("/simulator-runs/{run_id}", status_code=204)
+async def delete_simulator_run(run_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> Response:
+    await simulator_service.delete_run(db, run_id, current_user.user_id)
+    return Response(status_code=204)
+
+
+@router.get("/simulator-runs/{run_id}/preview")
+async def preview_simulator_run(run_id: int, current_user: CurrentUser = Depends(lecturer_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.run_preview(db, run_id, current_user.user_id)
 
 
 @router.get("/simulator-runs/{run_id}/results")
@@ -2782,6 +2800,16 @@ async def get_my_simulator_state(team_id: int, after_message_id: int = Query(0, 
 @router.put("/my/simulator-teams/{team_id}/votes")
 async def vote_in_my_simulator(team_id: int, payload: SimVote, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
     return await simulator_service.cast_vote(db, team_id, payload, current_user.user_id)
+
+
+@router.get("/my/simulators/{run_id}/leaderboard")
+async def get_my_simulator_leaderboard(run_id: int, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.student_leaderboard(db, run_id, current_user.user_id)
+
+
+@router.put("/my/simulator-teams/{team_id}/votes/lock")
+async def lock_my_simulator_votes(team_id: int, payload: SimVoteLock, current_user: CurrentUser = Depends(student_access), db: AsyncSession = Depends(get_db)) -> dict:
+    return await simulator_service.lock_votes(db, team_id, payload, current_user.user_id)
 
 
 @router.post("/my/simulator-teams/{team_id}/close-voting")

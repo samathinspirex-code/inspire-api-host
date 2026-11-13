@@ -36,7 +36,7 @@ def _tier_name(tier_index: int | None) -> str | None:
     return TIERS[tier_index][0] if tier_index is not None and 0 <= tier_index < len(TIERS) else None
 
 
-async def list_rewards(db: AsyncSession) -> list[dict]:
+async def list_rewards(db: AsyncSession, start=None, end=None) -> list[dict]:
     rewards = (await db.execute(text(
         f"SELECT {REWARD_COLUMNS} FROM crm_arena_rewards ORDER BY is_active DESC, tier_index NULLS LAST, title"
     ))).mappings().all()
@@ -44,6 +44,13 @@ async def list_rewards(db: AsyncSession) -> list[dict]:
         "SELECT code_id, reward_id, code, expires_at, status FROM crm_arena_reward_codes ORDER BY code_id"
     ))).mappings().all()
     today = colombo_today()
+    period_issued = {}
+    if start is not None and end is not None:
+        issued_rows = (await db.execute(text(
+            "SELECT reward_id, count(*) FROM crm_arena_reward_collections "
+            "WHERE status = 'given' AND decided_at >= :start AND decided_at < :end GROUP BY reward_id"
+        ), {"start": start, "end": end})).all()
+        period_issued = {int(reward_id): int(count) for reward_id, count in issued_rows}
     codes: dict[int, list[dict]] = {}
     for row in code_rows:
         expired = row["expires_at"] is not None and row["expires_at"] < today
@@ -55,7 +62,7 @@ async def list_rewards(db: AsyncSession) -> list[dict]:
             **reward,
             "tier_name": _tier_name(reward["tier_index"]),
             "stock": sum(1 for code in own if code["status"] == "available" and not code["expired"]),
-            "issued": sum(1 for code in own if code["status"] == "issued"),
+            "issued": period_issued.get(reward["reward_id"], 0) if start is not None else sum(1 for code in own if code["status"] == "issued"),
             "codes": [code for code in own if code["status"] != "void"],
         })
     return result
@@ -187,7 +194,7 @@ async def collect(db: AsyncSession, user_id: int, reward_id: int) -> dict:
     return {"collection_id": collection_id, "state": "requested"}
 
 
-async def list_collections(db: AsyncSession) -> list[dict]:
+async def list_collections(db: AsyncSession, start=None, end=None) -> list[dict]:
     rows = (await db.execute(text(
         "SELECT c.collection_id, c.reward_id, c.user_id, c.source, c.status, c.issued_code AS code, c.note, c.requested_at, c.decided_at, "
         "r.title, r.brand, r.value_label, r.reward_type, r.tier_index, "
@@ -198,8 +205,9 @@ async def list_collections(db: AsyncSession) -> list[dict]:
         "JOIN crm_arena_rewards r ON r.reward_id = c.reward_id "
         "JOIN users u ON u.user_id = c.user_id "
         "LEFT JOIN users d ON d.user_id = c.decided_by "
+        "WHERE (CAST(:start AS timestamp) IS NULL OR c.requested_at >= :start) AND (CAST(:end AS timestamp) IS NULL OR c.requested_at < :end) "
         "ORDER BY (c.status = 'requested') DESC, coalesce(c.decided_at, c.requested_at) DESC LIMIT 200"
-    ), {"today": colombo_today()})).mappings().all()
+    ), {"today": colombo_today(), "start": start, "end": end})).mappings().all()
     return [{**row, "tier_name": _tier_name(row["tier_index"])} for row in rows]
 
 

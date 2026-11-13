@@ -139,11 +139,13 @@ class CrmAssignmentSettingsOut(BaseModel):
     rotation: list[CrmCounsellorOut] = []
     meta_counsellor_ids: list[int] = []
     meta_setting_ready: bool = False
+    whatsapp_bot_counsellor_ids: list[int] = []
 
 
 class CrmAssignmentSettingsUpdate(BaseModel):
     auto_assign_enabled: Optional[bool] = None
     meta_counsellor_ids: Optional[list[int]] = Field(None, max_length=50)
+    whatsapp_bot_counsellor_ids: Optional[list[int]] = Field(None, max_length=50)
 
 
 class CrmCounsellorOrderUpdate(BaseModel):
@@ -184,6 +186,7 @@ class CrmLeadOut(BaseModel):
     programme_duration: Optional[str] = None
     intake: Optional[str] = None
     payment_plan: Optional[str] = None
+    free_foundation: bool = False
     last_contacted_at: Optional[datetime] = None
     last_activity_at: Optional[datetime] = None
     followup_count: int = 0
@@ -240,6 +243,7 @@ class CrmLeadSummary(BaseModel):
     stage: str
     campaign: Optional[str] = None
     academic_course_id: Optional[int] = None
+    free_foundation: bool = False
     last_contacted_at: Optional[datetime] = None
     last_activity_at: Optional[datetime] = None
     followup_count: int = 0
@@ -298,6 +302,7 @@ class CrmLeadCreate(BaseModel):
     programme_duration: Optional[str] = None
     intake: Optional[str] = None
     payment_plan: Optional[str] = None
+    free_foundation: bool = False
     followup_date: Optional[datetime] = None
     priority: str = "medium"
     notes: Optional[str] = None
@@ -345,6 +350,7 @@ class CrmLeadUpdate(BaseModel):
     programme_duration: Optional[str] = None
     intake: Optional[str] = None
     payment_plan: Optional[str] = None
+    free_foundation: Optional[bool] = None
     priority: Optional[str] = None
     priority_locked: Optional[bool] = None
     assigned_counsellor_id: Optional[int] = None

@@ -1,4 +1,5 @@
 import csv
+import logging
 from collections import defaultdict
 from decimal import Decimal
 from io import StringIO
@@ -32,7 +33,9 @@ from app.modules.lms.schemas import (
     StudentGradeItem,
     StudentGradesResponse,
 )
-from app.modules.lms import notification_service
+from app.modules.lms import grade_points_service, notification_service
+
+logger = logging.getLogger(__name__)
 
 
 def percentage(earned, possible) -> float:
@@ -260,11 +263,37 @@ async def student_grades(db: AsyncSession, user_id: int) -> StudentGradesRespons
     ) for value in grouped.values()]
     earned = sum((item.earned_marks for item in courses), Decimal("0"))
     possible = sum((item.total_possible_marks for item in courses), Decimal("0"))
+    distinctions = {grade.assignment_id: grade.title for course in courses for grade in course.grades if grade.grade_band == "distinction"}
+    points = await grade_points_service.sync_distinction_points(db, user_id, distinctions)
+    await db.commit()
     return StudentGradesResponse(
         overall_percentage=percentage(earned, possible),
         released_assignments=sum(item.released_assignments for item in courses),
+        distinctions=len(distinctions),
+        distinction_points=points,
         courses=courses,
     )
+
+
+async def sync_points_for_assignment(db: AsyncSession, assignment_id: int) -> None:
+    """After a release change, updates Distinction points for everyone with a marked result. Never blocks the release."""
+    # Points catch up the next time the student opens Grades, so nothing here may stop a release.
+    try:
+        student_ids = list((await db.execute(
+            select(LmsCourseworkSubmission.student_user_id).where(LmsCourseworkSubmission.assignment_id == assignment_id, LmsCourseworkSubmission.marks_awarded.is_not(None)).distinct()
+        )).scalars().all())
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not list students for Distinction points on assignment %s", assignment_id)
+        return
+    for student_id in student_ids:
+        try:
+            await student_grades(db, student_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Distinction points sync failed for assignment %s", assignment_id)
+            try:
+                await db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.exception("Rollback after Distinction points sync failed")
 
 
 async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool, user_id: int):
@@ -322,6 +351,7 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
     if linked_exam is not None:
         linked_exam.grades_released = released
     await db.commit()
+    await sync_points_for_assignment(db, assignment_id)
     if released:
         await notification_service.notify_grade_release(db, assignment)
         if assignment.submission_type != "mcq":

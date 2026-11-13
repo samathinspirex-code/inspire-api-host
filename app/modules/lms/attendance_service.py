@@ -1,4 +1,5 @@
 import csv
+import logging
 import math
 from datetime import date, datetime, timezone
 from io import StringIO
@@ -6,7 +7,11 @@ from io import StringIO
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ForbiddenError, NotFoundError, ValidationError
-from app.modules.lms import zoom_service
+from app.modules.lms import points_ledger, zoom_service
+
+logger = logging.getLogger(__name__)
+ATTENDANCE_POINTS = 10
+ATTENDANCE_SOURCE = "attendance_present"
 from app.modules.lms.repository import AttendanceRepository, MeetingRepository
 from app.modules.lms.schemas import (
     AttendanceAnalyticsResponse,
@@ -229,6 +234,12 @@ async def override_attendance_record(
     if role not in {"SUPER_ADMIN", "ADMIN", "LECTURER"}:
         raise ForbiddenError("Your LMS role cannot update attendance")
     record = await repository.override_record(record, payload.status, payload.reason.strip(), user_id)
+    student_id = getattr(record, "student_user_id", None)
+    if student_id is not None:
+        try:
+            await list_my_attendance(db, student_id)
+        except Exception:  # noqa: BLE001 - the override itself is already saved
+            logger.exception("Attendance points refresh failed after override %s", attendance_record_id)
     return _record_item((record, user, profile))
 
 
@@ -253,13 +264,33 @@ async def list_my_attendance(db: AsyncSession, student_user_id: int) -> StudentA
     ]
     present = sum(item.status == "present" for item in data)
     total = len(data)
+    points = await sync_attendance_points(db, student_user_id, data)
     return StudentAttendanceResponse(
         total_sessions=total,
         present_count=present,
         absent_count=total - present,
         attendance_percentage=round(present * 100 / total, 2) if total else 0,
+        points=points,
+        points_per_class=ATTENDANCE_POINTS,
         data=data,
     )
+
+
+async def sync_attendance_points(db: AsyncSession, student_user_id: int, items: list[StudentAttendanceItem]) -> int:
+    """10 points per attended live class, taken back if the record is changed to absent. Never blocks the page."""
+    current = {item.attendance_record_id: f"Attended: {item.course_title} · {item.meeting_title}" for item in items if item.status == "present"}
+    try:
+        points = await points_ledger.sync(db, student_user_id, source=ATTENDANCE_SOURCE, prefix="att", amount=ATTENDANCE_POINTS,
+                                          current=current, withdrawn_reason="Attendance changed to absent")
+        await db.commit()
+        return points
+    except Exception:  # noqa: BLE001 - points catch up next time
+        logger.exception("Attendance points sync failed for student %s", student_user_id)
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001
+            logger.exception("Rollback after attendance points sync failed")
+        return 0
 
 
 def _report_filters(

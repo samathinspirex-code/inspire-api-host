@@ -105,6 +105,14 @@ class Settings(BaseSettings):
     CRM_REGISTRATION_FORM_URL: str = "https://docs.google.com/forms/d/1hz96j-mr0xfSK1gGjB8TmD6-XkKY_KCSagSTCeRGwfw/viewform?edit_requested=true"
     CRM_OFFER_LETTER_PATH: str = "app/modules/crm/assets/offer-letter-template.docx"
     CRM_INTEGRATION_API_TOKEN: str = ""
+
+    # WhatsApp bot (CRM -> WhatsApp Bot). The API reads the bot's own Supabase
+    # with the service-role key and pulls handovers into CRM leads. Server only.
+    WABOT_SUPABASE_URL: str = ""
+    WABOT_SUPABASE_SERVICE_ROLE_KEY: str = ""
+    WABOT_SYNC_ENABLED: bool = True
+    # CRM counsellor (login email) who gets every imported pending handover.
+    WABOT_ASSIGN_TO_EMAIL: str = ""
     AUTHENTICATOR_INVITATION_SUBJECT: str = "Set up your Inspire College Authenticator"
 
     GOOGLE_OAUTH_CLIENT_ID: str = ""

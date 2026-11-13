@@ -12,6 +12,7 @@ from app.modules.crm.router import _check_lead_access
 from app.modules.insights import service
 from app.modules.insights.mission import save_mission
 from app.modules.insights.snapshot import lead_journey
+from app.modules.insights.period import period_bounds
 
 router = APIRouter(prefix="/api/v1/cms/insights", tags=["insights"])
 
@@ -41,8 +42,9 @@ async def get_dashboard(counsellor_id: int | None = None, user: CurrentUser = De
 
 
 @router.get("/command-centre")
-async def get_command(range_days: int = Query(30, alias="range", ge=7, le=90), counsellor_id: int | None = None, user: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
-    return await service.command_centre(db, _scope(user, counsellor_id), range_days)
+async def get_command(range_days: int = Query(30, alias="range", ge=7, le=90), period: str = "all", start_date: date | None = None, end_date: date | None = None, counsellor_id: int | None = None, user: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
+    start, end = period_bounds(period, start_date, end_date)
+    return await service.command_centre(db, _scope(user, counsellor_id), range_days, start, end)
 
 
 class MissionIn(BaseModel):

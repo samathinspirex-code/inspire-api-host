@@ -231,6 +231,8 @@ class StudentCourseGrade(BaseModel):
 class StudentGradesResponse(BaseModel):
     overall_percentage: float
     released_assignments: int
+    distinctions: int = 0
+    distinction_points: int = 0
     courses: list[StudentCourseGrade]
 
 
