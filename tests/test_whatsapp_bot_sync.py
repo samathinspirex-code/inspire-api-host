@@ -221,6 +221,17 @@ def test_whatsapp_bot_routes_need_explicit_grant():
         run(wabot_router.require_whatsapp_bot(SimpleNamespace(access=["SUPER_ADMIN", "ADMIN", "CRM"])))
     user = SimpleNamespace(access=["WHATSAPP_BOT"])
     assert run(wabot_router.require_whatsapp_bot(user)) is user
+    counsellor = SimpleNamespace(access=["COUNSELLOR"])
+    assert run(wabot_router.require_whatsapp_bot(counsellor)) is counsellor
+
+
+def test_only_whatsapp_bot_role_can_run_an_import():
+    sync_route = next(r for r in wabot_router.router.routes if r.path.endswith("/sync") and "POST" in r.methods)
+    assert any(d.call is wabot_router.require_whatsapp_bot_manager for d in sync_route.dependant.dependencies)
+    with pytest.raises(ForbiddenError):
+        run(wabot_router.require_whatsapp_bot_manager(SimpleNamespace(access=["COUNSELLOR"])))
+    manager = SimpleNamespace(access=["WHATSAPP_BOT"])
+    assert run(wabot_router.require_whatsapp_bot_manager(manager)) is manager
 
 
 def test_old_bot_push_routes_are_removed():

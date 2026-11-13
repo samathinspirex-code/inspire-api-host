@@ -1,4 +1,5 @@
-"""CRM -> WhatsApp Bot API (needs the WHATSAPP_BOT access role).
+"""CRM -> WhatsApp Bot API. Viewing: the WHATSAPP_BOT role or Admissions Counsellor (COUNSELLOR).
+Running an import (POST /sync): the WHATSAPP_BOT role only.
 
 Read-only on the bot: every route only reads the bot's database. The one write,
 POST /sync, writes CRM leads (and the CRM's own import record), never the bot.
@@ -20,10 +21,19 @@ from app.modules.whatsapp_bot.supabase import BotDB, BotUnavailable, configured
 from app.modules.whatsapp_bot.sync import imported_by_handover, pick_assignee, run_sync, sync_status
 
 
+VIEW_ROLES = {"WHATSAPP_BOT", "COUNSELLOR"}
+
+
 async def require_whatsapp_bot(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    # Deliberately an explicit grant, even for administrators (same as Payments).
-    if "WHATSAPP_BOT" not in user.access:
+    # An explicit grant, even for administrators (same as Payments). Admissions counsellors may view.
+    if not VIEW_ROLES.intersection(user.access):
         raise ForbiddenError("WhatsApp Bot access is required")
+    return user
+
+
+async def require_whatsapp_bot_manager(user: CurrentUser = Depends(require_whatsapp_bot)) -> CurrentUser:
+    if "WHATSAPP_BOT" not in user.access:
+        raise ForbiddenError("Only people with the WhatsApp Bot role can run an import")
     return user
 
 
@@ -147,5 +157,5 @@ async def sync_preview(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sync")
-async def sync_now(db: AsyncSession = Depends(get_db)):
+async def sync_now(_: CurrentUser = Depends(require_whatsapp_bot_manager), db: AsyncSession = Depends(get_db)):
     return await run_sync(db)
