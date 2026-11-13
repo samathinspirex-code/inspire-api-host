@@ -24,7 +24,7 @@ COLLEGE_FACTS = (
     "Inspire College is Sri Lanka's first tech-enabled online higher education institution.\n"
     "Address: Level 01, Shangri-La, Colombo 2, Sri Lanka.\n"
     "Phone / WhatsApp: +94 76 097 4224. Email: info@inspirecollege.lk.\n"
-    "Awarding and partner bodies include ATHE, WINC, LSBF and Jain University.\n"
+    "Inspire College may award its own courses. External awarding and partner bodies include ATHE, WINC, LSBF and Jain University.\n"
     "Website pages: / (home), /programs (all courses), /programs/<slug> (a course), "
     "/admissions (apply online), /contact (contact form), /about, /news."
 )

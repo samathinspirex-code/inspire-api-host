@@ -830,7 +830,10 @@ async def public_levels(db: AsyncSession, programme_id: int, school_id: int | No
 
 
 async def public_schools(db: AsyncSession):
-    return await list_nodes(db, "schools", True)
+    # These rows satisfy academic_courses.school_id for bodies whose public
+    # pathway goes directly from awarding body to programme.
+    rows = await list_nodes(db, "schools", True)
+    return [row for row in rows if row["code"].strip().upper() not in {"JAIN", "JAIN_UNIVERSITY", "LSBF", "INSPIRE"}]
 
 
 async def create_programme_enrolment(db: AsyncSession, payload: ProgrammeEnrolmentCreate):
