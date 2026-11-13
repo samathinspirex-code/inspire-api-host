@@ -76,17 +76,6 @@ class PublicContactSubmission(BaseModel):
     ref: Optional[str] = None
 
 
-class WhatsAppBotLeadSubmission(BaseModel):
-    phone: str
-    full_name: Optional[str] = "WhatsApp Lead"
-    interested_programme: Optional[str] = None
-    interested_course: Optional[str] = None
-    city: Optional[str] = None
-    last_message: Optional[str] = None
-    conversation_summary: Optional[str] = None
-    bot_session_id: Optional[str] = None
-
-
 class MetaLeadSubmission(BaseModel):
     lead_id: Optional[str] = None
     full_name: str
@@ -195,55 +184,6 @@ async def submit_website_contact(
         "status": "success",
         "lead_id": lead.lead_id,
         "message": "Thank you for contacting Inspire College. A counsellor will reach out shortly.",
-    }
-
-
-@router.post("/integrations/whatsapp", status_code=201)
-async def submit_whatsapp_lead(
-    payload: WhatsAppBotLeadSubmission,
-    x_webhook_secret: Optional[str] = Header(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Legacy webhook intake for the WhatsApp bot.
-    The bot now uses POST /api/v1/integrations/crm/whatsapp-bot/leads.
-    This route previously accepted unauthenticated posts; it now requires
-    X-Webhook-Secret to equal CRM_INTEGRATION_API_TOKEN, and it never runs the
-    round robin (WhatsApp bot leads keep the bot's own assignment).
-    """
-    configured = settings.CRM_INTEGRATION_API_TOKEN
-    if not x_webhook_secret or len(configured) < 32 or not compare_digest(x_webhook_secret, configured):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
-    notes_parts = []
-    if payload.bot_session_id:
-        notes_parts.append(f"WhatsApp Session: {payload.bot_session_id}")
-    if payload.conversation_summary:
-        notes_parts.append(f"Bot Summary: {payload.conversation_summary}")
-
-    create_payload = CrmLeadCreate(
-        full_name=payload.full_name or "WhatsApp Prospect",
-        phone=payload.phone.strip(),
-        whatsapp=payload.phone.strip(),
-        city=payload.city,
-        interested_programme=payload.interested_programme,
-        interested_course=payload.interested_course,
-        message=payload.last_message,
-        source="whatsapp",
-        stage="new_lead",
-        priority="medium",
-        notes="\n".join(notes_parts) if notes_parts else None,
-    )
-    lead = await service.create_lead(
-        db,
-        create_payload,
-        counsellor_id=None,
-        counsellor_name="WhatsApp Bot",
-        auto_assign=False,
-    )
-    return {
-        "status": "success",
-        "lead_id": lead.lead_id,
-        "message": "WhatsApp lead recorded in Inspire CRM.",
     }
 
 

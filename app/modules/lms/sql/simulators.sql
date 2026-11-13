@@ -144,3 +144,7 @@ ALTER TABLE lms_sim_templates ADD COLUMN IF NOT EXISTS cover_image_url VARCHAR(1
 ;
 ALTER TABLE lms_sim_runs ADD COLUMN IF NOT EXISTS cover_image_url VARCHAR(1000)
 ;
+ALTER TABLE lms_sim_templates ADD COLUMN IF NOT EXISTS how_it_works JSONB NOT NULL DEFAULT '[]'::jsonb
+;
+ALTER TABLE lms_sim_runs ADD COLUMN IF NOT EXISTS how_it_works JSONB NOT NULL DEFAULT '[]'::jsonb
+;

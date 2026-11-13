@@ -296,6 +296,9 @@ async def _crm_schema_present(db: AsyncSession) -> bool:
                 "AND EXISTS (SELECT 1 FROM information_schema.columns "
                 "WHERE table_schema='public' AND table_name='crm_leads' "
                 "AND column_name='awarding_body')"
+                "AND EXISTS (SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name='crm_leads' "
+                "AND column_name='free_foundation')"
             )
         )
     )
@@ -555,6 +558,7 @@ async def get_assignment_settings(db: AsyncSession) -> CrmAssignmentSettingsOut:
     return CrmAssignmentSettingsOut(
         meta_counsellor_ids=await source_assignment.meta_counsellor_ids(db),
         meta_setting_ready=await source_assignment.ready(db),
+        whatsapp_bot_counsellor_ids=await source_assignment.group_counsellor_ids(db, source_assignment.WHATSAPP_BOT_GROUP),
         auto_assign_enabled=settings.auto_assign_enabled,
         last_counsellor_id=settings.last_counsellor_id,
         last_assigned_on=settings.last_assigned_on.isoformat() if settings.last_assigned_on else None,
@@ -564,7 +568,8 @@ async def get_assignment_settings(db: AsyncSession) -> CrmAssignmentSettingsOut:
     )
 
 
-async def update_assignment_settings(db: AsyncSession, enabled: Optional[bool], meta_counsellor_ids: Optional[list[int]] = None) -> CrmAssignmentSettingsOut:
+async def update_assignment_settings(db: AsyncSession, enabled: Optional[bool], meta_counsellor_ids: Optional[list[int]] = None,
+                                     whatsapp_bot_counsellor_ids: Optional[list[int]] = None) -> CrmAssignmentSettingsOut:
     settings = await _settings_row(db)
     if enabled is not None:
         settings.auto_assign_enabled = enabled
@@ -572,6 +577,10 @@ async def update_assignment_settings(db: AsyncSession, enabled: Optional[bool], 
         from app.modules.crm.source_assignment import set_meta_counsellor_ids
         known = {user.user_id for user, _status in _dedupe_counsellor_rows((await db.execute(_counsellor_users_stmt(True))).all())}
         await set_meta_counsellor_ids(db, meta_counsellor_ids, known)
+    if whatsapp_bot_counsellor_ids is not None:
+        from app.modules.crm.source_assignment import WHATSAPP_BOT_GROUP, set_group_counsellor_ids
+        known = {user.user_id for user, _status in _dedupe_counsellor_rows((await db.execute(_counsellor_users_stmt(True))).all())}
+        await set_group_counsellor_ids(db, WHATSAPP_BOT_GROUP, whatsapp_bot_counsellor_ids, known)
     await db.commit()
     return await get_assignment_settings(db)
 
@@ -644,6 +653,7 @@ async def _ensure_awarding_body_column(db: AsyncSession, *, backfill: bool = Fal
     await db.execute(
         text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS awarding_body VARCHAR(100)")
     )
+    await db.execute(text("ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS free_foundation BOOLEAN NOT NULL DEFAULT false"))
     await db.commit()
     _awarding_body_column_ready = True
 

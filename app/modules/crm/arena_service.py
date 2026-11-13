@@ -353,7 +353,7 @@ def _badges(player: dict, extras: dict) -> list[dict]:
     ]
 
 
-async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int | None, full_detail: bool = False) -> dict:
+async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int | None, full_detail: bool = False, period_start: datetime | None = None, period_end: datetime | None = None) -> dict:
     """The full Arena. Only someone holding the counsellor role can claim, and only on their own card."""
     snap = await load_snapshot(db, None)
     today = colombo_today()
@@ -399,7 +399,36 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
                 min(1, streak / 14),
             ],
         })
-    board.sort(key=lambda item: (-item["xp"], -item["past_work"]["available"], -item["enrolled"]))
+    if period_start is not None and period_end is not None:
+        bounds = {"start": period_start, "end": period_end, "season": season_number}
+        claim_rows = (await db.execute(text(
+            "SELECT user_id, coalesce(sum(xp), 0) FROM crm_arena_claims "
+            "WHERE claim_date >= :first_day AND claim_date < :after_day AND season_number = :season GROUP BY user_id"
+        ), {**bounds, "first_day": period_start.replace(tzinfo=timezone.utc).astimezone(COLOMBO).date(), "after_day": period_end.replace(tzinfo=timezone.utc).astimezone(COLOMBO).date()})).all()
+        claimed = {int(owner): int(xp) for owner, xp in claim_rows}
+        lead_rows = (await db.execute(text(
+            "SELECT assigned_counsellor_id, count(*), count(*) FILTER (WHERE stage = 'uncontactable'), "
+            "count(*) FILTER (WHERE stage = 'enrolled') FROM crm_leads "
+            "WHERE is_archived = false AND created_at >= :start AND created_at < :end "
+            "AND assigned_counsellor_id IS NOT NULL GROUP BY assigned_counsellor_id"
+        ), bounds)).all()
+        leads = {int(owner): (int(total), int(uncontactable), int(enrolled)) for owner, total, uncontactable, enrolled in lead_rows}
+        activity_rows = (await db.execute(text(
+            f"SELECT a.counsellor_id, count(DISTINCT a.lead_id) FROM crm_activities a WHERE a.created_at >= :start AND a.created_at < :end "
+            f"AND a.activity_type IN ({CONTACT_SQL}) AND {REACHED_ACTIVITY_SQL} AND a.counsellor_id IS NOT NULL GROUP BY a.counsellor_id"
+        ), bounds)).all()
+        reached = {int(owner): int(count) for owner, count in activity_rows}
+        for person in board:
+            owner = person["user_id"]
+            assigned, uncontactable, enrolled = leads.get(owner, (0, 0, 0))
+            person.update(period_xp=claimed.get(owner, 0), assigned=assigned, uncontactable=uncontactable,
+                          new_waiting=max(0, assigned - reached.get(owner, 0) - enrolled),
+                          contacted=reached.get(owner, 0), enrolled=enrolled,
+                          contact_rate=round(reached.get(owner, 0) / assigned, 3) if assigned else 0,
+                          conversion=round(enrolled / assigned, 3) if assigned else 0)
+        board.sort(key=lambda item: (-item["period_xp"], -item["enrolled"], item["name"]))
+    else:
+        board.sort(key=lambda item: (-item["xp"], -item["past_work"]["available"], -item["enrolled"]))
     for rank, person in enumerate(board, start=1):
         person["rank"] = rank
     if focus_id is not None:

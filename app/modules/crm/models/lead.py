@@ -44,6 +44,7 @@ class CrmLead(Base):
     programme_duration: Mapped[Optional[str]] = mapped_column(String(100))
     intake: Mapped[Optional[str]] = mapped_column(String(100))
     payment_plan: Mapped[Optional[str]] = mapped_column(Text)
+    free_foundation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     last_contacted_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     followup_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

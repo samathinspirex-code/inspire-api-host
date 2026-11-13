@@ -1,4 +1,4 @@
-"""WhatsApp bot figures, measured from what the bot pushes into the CRM.
+"""WhatsApp bot figures, measured from the handovers synced into the CRM.
 
 Only handovers reach the CRM, so nothing here can describe students who dropped
 out earlier in the bot. A reply is either a CRM contact activity or a counsellor

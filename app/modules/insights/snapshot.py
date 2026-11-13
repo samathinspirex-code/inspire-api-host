@@ -27,8 +27,8 @@ STAGE_LABELS = {
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 PALETTE = ["#6D28D9", "#2563EB", "#0E9F6E", "#D9480F", "#DB2777", "#0891B2", "#CA8A04", "#4F46E5"]
 _SNAPSHOT_TTL = 20.0
-_snapshot_cache: dict[int | None, tuple[float, dict]] = {}
-_snapshot_locks: dict[int | None, asyncio.Lock] = {}
+_snapshot_cache: dict[tuple, tuple[float, dict]] = {}
+_snapshot_locks: dict[tuple, asyncio.Lock] = {}
 
 
 def _json_rows(value):
@@ -55,10 +55,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _where(counsellor_id: int | None) -> str:
+def _where(counsellor_id: int | None, start: datetime | None = None, end: datetime | None = None) -> str:
     clause = "l.is_archived = false"
     if counsellor_id is not None:
         clause += " AND l.assigned_counsellor_id = :cid"
+    if start is not None:
+        clause += " AND l.created_at >= :period_start"
+    if end is not None:
+        clause += " AND l.created_at < :period_end"
     return clause
 
 
@@ -96,32 +100,37 @@ def _streak(days: set, today) -> int:
     return streak
 
 
-async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> dict:
-    lock = _snapshot_locks.setdefault(counsellor_id, asyncio.Lock())
+async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None) -> dict:
+    key = (counsellor_id, start, end)
+    lock = _snapshot_locks.setdefault(key, asyncio.Lock())
     async with lock:
-        cached = _snapshot_cache.get(counsellor_id)
+        cached = _snapshot_cache.get(key)
         if cached and time.monotonic() - cached[0] < _SNAPSHOT_TTL:
             return cached[1]
         await _ensure_lead_indexes()
-        result = await _load_snapshot(db, counsellor_id)
-        _snapshot_cache[counsellor_id] = (time.monotonic(), result)
+        result = await _load_snapshot(db, counsellor_id, start, end)
+        _snapshot_cache[key] = (time.monotonic(), result)
         return result
 
 
-async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> dict:
+async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None) -> dict:
     now = _now()
     since = now - timedelta(days=90)
+    daily_since = start or since
     month = now - timedelta(days=30)
-    where = _where(counsellor_id)
+    where = _where(counsellor_id, start, end)
     params = _params(
         counsellor_id,
         since=since,
+        daily_since=daily_since,
         month=month,
         now=now,
         hour_ago=now - timedelta(hours=1),
         day_ago=now - timedelta(days=1),
         three_ago=now - timedelta(days=3),
         week_ago=now - timedelta(days=7),
+        period_start=start,
+        period_end=end,
     )
     pack = (await db.execute(text(f"""
         SELECT
@@ -143,7 +152,7 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
           (SELECT coalesce(json_agg(json_build_array(day, cnt) ORDER BY day), '[]'::json)
              FROM (
                SELECT date(l.created_at) AS day, count(*) AS cnt
-               FROM crm_leads l WHERE {where} AND l.created_at >= :since GROUP BY 1
+               FROM crm_leads l WHERE {where} AND l.created_at >= :daily_since GROUP BY 1
              ) s) AS daily,
           (SELECT json_build_array(
                count(*) FILTER (WHERE l.created_at > :hour_ago),
@@ -246,8 +255,9 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None) -> 
 
     by_day = {_as_date(day): int(count) for day, count in _json_rows(pack["daily"])}
     daily = []
-    cursor = since.date()
-    while cursor <= now.date():
+    cursor = daily_since.date()
+    last_day = min(now.date(), end.date()) if end is not None else now.date()
+    while cursor <= last_day:
         daily.append({"date": cursor.isoformat(), "count": by_day.get(cursor, 0)})
         cursor += timedelta(days=1)
 

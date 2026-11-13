@@ -18,6 +18,8 @@ from app.modules.insights.website import ga4_events
 from app.modules.insights.finance import load_finance
 from app.modules.insights.lms import load_lms
 from app.modules.insights.whatsapp import load_whatsapp
+from app.modules.whatsapp_bot.supabase import configured as wabot_configured
+from app.modules.whatsapp_bot.sync import sync_status as wabot_sync_status
 
 
 def _configured(account: dict) -> bool:
@@ -59,6 +61,12 @@ async def saved_accounts(db: AsyncSession) -> list[dict]:
 async def reporting(db: AsyncSession) -> dict:
     accounts = await saved_accounts(db)
     whatsapp = await load_whatsapp(db)
+    # No live Supabase call here: the timer's last run says whether the bot DB answered.
+    wabot = await wabot_sync_status(db)
+    last_errors = [e for e in (wabot.get("last_run") or {}).get("errors") or [] if str(e).startswith("WhatsApp bot database")]
+    whatsapp = {**whatsapp, "configured": wabot_configured(), "last_sync_at": wabot["last_sync_at"],
+                "synced_sessions": wabot["synced_sessions"], "last_error": last_errors[0] if last_errors else None,
+                "reachable": wabot_configured() and bool(wabot["last_sync_at"]) and not last_errors}
     lms = await load_lms(db)
     finance = await load_finance(db)
     capi = await capi_status(db)
