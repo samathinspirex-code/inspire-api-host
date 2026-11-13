@@ -184,7 +184,7 @@ async def _send_enrollment_email(db: AsyncSession, lead_id: int) -> CrmLead:
 
 
 async def list_programme_choices(db: AsyncSession) -> list[dict]:
-    """Return only active CMS courses and their populated hierarchy."""
+    """Return active courses plus programmes that do not have a course yet."""
     rows = (await db.execute(text("""
         SELECT c.course_id, c.title, c.awarding_body, c.programme_id,
                p.name AS programme_name, c.school_id, s.name AS school_name,
@@ -197,10 +197,24 @@ async def list_programme_choices(db: AsyncSession) -> list[dict]:
             WHERE course_id=c.course_id AND is_enabled=true
             ORDER BY price, study_option_id LIMIT 1
         ) o ON true
-        WHERE c.status='active' AND p.status='active' AND s.status='active'
+        WHERE c.status='active' AND p.status='active'
+          AND (s.status='active' OR upper(s.code) IN ('INSPIRE', 'JAIN', 'LSBF'))
         ORDER BY c.awarding_body, s.name, c.title
     """))).mappings().all()
-    return [dict(row) for row in rows]
+    choices = [dict(row) for row in rows]
+    standalone = (await db.execute(text("""
+        SELECT p.programme_id, p.name AS programme_name
+        FROM academic_programmes p
+        WHERE p.status='active' AND NOT EXISTS (
+            SELECT 1 FROM academic_courses c
+            WHERE c.programme_id=p.programme_id AND c.status='active'
+        ) ORDER BY p.name
+    """))).mappings().all()
+    choices.extend({"course_id": None, "title": row["programme_name"], "awarding_body": None,
+                    "programme_id": row["programme_id"], "programme_name": row["programme_name"],
+                    "school_id": None, "school_name": None, "programme_fee": None, "duration": None}
+                   for row in standalone)
+    return choices
 
 
 async def _resolve_course(db: AsyncSession, course_id: int) -> dict:
@@ -208,6 +222,17 @@ async def _resolve_course(db: AsyncSession, course_id: int) -> dict:
     if choice is None:
         raise ValidationError("Select an active programme")
     return choice
+
+
+async def _resolve_standalone_programme(db: AsyncSession, programme_id: int) -> str:
+    name = await db.scalar(text("""
+        SELECT p.name FROM academic_programmes p
+        WHERE p.programme_id=:id AND p.status='active'
+          AND NOT EXISTS (SELECT 1 FROM academic_courses c WHERE c.programme_id=p.programme_id AND c.status='active')
+    """), {"id": programme_id})
+    if not name:
+        raise ValidationError("Select an active programme")
+    return str(name)
 
 
 def _apply_course_choice(data: dict, choice: dict) -> None:
@@ -774,7 +799,7 @@ async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = Non
             .distinct()
         )
     ).all()
-    bodies: set[str] = set()
+    bodies: set[str] = {"ATHE", "CPD", "WINC", "LSBF", "Jain University", "Inspire College"}
     programmes: set[str] = set()
     sources: set[str] = set()
     cities: set[str] = set()
@@ -796,9 +821,16 @@ async def list_lead_filters(db: AsyncSession, counsellor_id: Optional[int] = Non
             campaigns.add(campaign)
         if intake:
             intakes.add(intake)
+    for choice in await list_programme_choices(db):
+        if choice["awarding_body"]:
+            bodies.add(choice["awarding_body"])
+        if choice["programme_name"]:
+            programmes.add(choice["programme_name"])
+        if choice["course_id"] is not None and choice["title"]:
+            programmes.add(choice["title"])
     return CrmLeadFilterOptions(
         awarding_bodies=sorted(bodies),
-        programmes=sorted(programmes)[:200],
+        programmes=sorted(programmes),
         sources=sorted(sources),
         cities=sorted(cities)[:200],
         countries=sorted(countries)[:200],
@@ -915,6 +947,7 @@ async def create_lead(
     await _ensure_counsellor_status_table(db)
     repo = CrmLeadRepository(db)
     data = payload.model_dump()
+    standalone_programme_id = data.pop("programme_id", None)
     if reject_duplicate_phone:
         await _reject_duplicate_manual_phone(db, data.get("phone"))
     if data.get("stage") not in PIPELINE_STAGES:
@@ -928,6 +961,11 @@ async def create_lead(
         data["followup_date"] = _scheduled_followup(data["followup_date"])
     if data.get("academic_course_id") is not None:
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
+    elif standalone_programme_id is not None:
+        if not data.get("awarding_body"):
+            raise ValidationError("Select an awarding body")
+        data["interested_programme"] = await _resolve_standalone_programme(db, standalone_programme_id)
+        data["interested_course"] = None
     requested_created_at = data.pop("created_at", None)
     backdated_created_at = None
     if requested_created_at is not None:
@@ -1005,6 +1043,7 @@ async def update_lead(
         raise NotFoundError(f"Lead {lead_id} not found")
 
     data = payload.model_dump(include=payload.model_fields_set)
+    standalone_programme_id = data.pop("programme_id", None)
     if "created_at" in data:
         if data["created_at"] is None:
             raise ValidationError("Choose a created date and time")
@@ -1056,6 +1095,15 @@ async def update_lead(
         data["followup_date"] = _scheduled_followup(data["followup_date"])
     if "academic_course_id" in data and data["academic_course_id"] is not None:
         _apply_course_choice(data, await _resolve_course(db, data["academic_course_id"]))
+    elif standalone_programme_id is not None:
+        if not data.get("awarding_body", lead.awarding_body):
+            raise ValidationError("Select an awarding body")
+        data["academic_course_id"] = None
+        data["interested_programme"] = await _resolve_standalone_programme(db, standalone_programme_id)
+        data["interested_course"] = None
+        data["school"] = None
+        data["programme_fee"] = data.get("programme_fee")
+        data["programme_duration"] = data.get("programme_duration")
     if "assigned_counsellor_id" in data:
         counsellor_id = data["assigned_counsellor_id"]
         if counsellor_id != lead.assigned_counsellor_id:
