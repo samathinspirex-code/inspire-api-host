@@ -1,5 +1,6 @@
 import asyncio
 import re
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -7,172 +8,153 @@ import httpx
 import pytest
 
 from app.core.errors import ForbiddenError
-from app.modules.whatsapp_bot import router as wabot_router, supabase, sync
+from app.modules.whatsapp_bot import leads as wabot_leads, router as wabot_router, supabase, sync
 
-S0 = "00000000-0000-0000-0000-000000000000"  # earlier chat, same number, never handed over
-S1 = "11111111-1111-1111-1111-111111111111"  # pending handover -> import
-S2 = "22222222-2222-2222-2222-222222222222"  # old accepted handover -> never import
-SW = "33333333-3333-3333-3333-333333333333"  # website chat, pending -> skipped
-L1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-L2 = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+START = datetime(2026, 11, 12, 18, 30, tzinfo=timezone.utc)  # 13 Nov 00:00 Sri Lanka time
+CHAMATH = SimpleNamespace(user_id=178, name="Chamath", email="chamath@inspire.college")
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
+def bot_lead(lead_id, phone, created, updated=None, **fields):
+    return {"id": lead_id, "phone": phone, "created_at": created, "updated_at": updated or created,
+            "name": None, "email": None, "qualification": None, "pathway": None, "field": None,
+            "course_interest": None, "status": "new", "source": "whatsapp", **fields}
+
+
 class FakeBot:
-    """In-memory, read-only PostgREST with the filters sync.py uses. Has no write methods."""
+    """In-memory, read-only PostgREST supporting the filters sync.py uses. Has no write methods."""
 
-    def __init__(self, tables):
-        self.tables = tables
-        self.calls = []
+    def __init__(self, leads):
+        self.tables = {"leads": leads}
 
-    def _match(self, row, key, cond):
-        value = row.get(key)
-        if cond == "not.is.null":
-            return value is not None
+    @staticmethod
+    def _match(row, key, cond):
         op, _, arg = cond.partition(".")
-        if op == "eq":
-            return str(value) == arg
-        if op == "in":
-            return str(value) in [a.strip('"') for a in arg.strip("()").split(",")]
-        if op == "gt":
-            return value is not None and value > arg
+        value = row.get(key)
+        if op == "gte":
+            return value is not None and sync.parse_ts(value) >= sync.parse_ts(arg)
         raise AssertionError(cond)
 
     async def select(self, table, params=None):
-        self.calls.append(table)
         params = dict(params or {})
         rows = [dict(r) for r in self.tables.get(table, [])]
-        order, limit = params.pop("order", None), params.pop("limit", None)
-        params.pop("select", None)
-        for key, cond in params.items():
-            rows = [r for r in rows if self._match(r, key, cond)]
-        if order:
-            col, direction = order.split(".")
-            rows.sort(key=lambda r: r.get(col) or "", reverse=direction == "desc")
+        clause = params.pop("and", None)
+        if clause:
+            for part in clause.strip("()").split(","):
+                key, _, cond = part.partition(".")
+                rows = [r for r in rows if self._match(r, key, cond)]
+        rows.sort(key=lambda r: (sync.parse_ts(r["updated_at"]), r["id"]))
+        limit = params.get("limit")
         return rows[: int(limit)] if limit else rows
 
-    async def one(self, table, params):
-        rows = await self.select(table, {**params, "limit": "1"})
-        return rows[0] if rows else None
 
+class Crm:
+    """Stands in for the CRM database: lead state, cursor, and the mirror call."""
 
-def tables():
-    return {
-        "leads": [
-            {"id": L1, "phone": "94755587843", "name": "Sinhalen dannako", "email": None, "qualification": "After A/L",
-             "pathway": "UK/ATHE", "field": "Business", "course_interest": None, "status": "new", "notes": None,
-             "created_at": "2026-11-13T05:00:00.12+00:00"},
-            {"id": L2, "phone": "94710000000", "name": "Old student", "status": "new", "created_at": "2026-10-01T05:00:00+00:00"},
-        ],
-        "chat_sessions": [
-            {"id": S0, "phone": "94755587843", "lead_id": L1, "source": "whatsapp", "status": "closed"},
-            {"id": S1, "phone": "94755587843", "lead_id": L1, "source": "whatsapp", "status": "active"},
-            {"id": S2, "phone": "94710000000", "lead_id": L2, "source": "whatsapp", "status": "handed_over", "assigned_counselor_id": "c1"},
-            {"id": SW, "phone": "web_abc", "lead_id": None, "source": "website", "status": "active"},
-        ],
-        "handovers": [
-            {"id": "h1", "chat_session_id": S1, "lead_id": L1, "status": "pending", "counselor_id": None,
-             "reason": "Qualification flow completed", "assigned_at": "2026-11-13T05:42:00+00:00"},
-            {"id": "h2", "chat_session_id": S2, "lead_id": L2, "status": "accepted", "counselor_id": "c1",
-             "reason": "Qualification flow completed", "assigned_at": "2026-10-01T06:00:00+00:00"},
-            {"id": "hw", "chat_session_id": SW, "lead_id": None, "status": "pending", "counselor_id": None,
-             "reason": "x", "assigned_at": "2026-11-13T06:00:00+00:00"},
-        ],
-        "chat_messages": [
-            {"session_id": S0, "sender": "user", "message": "earlier hi", "created_at": "2026-11-12T08:00:00+00:00"},
-            {"session_id": S1, "sender": "user", "message": "hello", "created_at": "2026-11-13T05:30:00+00:00"},
-            {"session_id": S1, "sender": "bot", "message": "hi there", "created_at": "2026-11-13T05:31:00+00:00"},
-        ],
-    }
+    def __init__(self, cursor=None):
+        self.state = {}
+        self.meta = {"leads_cursor": cursor} if cursor else {}
+        self.mirror = AsyncMock(side_effect=lambda db, row, prev, who, created: {
+            "action": "updated" if prev is not None else "created", "lead_id": 1000 + len(self.state),
+            "changed": [], "values": wabot_leads.bot_values(row)})
 
+    async def lead_state(self, db, ids):
+        return {i: dict(self.state[i]) for i in ids if i in self.state}
 
-class Harness:
-    """Stands in for the CRM database: import records plus mocked CRM writes."""
+    async def save(self, db, bot_id, crm_id, values, stamp):
+        self.state[bot_id] = {"crm_lead_id": crm_id, "bot_values": values}
 
-    def __init__(self):
-        self.store = {}
-        self.lead_sync = AsyncMock(return_value={"status": "success", "action": "created", "lead_id": 42, "counsellor_matched": True})
-        self.message_sync = AsyncMock(return_value={"status": "success", "lead_id": 42})
+    async def get_meta(self, db, key):
+        return self.meta.get(key)
 
-    async def imported(self, db, session_ids=None):
-        ids = self.store.keys() if session_ids is None else session_ids
-        return {i: dict(self.store[i]) for i in ids if i in self.store}
+    async def set_meta(self, db, key, value):
+        self.meta[key] = value
 
-    async def save(self, db, sid, hid, lid, last):
-        old = self.store.get(sid, {})
-        self.store[sid] = {"bot_handover_id": old.get("bot_handover_id") or hid, "crm_lead_id": lid or old.get("crm_lead_id"),
-                           "last_message_at": max([t for t in (last, old.get("last_message_at")) if t], default=None),
-                           "handover_synced_at": old.get("handover_synced_at") or last}
-
-    def run(self, bot, picked=None, **kwargs):
+    def run(self, bot, **kwargs):
         with patch.object(sync, "configured", return_value=True), \
-                patch.object(sync, "pick_for_group", AsyncMock(return_value=picked)), \
-                patch.object(sync, "imported", self.imported), patch.object(sync, "_save_state", self.save), \
-                patch.object(sync, "_save_run", AsyncMock()), \
-                patch.object(sync.settings, "WABOT_ASSIGN_TO_EMAIL", "samindi@inspire.college"), \
-                patch.object(sync, "sync_whatsapp_bot_lead", self.lead_sync), \
-                patch.object(sync, "add_whatsapp_bot_message", self.message_sync):
+                patch.object(sync, "lead_state", self.lead_state), patch.object(sync, "_save_lead_state", self.save), \
+                patch.object(sync, "_meta", self.get_meta), patch.object(sync, "_set_meta", self.set_meta), \
+                patch.object(sync, "resolve_assignee", AsyncMock(return_value=CHAMATH)), \
+                patch.object(sync, "mirror_lead", self.mirror):
             return run(sync.run_sync(SimpleNamespace(rollback=AsyncMock()), bot=bot, **kwargs))
 
 
-def test_only_pending_handovers_are_imported_and_assigned_to_samindi():
-    bot = FakeBot(tables())
-    h = Harness()
-    result = h.run(bot)
-    assert result["imported"] == 1 and result["skipped"] == 1 and not result["errors"]
-    payload = h.lead_sync.await_args.args[1]
-    assert payload.bot_session_id == S1 and payload.full_name == "Sinhalen dannako"
-    assert payload.counsellor.email == "samindi@inspire.college"
-    assert payload.handover_reason == "Qualification flow completed"
-    assert [m.message for m in payload.transcript] == ["earlier hi", "hello", "hi there"]
-    assert S2 not in h.store  # the old accepted handover is not backfilled
+def leads_since_yesterday():
+    return [
+        bot_lead("old", "94771111111", "2026-11-10T05:00:00+00:00", "2026-11-13T09:00:00+00:00", name="Before start"),
+        bot_lead("a", "94725175179", "2026-11-13T23:07:00+00:00", name="May I know about this program please"),
+        bot_lead("b", "94714477392", "2026-11-13T17:08:00+00:00", name="nilani", qualification="After A/L"),
+        bot_lead("web", "web_abc123", "2026-11-13T10:00:00+00:00"),
+    ]
 
 
-def test_counsellors_chosen_in_crm_override_the_env_fallback():
-    bot = FakeBot(tables())
-    h = Harness()
-    h.run(bot, picked=SimpleNamespace(user_id=9, name="Kamala", email="kamala@inspire.college"))
-    assert h.lead_sync.await_args.args[1].counsellor.email == "kamala@inspire.college"
+def test_backfill_from_yesterday_imports_every_phone_lead_once_and_assigns_chamath():
+    bot = FakeBot(leads_since_yesterday())
+    crm = Crm()
+    result = crm.run(bot, since=START)
+    assert result["created"] == 2 and result["skipped"] == 1 and not result["errors"]
+    assert {c.args[1]["id"] for c in crm.mirror.await_args_list} == {"a", "b"}  # not "old" (created before start), not web
+    assert all(c.args[3] is CHAMATH for c in crm.mirror.await_args_list)
+    assert crm.meta["leads_cursor"]["since"] == START.isoformat()
+
+    again = crm.run(bot)  # next pass: nothing changed, nothing re-imported
+    assert again["created"] == again["updated"] == 0 and crm.mirror.await_count == 2
 
 
-def test_dry_run_does_not_move_the_turn_pointer():
-    bot = FakeBot(tables())
-    h = Harness()
-    pick = AsyncMock(return_value=None)
-    with patch.object(sync, "pick_for_group", pick), patch.object(sync, "configured", return_value=True), \
-            patch.object(sync, "imported", h.imported), patch.object(sync.settings, "WABOT_ASSIGN_TO_EMAIL", "samindi@inspire.college"):
-        result = run(sync.run_sync(SimpleNamespace(rollback=AsyncMock()), bot=bot, dry_run=True))
-    assert result["would_import"][0]["assign_to"] == "samindi@inspire.college"
-    assert pick.await_args.kwargs["commit_turn"] is False
+def test_more_details_from_the_bot_update_the_same_crm_lead():
+    bot = FakeBot(leads_since_yesterday())
+    crm = Crm()
+    crm.run(bot, since=START)
+    lead = bot.tables["leads"][1]
+    lead.update(name="Kasun Perera", qualification="After O/L", updated_at="2026-11-14T03:00:00+00:00")
+    result = crm.run(bot)
+    assert result["updated"] == 1 and result["created"] == 0
+    call = crm.mirror.await_args
+    assert call.args[1]["id"] == "a" and call.args[2]["full_name"] == "May I know about this program please"
 
 
-def test_second_run_does_not_reimport_and_copies_only_new_messages():
-    bot = FakeBot(tables())
-    h = Harness()
-    h.run(bot)
-    second = h.run(bot)
-    assert second["imported"] == 0 and second["already_imported"] == 1 and h.lead_sync.await_count == 1
-    h.message_sync.assert_not_awaited()
-
-    bot.tables["chat_messages"].append({"session_id": S1, "sender": "user", "message": "When can I start?", "created_at": "2026-11-13T07:00:00+00:00"})
-    # Someone accepts the handover in the bot later: the chat is still followed.
-    bot.tables["handovers"][0]["status"] = "accepted"
-    third = h.run(bot)
-    assert third["messages"] == 1 and h.lead_sync.await_count == 1
-    h.run(bot)
-    assert h.message_sync.await_count == 1
+def test_first_run_without_a_start_point_imports_nothing_old():
+    bot = FakeBot(leads_since_yesterday())
+    crm = Crm()
+    result = crm.run(bot)
+    assert result["created"] == 0 and crm.mirror.await_count == 0
+    assert crm.meta["leads_cursor"]["since"]
 
 
 def test_dry_run_writes_nothing():
-    bot = FakeBot(tables())
-    h = Harness()
-    result = h.run(bot, dry_run=True)
-    assert [r["phone"] for r in result["would_import"]] == ["94755587843"]
-    h.lead_sync.assert_not_awaited()
-    assert h.store == {}
+    bot = FakeBot(leads_since_yesterday())
+    crm = Crm()
+    result = crm.run(bot, since=START, dry_run=True)
+    assert sorted(r["phone"] for r in result["would_import"]) == ["94714477392", "94725175179"]
+    crm.mirror.assert_not_awaited()
+    assert crm.state == {} and "leads_cursor" not in crm.meta
+
+
+def test_failed_lead_is_retried_and_cursor_does_not_skip_it():
+    bot = FakeBot(leads_since_yesterday())
+    crm = Crm()
+    crm.mirror.side_effect = RuntimeError("db down")
+    result = crm.run(bot, since=START)
+    assert result["errors"] and crm.meta["leads_cursor"]["updated_at"] == START.isoformat()
+
+
+def test_field_rule_keeps_counsellor_edits_but_follows_bot_changes():
+    previous = {"full_name": "Ok", "highest_qualification": "After A/L"}
+    current = {"full_name": "Ok", "highest_qualification": "HND (typed by counsellor)", "email": None}
+    values = {"full_name": "Thilak", "highest_qualification": "After O/L", "email": "t@x.test"}
+    assert wabot_leads.plan_updates(current, values, previous) == {"full_name": "Thilak", "email": "t@x.test"}
+    assert wabot_leads.plan_updates({"full_name": "WhatsApp Lead"}, {"full_name": "Nilani"}, None) == {"full_name": "Nilani"}
+    assert wabot_leads.plan_updates({"full_name": "Manual name"}, {"full_name": "Bot name"}, None) == {}
+
+
+def test_bot_values_map_bot_columns_to_crm_columns():
+    values = wabot_leads.bot_values(bot_lead("x", "94714477392", "2026-11-13T17:08:00+00:00", name="nilani",
+                                             qualification="After A/L", pathway="UK/ATHE", field="Business"))
+    assert values["full_name"] == "nilani" and values["highest_qualification"] == "After A/L"
+    assert values["awarding_body"] == "ATHE" and values["faculty"] == "Business" and values["whatsapp"] == "94714477392"
 
 
 def test_bot_client_refuses_every_write():
@@ -204,12 +186,13 @@ def test_bot_router_has_no_write_routes_except_crm_import():
 def test_unreachable_bot_database_is_reported_not_raised():
     def handle(request):
         return httpx.Response(402, json={"message": "exceed_egress_quota"})
+    crm = Crm()
     with patch.object(supabase.settings, "WABOT_SUPABASE_URL", "https://bot.supabase.test"), \
-            patch.object(supabase.settings, "WABOT_SUPABASE_SERVICE_ROLE_KEY", "service-key"):
+            patch.object(supabase.settings, "WABOT_SUPABASE_SERVICE_ROLE_KEY", "service-key"), \
+            patch.object(sync, "_meta", crm.get_meta), patch.object(sync, "_set_meta", crm.set_meta):
         async def go():
             async with supabase.BotDB(httpx.AsyncClient(transport=httpx.MockTransport(handle))) as bot:
-                with patch.object(sync, "_save_run", AsyncMock()):
-                    return await sync.run_sync(SimpleNamespace(rollback=AsyncMock()), bot=bot)
+                return await sync.run_sync(SimpleNamespace(rollback=AsyncMock()), bot=bot)
         result = run(go())
     assert "quota" in result["errors"][0] and "service-key" not in str(result)
 

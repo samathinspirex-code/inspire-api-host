@@ -15,7 +15,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from app.core.database import engine
 
-SQL = REPO_ROOT / "app" / "modules" / "whatsapp_bot" / "sql" / "2026_11_13_wabot_sync.sql"
+SQL_DIR = REPO_ROOT / "app" / "modules" / "whatsapp_bot" / "sql"
+SQL_FILES = ["2026_11_13_wabot_sync.sql", "2026_11_14_wabot_leads.sql"]
 
 
 async def main() -> None:
@@ -23,10 +24,11 @@ async def main() -> None:
     try:
         async with engine.begin() as connection:
             # Drop comment lines before splitting, so a ";" inside a comment can't break a statement.
-            sql = "\n".join(line for line in SQL.read_text(encoding="utf-8").splitlines() if not line.strip().startswith("--"))
-            for statement in [s.strip() for s in sql.split(";")]:
-                if statement:
-                    await connection.execute(text(statement))
+            for name in SQL_FILES:
+                sql = "\n".join(line for line in (SQL_DIR / name).read_text(encoding="utf-8").splitlines() if not line.strip().startswith("--"))
+                for statement in [s.strip() for s in sql.split(";")]:
+                    if statement:
+                        await connection.execute(text(statement))
             removed = (await connection.execute(text(
                 "DELETE FROM user_access_levels WHERE access_level_id IN "
                 "(SELECT access_level_id FROM access_levels WHERE access_key = 'WHATSAPP_BOT')"

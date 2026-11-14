@@ -1,14 +1,19 @@
 [Unit]
-Description=Inspire WhatsApp bot handovers into the CRM
+Description=Inspire WhatsApp bot leads into the CRM (near real time, read-only on the bot)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/inspire-api-host
 EnvironmentFile=/home/ubuntu/inspire-api-host/.env
-ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_wabot_sync.py
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_wabot_sync.py --watch --interval 20
+Restart=always
+RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 UMask=0077
+
+[Install]
+WantedBy=multi-user.target
