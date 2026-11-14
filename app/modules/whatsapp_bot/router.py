@@ -2,7 +2,8 @@
 Running an import (POST /sync): CRM & Admissions only.
 
 Read-only on the bot: every route only reads the bot's database. The one write,
-POST /sync, writes CRM leads (and the CRM's own import record), never the bot.
+POST /sync, writes CRM leads (and the CRM's own record of them), never the bot.
+Leads and pending handovers carry `crm_lead_id` when the bot lead is already in the CRM.
 """
 
 from datetime import date
@@ -18,7 +19,7 @@ from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.schemas import CurrentUser
 from app.modules.whatsapp_bot import service
 from app.modules.whatsapp_bot.supabase import BotDB, BotUnavailable, configured
-from app.modules.whatsapp_bot.sync import imported_by_handover, pick_assignee, run_sync, sync_status
+from app.modules.whatsapp_bot.sync import imported_by_bot_lead, pick_assignee, run_sync, sync_status
 
 
 VIEW_ROLES = {"CRM", "COUNSELLOR"}
@@ -100,11 +101,16 @@ async def leads(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     bot: BotDB = Depends(bot_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    return {"data": await service.list_leads(
+    rows = await service.list_leads(
         bot, status, source, qualification,
         date_from.isoformat() if date_from else None, date_to.isoformat() if date_to else None,
-    )}
+    )
+    done = await imported_by_bot_lead(db, [r["id"] for r in rows])
+    for row in rows:
+        row["crm_lead_id"] = done.get(row["id"])
+    return {"data": rows}
 
 
 @router.get("/counsellors")
@@ -115,11 +121,9 @@ async def counsellors(bot: BotDB = Depends(bot_db)):
 @router.get("/handovers/pending")
 async def pending(bot: BotDB = Depends(bot_db), db: AsyncSession = Depends(get_db)):
     rows = await service.pending_handovers(bot)
-    done = await imported_by_handover(db, [r["id"] for r in rows])
+    done = await imported_by_bot_lead(db, [r["lead_id"] for r in rows if r.get("lead_id")])
     for row in rows:
-        record = done.get(row["id"])
-        row["crm_lead_id"] = record["crm_lead_id"] if record else None
-        row["imported_at"] = record["handover_synced_at"].isoformat() if record and record["handover_synced_at"] else None
+        row["crm_lead_id"] = done.get(row.get("lead_id"))
     return {"data": rows}
 
 
