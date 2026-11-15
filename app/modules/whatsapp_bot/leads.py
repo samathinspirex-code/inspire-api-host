@@ -6,7 +6,7 @@ placeholder name replaced by the real one). A value a counsellor typed in the CR
 is never overwritten.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import text
@@ -63,11 +63,20 @@ def plan_updates(current: dict, values: dict, previous: Optional[dict]) -> dict:
     }
 
 
-def _sl(value: Optional[datetime]) -> Optional[datetime]:
-    """Bot timestamps (UTC, aware) -> naive UTC, as CRM columns store them."""
+SRI_LANKA = timezone(timedelta(hours=5, minutes=30))
+
+
+def sl_wall_clock(value: Optional[datetime]) -> Optional[datetime]:
+    """Aware time -> naive Sri Lanka clock time.
+
+    The CRM stores created_at of leads that have an external_record_id (imports,
+    WhatsApp bot) as Sri Lanka clock time, and the screens show it as such
+    (see CMS-UI api/crmTime.ts). Live leads keep UTC.
+    """
     if value is None:
         return None
-    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return aware.astimezone(SRI_LANKA).replace(tzinfo=None)
 
 
 async def mirror_lead(db: AsyncSession, bot_lead: dict, previous: Optional[dict],
@@ -89,7 +98,7 @@ async def mirror_lead(db: AsyncSession, bot_lead: dict, previous: Optional[dict]
     if action == "created":
         created = await service.create_lead(db, CrmLeadCreate(
             full_name=values.get("full_name") or "WhatsApp Lead",
-            created_at=_sl(created_at),
+            created_at=created_at,  # aware UTC; create_lead reads a naive value as Sri Lanka time
             email=values.get("email"),
             phone=values.get("phone"),
             whatsapp=values.get("whatsapp"),
@@ -104,6 +113,8 @@ async def mirror_lead(db: AsyncSession, bot_lead: dict, previous: Optional[dict]
             external_record_id=external_id,
         ), counsellor_name=BOT_ACTOR, auto_assign=False)
         lead = await db.get(CrmLead, created.lead_id, populate_existing=True)
+        if created_at is not None:
+            lead.created_at = sl_wall_clock(created_at)  # "Added" = when the student first messaged the bot
         if len(phone_key) >= 7:  # create_lead committed; lock again for the rest.
             await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:phone))"), {"phone": phone_key})
         lines = ["WhatsApp bot lead imported"]
@@ -122,6 +133,8 @@ async def mirror_lead(db: AsyncSession, bot_lead: dict, previous: Optional[dict]
         notes = []
         if not lead.external_record_id:
             lead.external_record_id = external_id
+            if lead.created_at is not None:  # live lead (UTC) now counts as imported: keep its "Added" time the same
+                lead.created_at = sl_wall_clock(lead.created_at)
             notes.append(f"Matched an existing lead by phone; WhatsApp bot details are now linked (source kept as {lead.source}).")
         if lead.assigned_counsellor_id is None and assignee:
             _assign(lead, assignee)

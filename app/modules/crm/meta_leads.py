@@ -34,6 +34,15 @@ def _clean(value, limit: int = 255) -> str | None:
     return text_value[:limit] or None
 
 
+def meta_time(value) -> datetime | None:
+    """Meta's created_time ("2026-11-15T07:36:32+0000") as an aware UTC time; None if missing or unreadable."""
+    try:
+        parsed = datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%S%z").astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return min(parsed, datetime.now(timezone.utc))  # create_lead rejects future times; clock skew must not drop a lead
+
+
 def _key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
@@ -156,7 +165,9 @@ async def _bring_in(db: AsyncSession, lead: dict, form_name: str | None) -> str:
         await db.commit()
         return "matched"
     platform = mapped.pop("platform")
-    payload = CrmLeadCreate(**mapped, source=SOURCE, stage="new_lead", priority="medium")
+    # "Added" is when the student submitted the form, not when intake picked it up (matters for backfills).
+    payload = CrmLeadCreate(**mapped, source=SOURCE, stage="new_lead", priority="medium",
+                            created_at=meta_time(lead.get("created_time")))
     try:
         await create_lead(db, payload, counsellor_id=None, counsellor_name=f"Meta Lead Forms ({platform})")
     except IntegrityError:
