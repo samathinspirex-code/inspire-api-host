@@ -7,7 +7,8 @@ After=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/inspire-api-host
-EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+# Settings come from .env in WorkingDirectory (read by the app). Do not add
+# EnvironmentFile: systemd changes values containing special characters.
 ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_connector_sync.py
 NoNewPrivileges=true
 PrivateTmp=true
