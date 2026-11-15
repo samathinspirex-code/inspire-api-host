@@ -7,7 +7,8 @@ After=network-online.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/inspire-api-host
-EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+# Settings come from .env in WorkingDirectory (the app reads it). Do not add EnvironmentFile:
+# systemd reads values with $ or ; differently, and its values override .env.
 ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_wabot_sync.py --watch --interval 20
 Restart=always
 RestartSec=10

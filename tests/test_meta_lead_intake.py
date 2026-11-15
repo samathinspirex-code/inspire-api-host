@@ -147,3 +147,20 @@ def test_real_form_question_names_map_correctly():
 def test_a_non_link_inbox_value_is_not_trusted_as_a_link():
     mapped = meta_leads.map_lead({"id": "9", "field_data": [{"name": "inbox_url", "values": ["javascript:alert(1)"]}]}, None)
     assert "Messenger conversation" not in mapped["notes"] and mapped["platform"] == "Meta"
+
+
+def test_meta_time_reads_the_submission_time_and_never_the_future():
+    from datetime import datetime, timezone
+    assert meta_leads.meta_time("2026-11-10T05:00:00+0000") == datetime(2026, 11, 10, 5, 0, tzinfo=timezone.utc)
+    assert meta_leads.meta_time(None) is None and meta_leads.meta_time("yesterday") is None
+    assert meta_leads.meta_time("2999-01-01T00:00:00+0000") <= datetime.now(timezone.utc)
+
+
+def test_new_lead_is_added_at_the_form_submission_time():
+    from datetime import datetime, timezone
+    db = MagicMock()
+    db.scalar = AsyncMock(return_value=None)
+    with patch.object(meta_leads, "_existing_lead", AsyncMock(return_value=None)), \
+         patch("app.modules.crm.service.create_lead", AsyncMock()) as create:
+        assert run(meta_leads._bring_in(db, lead(), "HND form")) == "created"
+    assert create.await_args.args[1].created_at == datetime(2026, 11, 10, 5, 0, tzinfo=timezone.utc)

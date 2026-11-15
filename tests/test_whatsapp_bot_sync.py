@@ -150,6 +150,14 @@ def test_field_rule_keeps_counsellor_edits_but_follows_bot_changes():
     assert wabot_leads.plan_updates({"full_name": "Manual name"}, {"full_name": "Bot name"}, None) == {}
 
 
+def test_added_time_is_stored_as_sri_lanka_clock_time_like_other_imported_leads():
+    # Bot says 03:40:56 UTC = 09:10:56 in Colombo; imported CRM leads show created_at as Colombo time.
+    bot_time = sync.parse_ts("2026-11-14T03:40:56.771503+00:00")
+    assert wabot_leads.sl_wall_clock(bot_time) == datetime(2026, 11, 14, 9, 10, 56, 771503)
+    # A merged live lead stored in UTC keeps the same displayed time once it counts as imported.
+    assert wabot_leads.sl_wall_clock(datetime(2026, 11, 13, 4, 0)) == datetime(2026, 11, 13, 9, 30)
+
+
 def test_bot_values_map_bot_columns_to_crm_columns():
     values = wabot_leads.bot_values(bot_lead("x", "94714477392", "2026-11-13T17:08:00+00:00", name="nilani",
                                              qualification="After A/L", pathway="UK/ATHE", field="Business"))

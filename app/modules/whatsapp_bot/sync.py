@@ -66,7 +66,10 @@ async def _meta(db: AsyncSession, key: str) -> Optional[dict]:
         return await db.scalar(text("SELECT value FROM wabot_sync_meta WHERE key = :k"), {"k": key})
     except Exception as exc:
         await db.rollback()
-        raise RuntimeError("Run scripts/apply_whatsapp_bot_migration.py first") from exc
+        # Name the real cause: a missing table and a connection problem need different fixes.
+        cause = str(getattr(exc, "orig", None) or exc).splitlines()[0][:200]
+        raise RuntimeError(f"Could not read wabot_sync_meta ({type(exc).__name__}: {cause}). "
+                           "If the table is missing, run scripts/apply_whatsapp_bot_migration.py") from exc
 
 
 async def _set_meta(db: AsyncSession, key: str, value: dict) -> None:
