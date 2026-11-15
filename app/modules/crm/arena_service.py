@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ValidationError
@@ -353,6 +354,23 @@ def _badges(player: dict, extras: dict) -> list[dict]:
     ]
 
 
+async def placeholder_counsellors(db: AsyncSession) -> set[int]:
+    """Paused placeholder accounts that hold former staff's leads (15 Nov 2026 rebuild).
+
+    They use reserved @example.com addresses, so nobody can sign in as them. A real
+    counsellor who is only paused stays on the board. Empty if the table is missing.
+    """
+    try:
+        rows = (await db.execute(text(
+            "SELECT s.user_id FROM crm_counsellor_status s JOIN users u ON u.user_id = s.user_id "
+            "WHERE s.is_active = false AND lower(u.email) LIKE '%@example.com'"
+        ))).scalars().all()
+    except DBAPIError:
+        await db.rollback()
+        return set()
+    return {int(user_id) for user_id in rows}
+
+
 async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int | None, full_detail: bool = False, period_start: datetime | None = None, period_end: datetime | None = None) -> dict:
     """The full Arena. Only someone holding the counsellor role can claim, and only on their own card."""
     snap = await load_snapshot(db, None)
@@ -366,9 +384,12 @@ async def arena(db: AsyncSession, viewer_id: int, can_claim: bool, focus_id: int
     actions = {owner: sum(count for day, count in days.items() if day >= recent_start) for owner, days in active.items()}
     most_leads = max([item["assigned"] for item in totals.values()] + [1])
     most_actions = max(list(actions.values()) + [1])
+    placeholders = await placeholder_counsellors(db)
     board = []
     for person in snap["counsellors"]:
         owner = person["user_id"]
+        if owner in placeholders and owner != focus_id:
+            continue  # Former staff placeholders hold old leads but are not in the competition.
         xp = season_xp_total(season.get(owner, {}))
         streak = arena_streak(set(active.get(owner, {})), today)
         own = totals.get(owner, {})
