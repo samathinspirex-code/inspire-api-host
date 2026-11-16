@@ -40,13 +40,48 @@ def empty(value) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+async def lead_columns(conn) -> tuple[list[str], list[tuple[str, str]]]:
+    columns = [r[0] for r in (await conn.execute(text(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='crm_leads'"))).all()]
+    links = [(t, c) for t, c in LINKS if (await conn.scalar(text("SELECT to_regclass(:t)"), {"t": t}))]
+    return columns, links
+
+
+async def merge_into(conn, keep: dict, others: list[dict], columns: list[str], links: list[tuple[str, str]]) -> None:
+    """Fold `others` into `keep` (rows as dicts): fill empty fields, move links, archive the others, add a note."""
+    others = sorted(others, key=lambda l: l["created_at"])
+    fill = {}
+    for col in columns:
+        if col in NEVER_COPY or not empty(keep.get(col)):
+            continue
+        donor = next((o[col] for o in others if not empty(o.get(col))), None)
+        if donor is not None:
+            fill[col] = donor
+    for key in ("external_record_id", "social_lead_id"):
+        if empty(keep.get(key)):
+            donor = next((o for o in others if not empty(o.get(key))), None)
+            if donor:
+                await conn.execute(text(f"UPDATE crm_leads SET {key} = NULL WHERE lead_id = :id"), {"id": donor["lead_id"]})
+                fill[key] = donor[key]
+    fill["created_at"] = min(l["created_at"] for l in [keep, *others])
+    sets = ", ".join(f'"{c}" = :{c}' for c in fill)
+    await conn.execute(text(f"UPDATE crm_leads SET {sets}, updated_at = now() WHERE lead_id = :lead_id"),
+                       {**fill, "lead_id": keep["lead_id"]})
+    ids = [o["lead_id"] for o in others]
+    for table, col in links:
+        await conn.execute(text(f"UPDATE {table} SET {col} = :keep WHERE {col} = ANY(:ids)"), {"keep": keep["lead_id"], "ids": ids})
+    await conn.execute(text("UPDATE crm_leads SET is_archived = true, updated_at = now() WHERE lead_id = ANY(:ids)"), {"ids": ids})
+    note = "Merged duplicate lead(s) with the same phone: " + "; ".join(
+        f"#{o['lead_id']} ({o['source']}, {o['stage']}, added {o['created_at']:%d %b %Y})" for o in others) + ". They are archived."
+    await conn.execute(text("INSERT INTO crm_activities (lead_id, activity_type, content) VALUES (:id, 'note', :c)"),
+                       {"id": keep["lead_id"], "c": note})
+
+
 async def main(apply: bool) -> None:
     engine.echo = False
     async with engine.connect() as conn:
         groups = (await conn.execute(text(GROUPS))).all()
-        columns = [r[0] for r in (await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='crm_leads'"))).all()]
-        links = [(t, c) for t, c in LINKS if (await conn.scalar(text("SELECT to_regclass(:t)"), {"t": t}))]
+        columns, links = await lead_columns(conn)
     print(f"Phone numbers on more than one open lead: {len(groups)}; leads to archive: {sum(len(g.ids) - 1 for g in groups)}")
     for n, group in enumerate(groups):
         async with engine.begin() as conn:
@@ -62,31 +97,7 @@ async def main(apply: bool) -> None:
                           + ", ".join(f"#{o['lead_id']} ({o['source']}, {o['stage']})" for o in others))
             if not apply:
                 continue
-            fill = {}
-            for col in columns:
-                if col in NEVER_COPY or not empty(keep.get(col)):
-                    continue
-                donor = next((o[col] for o in others if not empty(o.get(col))), None)
-                if donor is not None:
-                    fill[col] = donor
-            for key in ("external_record_id", "social_lead_id"):
-                if empty(keep.get(key)):
-                    donor = next((o for o in others if not empty(o.get(key))), None)
-                    if donor:
-                        await conn.execute(text(f"UPDATE crm_leads SET {key} = NULL WHERE lead_id = :id"), {"id": donor["lead_id"]})
-                        fill[key] = donor[key]
-            fill["created_at"] = min(l["created_at"] for l in leads)
-            sets = ", ".join(f'"{c}" = :{c}' for c in fill)
-            await conn.execute(text(f"UPDATE crm_leads SET {sets}, updated_at = now() WHERE lead_id = :lead_id"),
-                               {**fill, "lead_id": keep["lead_id"]})
-            ids = [o["lead_id"] for o in others]
-            for table, col in links:
-                await conn.execute(text(f"UPDATE {table} SET {col} = :keep WHERE {col} = ANY(:ids)"), {"keep": keep["lead_id"], "ids": ids})
-            await conn.execute(text("UPDATE crm_leads SET is_archived = true, updated_at = now() WHERE lead_id = ANY(:ids)"), {"ids": ids})
-            note = "Merged duplicate lead(s) with the same phone: " + "; ".join(
-                f"#{o['lead_id']} ({o['source']}, {o['stage']}, added {o['created_at']:%d %b %Y})" for o in others) + ". They are archived."
-            await conn.execute(text("INSERT INTO crm_activities (lead_id, activity_type, content) VALUES (:id, 'note', :c)"),
-                               {"id": keep["lead_id"], "c": note})
+            await merge_into(conn, keep, others, columns, links)
     print("Merged." if apply else "Preview only; add --apply to merge.")
     await engine.dispose()
 

@@ -18,7 +18,7 @@ business:
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.crm import service
@@ -110,20 +110,26 @@ async def _lead_by_external(db: AsyncSession, external_id: str) -> Optional[CrmL
     return (await db.execute(select(CrmLead).where(CrmLead.external_record_id == external_id))).scalar_one_or_none()
 
 
+def _same_number(lead, normalized: str) -> bool:
+    """True when the lead's phone or WhatsApp number is this number (imports often keep it only in WhatsApp)."""
+    return any(service._normalized_lead_phone(value) == normalized for value in (lead.phone, lead.whatsapp) if value)
+
+
 async def _lead_by_phone(db: AsyncSession, phone: Optional[str]) -> Optional[CrmLead]:
     normalized = service._normalized_lead_phone(phone)
     if len(normalized) < 7:
         return None
     suffix = normalized[-9:]
+
+    def ends_with(column):
+        return func.right(func.regexp_replace(column, "[^0-9]", "", "g"), len(suffix)) == suffix
+
     candidates = (await db.execute(
         select(CrmLead)
-        .where(func.right(func.regexp_replace(CrmLead.phone, "[^0-9]", "", "g"), len(suffix)) == suffix)
+        .where(or_(ends_with(CrmLead.phone), ends_with(CrmLead.whatsapp)))
         .order_by(CrmLead.is_archived.asc(), CrmLead.lead_id.desc())
     )).scalars().all()
-    for lead in candidates:
-        if service._normalized_lead_phone(lead.phone) == normalized:
-            return lead
-    return None
+    return next((lead for lead in candidates if _same_number(lead, normalized)), None)
 
 
 async def _activity_exists(db: AsyncSession, lead_id: int, prefix: str) -> bool:
