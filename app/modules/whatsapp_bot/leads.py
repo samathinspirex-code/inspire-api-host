@@ -90,6 +90,13 @@ async def mirror_lead(db: AsyncSession, bot_lead: dict, previous: Optional[dict]
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:phone))"), {"phone": phone_key})
 
     lead = await _lead_by_external(db, external_id)
+    if lead is not None and lead.is_archived:
+        # Archived as a duplicate: follow the merge to the lead that was kept.
+        kept = await db.scalar(text(
+            "SELECT s.crm_lead_id FROM wabot_lead_state s JOIN crm_leads l ON l.lead_id = s.crm_lead_id "
+            "WHERE s.bot_lead_id = :id AND l.is_archived = false"), {"id": bot_lead["id"]})
+        if kept is not None:
+            lead = await db.get(CrmLead, kept)
     action = "updated"
     if lead is None:
         lead = await _lead_by_phone(db, bot_lead["phone"])

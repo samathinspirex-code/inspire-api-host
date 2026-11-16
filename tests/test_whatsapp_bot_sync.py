@@ -231,3 +231,28 @@ def test_old_bot_push_routes_are_removed():
     from app.modules.crm import integration_router, public_router
     paths = [r.path for r in integration_router.router.routes] + [r.path for r in public_router.router.routes]
     assert not [p for p in paths if re.search(r"whatsapp", p)]
+
+
+def test_existing_lead_with_the_number_only_in_whatsapp_is_matched_not_duplicated():
+    from app.modules.crm.whatsapp_bot_service import _lead_by_phone, _same_number
+    only_whatsapp = SimpleNamespace(phone=None, whatsapp="077 123 4567")
+    other = SimpleNamespace(phone="+94 71 999 9999", whatsapp=None)
+    assert _same_number(only_whatsapp, "94771234567")
+    assert not _same_number(other, "94771234567")
+    rows = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [other, only_whatsapp]))
+    db = SimpleNamespace(execute=AsyncMock(return_value=rows))
+    assert asyncio.run(_lead_by_phone(db, "+94771234567")) is only_whatsapp
+    assert "whatsapp" in str(db.execute.await_args.args[0]).lower()
+
+
+def test_bot_update_for_a_merged_duplicate_goes_to_the_kept_lead():
+    archived = SimpleNamespace(lead_id=11, is_archived=True, external_record_id="wabot:b1")
+    kept = SimpleNamespace(lead_id=7, is_archived=False, external_record_id="zcrm_1", assigned_counsellor_id=3,
+                           full_name="Asha", email=None, phone="+94771234567", whatsapp="+94771234567")
+    db = SimpleNamespace(execute=AsyncMock(), scalar=AsyncMock(return_value=7), get=AsyncMock(return_value=kept), commit=AsyncMock())
+    bot_lead = {"id": "b1", "phone": "+94771234567", "name": "Asha", "email": "asha@example.org"}
+    with patch.object(wabot_leads, "_lead_by_external", AsyncMock(return_value=archived)), \
+            patch.object(wabot_leads, "_add_bot_activity", AsyncMock()):
+        result = asyncio.run(wabot_leads.mirror_lead(db, bot_lead, None, None, None))
+    assert result["lead_id"] == 7 and result["action"] == "updated"
+    assert kept.email == "asha@example.org"
