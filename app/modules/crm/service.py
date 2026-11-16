@@ -266,6 +266,7 @@ _SUMMARY_ONLY = load_only(
     CrmLead.stage,
     CrmLead.campaign,
     CrmLead.academic_course_id,
+    CrmLead.free_foundation,  # CrmLeadSummary reads it; leaving it out lazy-loads and fails under async
     CrmLead.last_contacted_at,
     CrmLead.last_activity_at,
     CrmLead.followup_count,
