@@ -55,14 +55,22 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# A period counts the leads given to a counsellor in it (assigned date, else created date), like the
+# counsellor report. Imported leads (external_record_id) store Sri Lanka clock time; live leads store UTC.
+_IN_PERIOD = (
+    "(CASE WHEN l.external_record_id IS NOT NULL THEN coalesce(l.assigned_at, l.created_at) - interval '5 hours 30 minutes' "
+    "ELSE coalesce(l.assigned_at, l.created_at) END)"
+)
+
+
 def _where(counsellor_id: int | None, start: datetime | None = None, end: datetime | None = None) -> str:
     clause = "l.is_archived = false"
     if counsellor_id is not None:
         clause += " AND l.assigned_counsellor_id = :cid"
     if start is not None:
-        clause += " AND l.created_at >= :period_start"
+        clause += f" AND {_IN_PERIOD} >= :period_start"
     if end is not None:
-        clause += " AND l.created_at < :period_end"
+        clause += f" AND {_IN_PERIOD} < :period_end"
     return clause
 
 
