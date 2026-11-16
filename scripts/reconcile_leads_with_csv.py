@@ -110,6 +110,10 @@ async def main(path: Path, apply: bool) -> None:
             "l.assigned_counsellor_id, l.enrolled_at FROM crm_leads l WHERE l.is_archived = false "
             "AND NOT EXISTS (SELECT 1 FROM crm_activities a WHERE a.lead_id = l.lead_id AND a.activity_type = 'stage_change') "
             "ORDER BY l.lead_id"))).mappings().all()
+        # The counsellors' November sheets are newer than the 1 Nov CSV: leads they updated keep the sheet values.
+        from_sheets = set((await conn.execute(text(
+            "SELECT DISTINCT lead_id FROM crm_activities WHERE content LIKE 'Counsellor sheet %' "
+            "OR content LIKE 'Source set to Meta Ads: the counsellor sheet%'"))).scalars())
         people = (await conn.execute(text(
             "SELECT DISTINCT u.user_id, u.full_name FROM users u JOIN user_access_levels ual ON ual.user_id = u.user_id "
             "JOIN access_levels al ON al.access_level_id = ual.access_level_id "
@@ -127,6 +131,9 @@ async def main(path: Path, apply: bool) -> None:
             counts["not in the CSV"] += 1
             continue
         counts["matched"] += 1
+        if lead["lead_id"] in from_sheets:
+            counts["updated later by a counsellor sheet (kept)"] += 1
+            continue
         change = {}
         if row["source"] and lead["source"] != row["source"]:
             change["source"] = row["source"]

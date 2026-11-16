@@ -52,7 +52,8 @@ COURSES = {  # normalized sheet text -> academic_courses.course_id
 }
 FREE_FOUNDATION = {"free f", "free foundation"}
 CAMPAIGNS = {"shenoli video": "Shenoli video"}
-SOURCES = {"whatsapp": "whatsapp", "chat bot": "whatsapp", "lead form": "meta_lead_forms", "direct calls": "hotline_call"}
+# In these sheets "WhatsApp" means a Meta ad that opened WhatsApp (your rule, 16 Nov 2026); "Chat Bot" is the bot.
+SOURCES = {"whatsapp": "meta", "chat bot": "whatsapp", "lead form": "meta_lead_forms", "direct calls": "hotline_call"}
 COUNSELLORS = {"shaniya": 7, "samindi": 4, "thiruni": 8, "jennifer": 5, "eugine": 25}
 LABELS = {"new_lead": "New Lead", "uncontactable": "Uncontactable", "contacted": "Contacted", "follow_up": "Follow Up",
           "not_interested": "Not Interested"}
