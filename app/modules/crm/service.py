@@ -1335,7 +1335,7 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, d
     active = and_(CrmLead.is_archived == False, CrmLead.assigned_counsellor_id == counsellor_id) if counsellor_id is not None else CrmLead.is_archived == False  # noqa: E712
     if date_from is not None and date_to is not None:
         start, end, _, _ = _period_bounds(date_from, date_to)
-        active = and_(active, _assigned_in_period(start, end))  # same cohort as the counsellor report
+        active = and_(active, CrmLead.created_at >= start, CrmLead.created_at < end)
 
     totals = (
         await db.execute(
@@ -1458,20 +1458,6 @@ def _period_bounds(
     start = datetime.combine(start_d, time.min)
     end = datetime.combine(end_d + timedelta(days=1), time.min)
     return start, end, start_d, end_d
-
-
-def _assigned_in_period(start: datetime, end: datetime):
-    """Leads given to a counsellor in [start, end) Sri Lanka days: assigned date, else created date.
-
-    Imported leads (external_record_id) store Sri Lanka clock time; live leads store UTC.
-    The counsellor report and the dashboard both use this, so their totals match.
-    """
-    when = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
-    offset = timedelta(hours=5, minutes=30)
-    return or_(
-        and_(CrmLead.external_record_id.is_not(None), when >= start, when < end),
-        and_(CrmLead.external_record_id.is_(None), when >= start - offset, when < end - offset),
-    )
 
 
 def _conversion_rate(enrolled: int, new_leads: int) -> float:
@@ -1626,7 +1612,10 @@ async def get_counsellor_report(
 
     assignment_time = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
     colombo_offset = timedelta(hours=5, minutes=30)
-    in_created = _assigned_in_period(start, end)
+    in_created = or_(
+        and_(CrmLead.external_record_id.is_not(None), assignment_time >= start, assignment_time < end),
+        and_(CrmLead.external_record_id.is_(None), assignment_time >= start - colombo_offset, assignment_time < end - colombo_offset),
+    )
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     local_now = datetime.now(COLOMBO)
