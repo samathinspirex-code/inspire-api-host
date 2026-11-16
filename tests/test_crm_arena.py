@@ -367,3 +367,13 @@ def test_only_arena_admins_can_reset_and_must_type_reset():
             reset.assert_awaited_once_with(db, 1)
 
     asyncio.run(run())
+
+
+def test_placeholder_counsellors_are_read_and_a_missing_table_means_none():
+    from sqlalchemy.exc import DBAPIError
+    rows = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [9, 10]))
+    db = SimpleNamespace(execute=AsyncMock(return_value=rows), rollback=AsyncMock())
+    assert asyncio.run(arena_service.placeholder_counsellors(db)) == {9, 10}
+    db = SimpleNamespace(execute=AsyncMock(side_effect=DBAPIError("x", {}, Exception("missing"))), rollback=AsyncMock())
+    assert asyncio.run(arena_service.placeholder_counsellors(db)) == set()
+    db.rollback.assert_awaited()
