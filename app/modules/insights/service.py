@@ -118,7 +118,7 @@ async def dashboard(db: AsyncSession, counsellor_id: int | None) -> dict:
         ],
         "secondary": [
             {"label": "Programme enquiries", "value": snap["total"], "sub": f"{snap['active_month']} active this month"},
-            {"label": "Awaiting counselling", "value": snap["in_progress"], "sub": "open counselling stages"},
+            {"label": "Work in progress", "value": snap["in_progress"], "sub": "open stages before a decision"},
             {"label": "Conversion", "value": f"{snap['conversion']}%", "sub": f"{snap['enrolled']} confirmed enrolments"},
         ],
         "pending": [
@@ -197,7 +197,7 @@ async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int,
             if 0 <= offset < 14:
                 enrol_spark[offset] = int(count)
         sparks = [sum(values[index] for values in stage_sparks.values()) for index in range(14)]
-    queue_spark = [sum(stage_sparks.get(key, [0] * 14)[index] for key in ("contacted", "follow_up", "potential", "future_prospect")) for index in range(14)] if stage_sparks else sparks
+    queue_spark = [sum(stage_sparks.get(key, [0] * 14)[index] for key in ("uncontactable", "contacted", "follow_up", "potential", "future_prospect")) for index in range(14)] if stage_sparks else sparks
     return {
         "generated_at": snap["generated_at"],
         "mission": {
@@ -221,7 +221,7 @@ async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int,
         "kpis": [
             {"label": "CRM leads", "value": snap["total"], "detail": f"{snap['awaiting']} awaiting first contact", "tone": "brand", "spark": sparks, "source": "cms"},
             {"label": "New enquiries", "value": snap["total"] if start is not None else snap["active_month"], "detail": "selected period" if start is not None else "last 30 days", "tone": "con", "spark": [point["count"] for point in snap["daily"][-30:]], "source": "cms"},
-            {"label": "Counselling queue", "value": snap["in_progress"], "detail": "open stages before a decision", "tone": "ca", "spark": queue_spark, "source": "cms"},
+            {"label": "Work in progress", "value": snap["in_progress"], "detail": "open stages before a decision", "tone": "ca", "spark": queue_spark, "source": "cms"},
             {"label": "Enrolments", "value": snap["enrolled"], "detail": f"{snap['conversion']}% of selected leads", "tone": "enr", "spark": enrol_spark if db is not None else sparks, "source": "cms"},
         ],
         "stages": snap["stages"],
