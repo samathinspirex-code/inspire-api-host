@@ -59,6 +59,9 @@ STAGE_ALIASES = {
     "lost to competitor": "lost_deferred",
 }
 
+# Zoho "Lead Source" names -> CMS source keys (CMS-UI api/crmSources.ts).
+CMS_SOURCE_KEYS = {"whatsapp_bot": "whatsapp", "meta_ads": "meta", "tik_tok": "tiktok_lead_forms", "tiktok": "tiktok_lead_forms"}
+
 FIELDS = (
     "full_name",
     "email",
@@ -200,6 +203,7 @@ def record_from_getter(
     reason = clean(get("Reason For Loss"))
     source_raw = clean(get("Lead Source")) or "zoho_import"
     source = re.sub(r"[^a-z0-9]+", "_", source_raw.lower()).strip("_")
+    source = CMS_SOURCE_KEYS.get(source, source)  # the keys the CMS source filter uses
     priority = "high" if stage in {"offer_sent", "enrolled"} else "medium"
     return {
         "_row": row_number,
