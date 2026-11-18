@@ -66,3 +66,18 @@ class ScheduledDurationRuleTests(unittest.TestCase):
     def test_40_of_60_minutes_is_absent(self):
         base = self.scheduled_class_seconds(self.start, self.end)
         self.assertEqual(_attendance_status(40 * 60, base, 75), "absent")
+
+
+class EarlyClassOccurrenceTests(unittest.TestCase):
+    """A class the host ran days before its scheduled time is still its own occurrence."""
+
+    def test_participants_from_an_early_run_are_accepted_when_the_host_joined_then(self):
+        from app.modules.lms.zoom_service import _participants_near_class
+
+        scheduled = datetime(2026, 11, 20, 1, 30, tzinfo=timezone.utc)
+        ran = datetime(2026, 11, 18, 13, 0, tzinfo=timezone.utc)
+        context = {"start_time": scheduled, "end_time": scheduled + timedelta(hours=1)}
+        participants = [{"join_time": (ran + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")}]
+
+        self.assertFalse(_participants_near_class(participants, context))
+        self.assertTrue(_participants_near_class(participants, {**context, "host_joined_at": ran}))

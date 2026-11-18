@@ -340,6 +340,25 @@ async def _claim_host(db: AsyncSession, lecturer_id: int, start: datetime, end: 
     return host
 
 
+DEFAULT_CLASS_TIMEZONE="Asia/Colombo"
+
+
+def _zoom_local_start(start: datetime, tz: str) -> str:
+    """Zoom reads start_time as wall-clock time in the `timezone` field sent with it.
+
+    Sending a UTC instant ("...+00:00") alongside timezone=Asia/Colombo made Zoom
+    schedule classes 5h30 early, so convert to the meeting's zone and drop the offset.
+    """
+    if start.tzinfo is None:
+        start=start.replace(tzinfo=timezone.utc)
+    try:
+        import zoneinfo
+        start=start.astimezone(zoneinfo.ZoneInfo(tz))
+    except Exception:
+        start=start.astimezone(timezone.utc)
+    return start.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 async def create_zoom_meeting(db: AsyncSession, payload, lecturer_id: int, class_, course) -> dict:
     zoom_settings=(await db.execute(text("SELECT * FROM lms_zoom_settings WHERE settings_id=1"))).mappings().first()
     if not zoom_settings or not zoom_settings["enabled"]: raise ValidationError("Zoom integration is not enabled")
@@ -349,8 +368,9 @@ async def create_zoom_meeting(db: AsyncSession, payload, lecturer_id: int, class
     passcode=options.passcode or secrets.token_hex(4)
     # The integration setting is the default; the schedule form may override it.
     recording=options.auto_recording or ("cloud" if zoom_settings["automatic_recording"] else "none")
-    body={"topic":payload.title.strip(),"type":2,"start_time":payload.start_time.isoformat(),"duration":duration,"password":passcode,
-      "timezone":payload.timezone or class_.timezone,"agenda":(payload.description or "").strip(),
+    tz=payload.timezone or class_.timezone or DEFAULT_CLASS_TIMEZONE
+    body={"topic":payload.title.strip(),"type":2,"start_time":_zoom_local_start(payload.start_time,tz),"duration":duration,"password":passcode,
+      "timezone":tz,"agenda":(payload.description or "").strip(),
       # No registration: students are already authenticated LMS users and join
       # through the embedded Meeting SDK, so Zoom must not demand a registrant.
       "settings":{"approval_type":2,"waiting_room":options.waiting_room,
@@ -389,18 +409,8 @@ async def update_zoom_meeting(db: AsyncSession, meeting, payload) -> dict:
         )
     token=await _access_token(db,dict(host))
     options=payload.options
-    tz = payload.timezone or meeting.timezone or "UTC"
-    # Zoom's PATCH /meetings/{id} expects start_time in the meeting's own timezone
-    # as a naive local datetime (no UTC offset).  Python's isoformat() emits "+00:00"
-    # for aware datetimes which Zoom rejects with a 400 error.  Convert to the
-    # target timezone first, then strip the offset so Zoom reads it relative to
-    # the timezone field we send alongside it.
-    try:
-        import zoneinfo
-        local_start = payload.start_time.astimezone(zoneinfo.ZoneInfo(tz))
-    except Exception:
-        local_start = payload.start_time
-    start_str = local_start.strftime("%Y-%m-%dT%H:%M:%S")
+    tz = payload.timezone or meeting.timezone or DEFAULT_CLASS_TIMEZONE
+    start_str = _zoom_local_start(payload.start_time, tz)
     body={"topic":payload.title.strip(),"start_time":start_str,
       "duration":max(1,round((payload.end_time-payload.start_time).total_seconds()/60)),
       "timezone":tz,"agenda":(payload.description or "").strip(),
@@ -721,12 +731,28 @@ async def _past_participants(context, token: str) -> list[dict]:
     raise ValidationError(f"{message} Zoom said — {detail}" if detail else message)
 
 
+def _class_windows(context: dict) -> list[tuple[datetime, datetime]]:
+    """Times a real occurrence of this class can fall in.
+
+    Around the scheduled time, and - for a class the host ran early or late - around
+    when the connected host account joined it (recorded from Zoom's webhook).
+    """
+    windows=[(context["start_time"]-timedelta(hours=2),context["end_time"]+timedelta(hours=2))]
+    host_joined=context.get("host_joined_at")
+    if isinstance(host_joined,datetime):
+        length=context["end_time"]-context["start_time"]
+        windows.append((host_joined-timedelta(hours=2),host_joined+length+timedelta(hours=2)))
+    return windows
+
+
+def _in_class_window(value: datetime|None, context: dict) -> bool:
+    return value is not None and any(start <= value <= end for start,end in _class_windows(context))
+
+
 def _participants_near_class(participants: list[dict], context: dict) -> bool:
     """Never turn an old or empty Zoom occurrence into absent students."""
-    start=context["start_time"]-timedelta(hours=2)
-    end=context["end_time"]+timedelta(hours=2)
     joined=[_dt(p.get("join_time")) for p in participants]
-    return bool(joined) and all(join and start <= join <= end for join in joined)
+    return bool(joined) and all(_in_class_window(join,context) for join in joined)
 
 
 def _host_attended(participants: list[dict], host: dict) -> bool:
@@ -925,7 +951,7 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
     nearby=[]
     for instance in instances:
         started=_dt(instance["started"])
-        if started and context["start_time"]-timedelta(hours=2) <= started <= context["end_time"]+timedelta(hours=2):
+        if started and _in_class_window(started,context):
             nearby.append((started,instance["uuid"]))
     if nearby:
         context["attendance_instance_refs"]=list(dict.fromkeys(ref for _,ref in sorted(nearby)))
