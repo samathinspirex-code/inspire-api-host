@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import APIError, NotFoundError, ValidationError
-from app.core.public_form_email import form_email_html, offer_letter_email_content, send_public_form_email
+from app.core.public_form_email import OFFER_FROM_NAME, form_email_html, offer_letter_email_content, send_public_form_email
 
 logger = logging.getLogger(__name__)
 COLOMBO = ZoneInfo("Asia/Colombo")
@@ -128,6 +128,7 @@ async def send_offer_letter(db: AsyncSession, lead_id: int, *, sent_by: int | No
         result = await send_public_form_email(
             subject, text_body, html_body, reply_to=settings.PUBLIC_FORM_FROM_EMAIL,
             custom_id=f"offer-{offer_id}", to_email=lead["email"].strip(), to_name=full_name,
+            from_name=OFFER_FROM_NAME,
         )
         sent, error = result.sent, result.error
     except Exception:

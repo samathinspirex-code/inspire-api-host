@@ -47,7 +47,7 @@ def form_email_html(title: str, intro: str, rows: list[tuple[str, str | None]], 
     )
 
 
-async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form", attachments: list[dict[str, str]] | None = None, to_email: str | None = None, to_name: str = "Inspire Admissions", cc_email: str | None = None) -> FormEmailResult:
+async def send_public_form_email(subject: str, text_body: str, html_body: str, reply_to: str | None = None, custom_id: str = "website-form", attachments: list[dict[str, str]] | None = None, to_email: str | None = None, to_name: str = "Inspire Admissions", cc_email: str | None = None, from_name: str | None = None) -> FormEmailResult:
     if not settings.MAILJET_API_KEY.strip() or not settings.MAILJET_SECRET_KEY.strip() or not settings.PUBLIC_FORM_FROM_EMAIL.strip():
         return FormEmailResult(False, "Mailjet is not configured")
     recipient = (to_email or settings.PUBLIC_FORM_RECIPIENT_EMAIL).strip()
@@ -57,7 +57,7 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
     if not recipients:
         return FormEmailResult(False, "No valid form recipients configured")
     message = {
-        "From": {"Email": settings.PUBLIC_FORM_FROM_EMAIL, "Name": settings.PUBLIC_FORM_FROM_NAME},
+        "From": {"Email": settings.PUBLIC_FORM_FROM_EMAIL, "Name": from_name or settings.PUBLIC_FORM_FROM_NAME},
         "To": recipients,
         "Subject": subject,
         "TextPart": text_body,
@@ -130,6 +130,7 @@ def confirmation_email_content(name: str, *, admission: bool) -> tuple[str, str,
     return f"{title} | Inspire College", text, markup
 
 
+OFFER_FROM_NAME = "Inspire College Admissions"
 OFFER_EMAIL_SUBJECT = "Congratulations! Your Conditional Offer of Admission – Inspire College"
 OFFER_REQUIRED_DOCUMENTS = (
     # (document type, name, note, required to fulfil the offer)
@@ -192,40 +193,43 @@ def offer_letter_email_content(first_name: str, full_name: str, programme: str, 
         "Warm regards,", "Admissions Team", "Inspire College", "071 199 3331",
     ])
 
+    # Plain personal-letter HTML: no banner, coloured boxes, images or buttons.
+    # Heavily designed layouts are what Gmail files under Promotions.
     e = html.escape
-    heading = 'style="margin:28px 0 10px;font-size:14px;letter-spacing:1.5px;color:#3f007c"'
-    detail_rows = "".join(
-        f'<tr><td style="padding:6px 0;color:#5c5266;width:140px">{e(label)}</td><td style="padding:6px 0;font-weight:bold">{e(value)}</td></tr>'
-        for label, value in details
-    )
+
+    def para(value: str) -> str:
+        return f"<p>{e(value)}</p>"
+
+    def heading(value: str) -> str:
+        return f"<p><b>{e(value)}</b></p>"
+
+    lines = [
+        para(f"Dear {first_name},"),
+        para(f"Congratulations, {first_name}!"),
+        para("We are pleased to offer you a Conditional Offer of Admission to study at Inspire College."),
+        heading("Your offer details"),
+        "<p>" + "<br>".join(f"{e(label)}: {e(value)}" for label, value in details) + "</p>",
+        para(_OFFER_INTRO),
+        heading("Your next steps"),
+        para(next_steps),
+    ]
     if all_required_in:
-        documents_html = (
-            f'<h2 {heading}>DOCUMENTS</h2>'
-            f'<div style="padding:14px 18px;border-left:4px solid #7b3ec8;background:#f6f0fb">{e(_OFFER_DOCUMENTS_RECEIVED)}</div>'
-        )
+        lines += [heading("Documents"), para(_OFFER_DOCUMENTS_RECEIVED)]
     else:
-        bullets = "".join(f'<li style="margin-bottom:6px"><strong>{e(name)}</strong> – {e(note)}</li>' for name, note in outstanding)
-        documents_html = (
-            f'<h2 {heading}>REQUIRED DOCUMENTS &amp; SUBMISSION</h2>'
-            '<p>To fulfil the conditions of your offer and proceed with admission, please submit the following documents:</p>'
-            f'<ul style="padding-left:20px;margin:0 0 20px">{bullets}</ul>'
-            + (f'<p style="color:#5c5266">{e(already)}</p>' if already else "")
-            + '<p style="margin:24px 0 8px"><strong>Submit Your Documents:</strong></p>'
-            f'<p style="margin:0 0 8px"><a href="{e(link)}" style="display:inline-block;padding:12px 24px;background-color:#3f007c;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold">Submit your documents</a></p>'
-            f'<p style="margin:0 0 20px;font-size:12px;color:#766d7d;word-break:break-all">{e(link)}</p>'
-        )
-    body = (
-        '<h1 style="margin:0 0 24px;font-size:26px;line-height:1.3">Congratulations! Your Conditional Offer of Admission</h1>'
-        f'<p>Dear {e(first_name)},</p><p><strong>Congratulations, {e(first_name)}!</strong></p>'
-        '<p>We are pleased to offer you a Conditional Offer of Admission to study at Inspire College.</p>'
-        f'<h2 {heading}>YOUR OFFER DETAILS</h2>'
-        f'<div style="padding:16px 20px;border-left:4px solid #7b3ec8;background:#f6f0fb"><table role="presentation" style="width:100%;border-spacing:0">{detail_rows}</table></div>'
-        f'<p style="margin-top:20px">{e(_OFFER_INTRO)}</p>'
-        f'<h2 {heading}>YOUR NEXT STEPS</h2><p>{e(next_steps)}</p>'
-        + documents_html
-        + f'<p style="margin-top:20px"><strong>Offer Valid Until:</strong> {e(expiry)}</p>'
-        + "".join(f"<p>{e(paragraph)}</p>" for paragraph in _OFFER_CLOSING)
-        + '<p style="margin-bottom:0">Warm regards,<br><strong>Admissions Team</strong><br>Inspire College<br>071 199 3331</p>'
+        lines += [
+            heading("Required documents & submission"),
+            para("To fulfil the conditions of your offer and proceed with admission, please submit the following documents:"),
+            "<ul>" + "".join(f"<li>{e(name)} – {e(note)}</li>" for name, note in outstanding) + "</ul>",
+        ]
+        if already:
+            lines.append(para(already))
+        lines.append(f'<p>Submit your documents: <a href="{e(link)}">{e(link)}</a></p>')
+    lines.append(f"<p>Offer valid until: {e(expiry)}</p>")
+    lines += [para(paragraph) for paragraph in _OFFER_CLOSING]
+    lines.append("<p>Warm regards,<br>Admissions Team<br>Inspire College<br>071 199 3331</p>")
+    markup = (
+        '<!doctype html><html><body><div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#222">'
+        + "".join(lines)
+        + "</div></body></html>"
     )
-    markup = branded_email(body, "This offer remains conditional until all admission requirements have been satisfied and verified by Inspire College.")
     return OFFER_EMAIL_SUBJECT, text, markup
