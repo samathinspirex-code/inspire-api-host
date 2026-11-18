@@ -159,6 +159,16 @@ class Settings(BaseSettings):
     MEDIA_UPLOAD_EXPIRE_SECONDS: int = 900
     LIBREOFFICE_PATH: str = ""
 
+    # Database backup to S3 (scripts/run_db_backup_s3.py). The media bucket is
+    # served publicly through CloudFront, so the dump is always encrypted with
+    # DB_BACKUP_ENCRYPTION_KEY before upload. Keep a copy of the key offline:
+    # without it the backup cannot be restored.
+    DB_BACKUP_ENCRYPTION_KEY: str = ""
+    DB_BACKUP_S3_KEY: str = "backups/inspire-db-latest.dump.enc"
+    DB_BACKUP_MIN_INTERVAL_HOURS: int = 36
+    PG_DUMP_PATH: str = "pg_dump"
+    PG_RESTORE_PATH: str = "pg_restore"
+
     # Vimeo is intentionally server-only.  Never expose this token to the LMS browser.
     VIMEO_ACCESS_TOKEN: str = ""
     VIMEO_ROOT_FOLDER: str = "INSPIRE COLLEGE"
