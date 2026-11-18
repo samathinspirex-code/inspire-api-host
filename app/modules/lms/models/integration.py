@@ -23,7 +23,7 @@ class GoogleIntegrationSettings(Base):
     calendar_sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     attendance_sync_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     attendance_threshold_percentage: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, default=50
+        SmallInteger, nullable=False, default=75
     )
     default_access_type: Mapped[str] = mapped_column(String(20), nullable=False, default="restricted")
     updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"))

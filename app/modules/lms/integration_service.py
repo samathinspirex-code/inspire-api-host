@@ -96,7 +96,7 @@ def _to_item(item) -> GoogleIntegrationItem:
         calendar_sync_enabled=item.calendar_sync_enabled if item else True,
         attendance_sync_enabled=item.attendance_sync_enabled if item else True,
         attendance_threshold_percentage=(
-            item.attendance_threshold_percentage if item else 50
+            item.attendance_threshold_percentage if item else 75
         ),
         default_access_type=item.default_access_type if item else "restricted",
         oauth_configured=oauth_configured,

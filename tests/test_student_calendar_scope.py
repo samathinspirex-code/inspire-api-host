@@ -98,13 +98,17 @@ class StudentCalendarScopeTests(unittest.IsolatedAsyncioTestCase):
                              status=status, provider="google", join_uri="https://meet.example/test",
                              calendar_sync_status="disabled")
 
-    async def test_student_sees_only_upcoming_meetings_for_current_classes(self):
+    async def test_student_sees_upcoming_and_recently_completed_meetings_for_current_classes(self):
         session = LocalSession(self.engine)
         self.addCleanup(session.session.close)
 
         rows = await MeetingRepository(session).list_for_user(20, "STUDENT")
+        ids = [row[0].meeting_id for row in rows]
 
-        self.assertEqual([row[0].meeting_id for row in rows], [7, 1])
+        # Upcoming classes first, then the completed class (so students can open its
+        # attendance). Cancelled, other-course and past-but-never-held classes stay out.
+        self.assertEqual(sorted(ids[:2]), [1, 7])
+        self.assertEqual(ids[2:], [3])
 
 
 if __name__ == "__main__":

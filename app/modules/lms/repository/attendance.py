@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, case, cast, func, literal, or_, select
+from sqlalchemy import Date, and_, case, cast, column, func, literal, or_, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -21,6 +21,8 @@ from app.modules.lms.models import (
 
 StudentUser = aliased(User, name="attendance_student")
 LecturerUser = aliased(User, name="attendance_lecturer")
+
+MEETING_AUDIENCE = table("lms_meeting_audience_classes", column("meeting_id"), column("class_id"))
 
 
 class AttendanceRepository:
@@ -184,22 +186,43 @@ class AttendanceRepository:
         return record
 
     async def list_student_attendance(self, student_user_id: int):
+        student_class = aliased(LmsClass)
+        student_classes = (
+            select(ClassStudent.class_id)
+            .join(student_class, student_class.class_id == ClassStudent.class_id)
+            .join(
+                CourseEnrollment,
+                and_(
+                    CourseEnrollment.course_id == student_class.course_id,
+                    CourseEnrollment.student_user_id == student_user_id,
+                ),
+            )
+            .where(
+                ClassStudent.student_user_id == student_user_id,
+                CourseEnrollment.status == "enrolled",
+                student_class.status != "cancelled",
+            )
+        )
         stmt = (
             select(AttendanceRecord, AttendanceSession, OnlineMeeting, LmsClass, LmsCourse)
             .join(AttendanceSession, AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id)
             .join(OnlineMeeting, OnlineMeeting.meeting_id == AttendanceSession.meeting_id)
             .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
             .join(LmsCourse, LmsCourse.course_id == LmsClass.course_id)
-            .join(ClassStudent, ClassStudent.class_id == LmsClass.class_id)
-            .join(
-                CourseEnrollment,
-                CourseEnrollment.course_id == LmsCourse.course_id,
-            )
             .where(
                 AttendanceRecord.student_user_id == student_user_id,
-                ClassStudent.student_user_id == student_user_id,
-                CourseEnrollment.student_user_id == student_user_id,
-                CourseEnrollment.status == "enrolled",
+                # The session is stored against the meeting's primary class, but a
+                # live class can be shared with other classes. The student must
+                # belong (with an active enrolment) to the primary class or to one
+                # of the meeting's audience classes.
+                or_(
+                    AttendanceSession.class_id.in_(student_classes),
+                    AttendanceSession.meeting_id.in_(
+                        select(MEETING_AUDIENCE.c.meeting_id).where(
+                            MEETING_AUDIENCE.c.class_id.in_(student_classes)
+                        )
+                    ),
+                ),
                 LmsClass.status != "cancelled",
                 LmsCourse.status != "archived",
                 AttendanceSession.sync_status == "synced",

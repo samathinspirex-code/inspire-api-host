@@ -117,7 +117,7 @@ async def get_settings(db: AsyncSession) -> dict:
     return {
         "enabled": bool(row and row["enabled"]), "active_provider": row["active_provider"] if row else "google",
         "attendance_sync_enabled": bool(row is None or row["attendance_sync_enabled"]),
-        "attendance_threshold_percentage": row["attendance_threshold_percentage"] if row else 50,
+        "attendance_threshold_percentage": row["attendance_threshold_percentage"] if row else 75,
         "automatic_recording": bool(row is None or row["automatic_recording"]),
         "oauth_configured": _configured(),
         "sdk_configured": bool(settings.ZOOM_MEETING_SDK_KEY and settings.ZOOM_MEETING_SDK_SECRET),
@@ -130,7 +130,7 @@ async def update_settings(db: AsyncSession, payload: dict, user_id: int) -> dict
     enabled = bool(payload.get("enabled", False))
     if enabled and not _configured():
         raise ValidationError("Add the Zoom OAuth and token-encryption credentials to the API environment first")
-    threshold = max(1, min(100, int(payload.get("attendance_threshold_percentage", 50))))
+    threshold = max(1, min(100, int(payload.get("attendance_threshold_percentage", 75))))
     provider = payload.get("active_provider", "zoom" if enabled else "google")
     if provider not in {"google", "zoom"}:
         raise ValidationError("Invalid active meeting provider")
@@ -985,7 +985,8 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
       VALUES(:m,:c,:ref,:start,:end,:threshold,'synced',CAST(:unmatched AS jsonb),:by,now()) ON CONFLICT(meeting_id) DO UPDATE SET provider_reference=EXCLUDED.provider_reference,
       actual_start_time=EXCLUDED.actual_start_time,actual_end_time=EXCLUDED.actual_end_time,threshold_percentage=EXCLUDED.threshold_percentage,sync_status='synced',sync_error=NULL,unmatched_participants=EXCLUDED.unmatched_participants,synced_by=EXCLUDED.synced_by,synced_at=now() RETURNING attendance_session_id"""),
       {"m":meeting_id,"c":context["class_id"],"ref":context["provider_meeting_uuid"],"start":actual_start,"end":actual_end,"threshold":context["attendance_threshold_percentage"],"unmatched":json.dumps(unmatched),"by":synced_by})
-    from app.modules.lms.attendance_service import _attendance_status, _merge_duration
+    from app.modules.lms.attendance_service import _attendance_status, _merge_duration, scheduled_class_seconds
+    class_seconds=scheduled_class_seconds(context["start_time"],context["end_time"],window)
     for student in roster:
         entries=buckets[student["user_id"]]
         # Do not mark a student absent for a class that ended before they were
@@ -998,8 +999,10 @@ async def sync_attendance(db: AsyncSession, meeting_id: int, synced_by: int) -> 
         # summing durations so overlapping sessions are not counted twice.
         intervals=[(_dt(p.get("join_time")),_dt(p.get("leave_time")) or actual_end) for p in entries if p.get("join_time")]
         seconds,first_join,last_leave=_merge_duration(intervals,actual_start,actual_end)
-        percentage=min(100,round(seconds*100/window,2))
-        status=_attendance_status(seconds,window,context["attendance_threshold_percentage"])
+        # Percentage and present/absent are judged against the scheduled class
+        # length (e.g. 7:00-8:00 = 60 min), not the actual Zoom window.
+        percentage=min(100,round(seconds*100/class_seconds,2))
+        status=_attendance_status(seconds,class_seconds,context["attendance_threshold_percentage"])
         await db.execute(text("""INSERT INTO lms_attendance_records(attendance_session_id,student_user_id,status,attended_seconds,attendance_percentage,first_join_time,last_leave_time,google_participant_name,source)
           VALUES(:session,:student,:status,:seconds,:percentage,:first,:last,LEFT(CAST(:name AS TEXT),255),'zoom') ON CONFLICT(attendance_session_id,student_user_id) DO UPDATE SET status=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.status ELSE EXCLUDED.status END,
           attended_seconds=EXCLUDED.attended_seconds,attendance_percentage=EXCLUDED.attendance_percentage,first_join_time=EXCLUDED.first_join_time,last_leave_time=EXCLUDED.last_leave_time,google_participant_name=EXCLUDED.google_participant_name,source=CASE WHEN lms_attendance_records.source='manual_override' THEN lms_attendance_records.source ELSE 'zoom' END"""),

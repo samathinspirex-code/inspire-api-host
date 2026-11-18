@@ -277,14 +277,16 @@ async def get_dashboard(
         )
         .join(AttendanceSession, AttendanceSession.attendance_session_id == AttendanceRecord.attendance_session_id)
         .join(LmsClass, LmsClass.class_id == AttendanceSession.class_id)
-        .where(LmsClass.course_id.in_(course_ids))
+        .where(AttendanceSession.sync_status == "synced")
     )
     if is_student:
-        attendance_stmt = attendance_stmt.where(
-            AttendanceRecord.student_user_id == user_id,
-            AttendanceSession.class_id.in_(scoped_class_ids or [-1]),
-        )
-    elif role == "LECTURER":
+        # A student's own records, including live classes shared with their class
+        # whose session is stored against another (primary) class. Matches the
+        # student's Attendance page.
+        attendance_stmt = attendance_stmt.where(AttendanceRecord.student_user_id == user_id)
+    else:
+        attendance_stmt = attendance_stmt.where(LmsClass.course_id.in_(course_ids))
+    if role == "LECTURER" and not is_student:
         attendance_stmt = attendance_stmt.where(
             AttendanceSession.class_id.in_(scoped_class_ids or [-1])
         )
@@ -528,7 +530,7 @@ async def get_dashboard(
         ) or 0)
         metrics = [
             AnalyticsMetric(key="progress", label="Overall progress", value=overall_progress or 0, display_value=_display_percent(overall_progress), hint="Across required course materials", tone="purple"),
-            AnalyticsMetric(key="attendance", label="Attendance", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_attendance_all} recorded classes", tone="green"),
+            AnalyticsMetric(key="attendance", label="Attendance", value=attendance_rate or 0, display_value=_display_percent(attendance_rate), hint=f"{total_present_all} of {total_attendance_all} classes attended", tone="green"),
             AnalyticsMetric(key="grades", label="Grade average", value=grade_average or 0, display_value=_display_percent(grade_average), hint=f"{len(all_grades)} released results", tone="blue"),
             AnalyticsMetric(key="upcoming", label="Coming up", value=assignments_due + upcoming_classes, display_value=str(assignments_due + upcoming_classes), hint=f"{assignments_due} deadlines · {upcoming_classes} classes", tone="amber"),
         ]

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, case, column, func, or_, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -227,8 +227,15 @@ class MeetingRepository:
                 ),
                 LmsClass.status != "cancelled",
                 LmsCourse.status != "archived",
-                OnlineMeeting.status == "scheduled",
-                OnlineMeeting.end_time >= now,
+                # Upcoming / in-progress classes, plus classes held in the last
+                # 60 days so students can see completed classes and their attendance.
+                or_(
+                    and_(OnlineMeeting.status == "scheduled", OnlineMeeting.end_time >= now),
+                    and_(
+                        OnlineMeeting.status == "completed",
+                        OnlineMeeting.start_time >= now - timedelta(days=60),
+                    ),
+                ),
             )
         # Next scheduled class first. A meeting already marked completed stays with
         # the held classes even if its scheduled end time has not passed yet.

@@ -61,6 +61,15 @@ def _merge_duration(
     return seconds, merged[0][0], merged[-1][1]
 
 
+def scheduled_class_seconds(start: datetime | None, end: datetime | None, fallback: int = 1) -> int:
+    """Scheduled class length in seconds (end - start); the fallback is used when the schedule is unusable."""
+    if start is not None and end is not None:
+        seconds = int((end - start).total_seconds())
+        if seconds > 0:
+            return seconds
+    return max(1, int(fallback or 1))
+
+
 def _attendance_status(attended_seconds: int, window_seconds: int, threshold: int) -> str:
     required_seconds = math.ceil(max(1, window_seconds) * threshold / 100)
     return "present" if attended_seconds >= required_seconds else "absent"
@@ -184,8 +193,6 @@ async def sync_meeting_attendance(
         raise ValidationError("Cancelled live classes do not have attendance")
     if meeting.status != "completed":
         raise ValidationError("End the Zoom meeting for everyone before importing attendance")
-    if meeting.end_time > datetime.now(timezone.utc):
-        raise ValidationError("Attendance can be imported after the scheduled end time")
     if meeting.provider != "zoom":
         raise ValidationError(
             "This live class was created with a retired meeting provider, so attendance cannot be imported"
@@ -258,6 +265,8 @@ async def list_my_attendance(db: AsyncSession, student_user_id: int) -> StudentA
             status=record.status,
             attended_seconds=record.attended_seconds,
             attendance_percentage=round(record.attendance_percentage, 2),
+            scheduled_seconds=scheduled_class_seconds(meeting.start_time, meeting.end_time),
+            threshold_percentage=_session.threshold_percentage,
             source=record.source,
         )
         for record, _session, meeting, class_, course in rows
