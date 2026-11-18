@@ -40,7 +40,7 @@ def test_offer_email_has_details_bullets_link_and_expiry():
     assert "Nimal &lt;Perera&gt;" in markup and "<Perera>" not in markup
     assert markup.count("<li") == 3 and "NIC or Passport" in markup and "Academic Transcript" in markup
     assert 'href="https://site/offer-documents/abc"' in markup and "071 199 3331" in markup
-    assert "background:#3f007c" in markup  # branded student layout
+    assert "background" not in markup and "<table" not in markup and "<img" not in markup  # plain letter, so Gmail keeps it in Primary
     assert text.count("We are pleased to offer you") == 1
 
 
@@ -73,6 +73,7 @@ def test_send_offer_emails_the_student_and_never_changes_stage():
         assert asyncio.run(offer_service.send_offer_letter(db, 4, sent_by=9, sent_by_name="Counsellor")) == {"ok": True}
     kwargs = send.await_args.kwargs
     assert kwargs["to_email"] == "ann@example.com" and kwargs["custom_id"] == "offer-77"
+    assert kwargs["from_name"] == "Inspire College Admissions"
     subject, _text, markup = send.await_args.args
     assert subject.startswith("Congratulations!") and "HND in Business" in markup and "/offer-documents/" in markup
     sql = " ".join(str(call.args[0]) for call in db.execute.await_args_list)
