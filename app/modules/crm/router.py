@@ -489,6 +489,28 @@ async def add_activity(
     )
 
 
+@router.get("/leads/{lead_id}/offer-letter")
+async def get_offer_letter(lead_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> dict:
+    await _check_lead_access(db, lead_id, current_user)
+    from app.modules.crm import offer_service
+    return await offer_service.offer_summary(db, lead_id)
+
+
+@router.post("/leads/{lead_id}/offer-letter")
+async def send_offer_letter(lead_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> dict:
+    await _check_lead_access(db, lead_id, current_user)
+    from app.modules.crm import offer_service
+    actor_name = await service._actor_name(db, current_user.user_id, current_user.email)
+    return await offer_service.send_offer_letter(db, lead_id, sent_by=current_user.user_id, sent_by_name=actor_name)
+
+
+@router.get("/leads/{lead_id}/documents/{document_id}/url")
+async def lead_document_url(lead_id: int, document_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = Depends(require_crm_staff)) -> dict:
+    await _check_lead_access(db, lead_id, current_user)
+    from app.modules.crm import offer_service
+    return await offer_service.lead_document_url(db, lead_id, document_id)
+
+
 @router.post("/leads/{lead_id}/enrollment-email", response_model=CrmLeadOut)
 async def retry_enrollment_email(
     lead_id: int,

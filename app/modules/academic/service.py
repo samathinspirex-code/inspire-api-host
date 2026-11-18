@@ -50,17 +50,22 @@ def _rows(result) -> list[dict[str, Any]]:
 
 
 async def _store_admission_document(payload, submission_id: str) -> str:
+    return await store_private_document(payload, f"admissions/results/{submission_id}")
+
+
+async def store_private_document(payload, key_prefix: str, *, label: str = "result document") -> str:
+    """Store a base64 PDF/JPG/PNG (max 10 MB) privately in S3 and return its key."""
     if not settings.MEDIA_BUCKET:
-        raise ValidationError("Result document storage is not configured. Continue without a document or contact admissions.")
+        raise ValidationError(f"The {label} storage is not configured. Please contact admissions.")
     try:
         content = base64.b64decode(payload.data_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValidationError("The result document could not be read") from exc
+        raise ValidationError(f"The {label} could not be read") from exc
     if len(content) != payload.size_bytes or len(content) > 10_485_760:
-        raise ValidationError("The result document size is invalid")
+        raise ValidationError(f"The {label} size is invalid")
     extension = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png"}[payload.content_type]
-    safe_stem = re.sub(r"[^a-z0-9]+", "-", Path(payload.filename).stem.lower()).strip("-")[:70] or "results"
-    key = f"admissions/results/{submission_id}/{uuid4().hex}-{safe_stem}{extension}"
+    safe_stem = re.sub(r"[^a-z0-9]+", "-", Path(payload.filename).stem.lower()).strip("-")[:70] or "document"
+    key = f"{key_prefix}/{uuid4().hex}-{safe_stem}{extension}"
     try:
         await asyncio.to_thread(
             media_service._client().put_object,
@@ -71,7 +76,7 @@ async def _store_admission_document(payload, submission_id: str) -> str:
             ServerSideEncryption="AES256",
         )
     except Exception as exc:
-        raise ValidationError("The result document could not be stored securely. Continue without it or try again.") from exc
+        raise ValidationError(f"The {label} could not be stored securely. Please try again.") from exc
     return key
 
 
@@ -304,7 +309,22 @@ async def create_admission_lead(db: AsyncSession, payload: AdmissionApplicationC
     )
     if not email_result.sent:
         logger.warning("Admission lead %s was saved but its notification email failed: %s", lead_id, email_result.error)
-    await _send_visitor_confirmation(payload.full_name.strip(), str(payload.email), admission=True, reference=f"admission-{submission_id}")
+    # The student receives their Conditional Offer (with the document upload link)
+    # instead of the old "application received" confirmation.
+    try:
+        from app.modules.crm.offer_service import record_existing_document, send_offer_letter
+        if document_key:
+            # The form's result upload is their Highest Qualification, so the offer won't ask for it again.
+            await record_existing_document(
+                db, new_crm_lead["lead_id"], "qualification", document_key,
+                re.sub(r"[\r\n]", "", document.filename.replace("\\", "/").split("/")[-1]),
+                document.content_type, document.size_bytes,
+            )
+        await send_offer_letter(db, new_crm_lead["lead_id"], origin="website_admission")
+    except Exception:
+        # A saved application must never become a failed form.
+        logger.exception("Offer letter for admission %s failed unexpectedly", submission_id)
+        await db.rollback()
     return {"lead_id": lead_id, "status": "new_lead", "message": "Your application was received. An advisor will contact you within one business day."}
 
 
@@ -1242,9 +1262,12 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
             raise ValidationError("Link this Course page to the academic catalogue before creating a class")
         if payload.academic_course_id is None:
             # A reusable template may intentionally create a programme-level
-            # Common class with no exact catalogue course or study-mode link.
+            # Common class with no exact catalogue course link. It still runs
+            # as a Full-time or Part-time intake, so the study mode is kept.
+            if payload.study_mode is None:
+                raise ValidationError("Select a study mode")
             target_course_id = None
-            study_mode = None
+            study_mode = payload.study_mode
         else:
             if payload.study_mode is None:
                 raise ValidationError("Select a study mode")
