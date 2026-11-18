@@ -8,18 +8,31 @@ here writes to the bot. Rows are returned as the bot stores them.
 import csv
 import io
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 from app.core.errors import NotFoundError, ValidationError
 from app.modules.whatsapp_bot.supabase import BotDB, in_list
 
 SESSION_STATUSES = {"active", "handed_over", "closed"}
+SRI_LANKA = timezone(timedelta(hours=5, minutes=30))
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def sl_day_start(day: date) -> str:
+    """Start of a Sri Lanka calendar day as a UTC timestamp the bot's PostgREST understands.
+
+    The bot stores UTC; the CRM counts leads by Sri Lanka day, so the screens must too.
+    """
+    return datetime.combine(day, time.min, SRI_LANKA).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sl_today() -> date:
+    return datetime.now(SRI_LANKA).date()
 
 
 def check_id(value: str, label: str = "id") -> str:
@@ -29,7 +42,7 @@ def check_id(value: str, label: str = "id") -> str:
 
 
 async def dashboard(bot: BotDB) -> dict:
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = sl_day_start(sl_today())
     stats = {
         "total_leads": await bot.count("leads"),
         "leads_today": await bot.count("leads", {"created_at": f"gte.{today}"}),
@@ -116,9 +129,9 @@ async def list_leads(bot: BotDB, status: Optional[str] = None, source: Optional[
         params["qualification"] = f'eq.{qualification}'
     created = []
     if date_from:
-        created.append(f"created_at.gte.{date_from}")
+        created.append(f"created_at.gte.{sl_day_start(date.fromisoformat(date_from))}")
     if date_to:
-        created.append(f"created_at.lte.{date_to}T23:59:59")
+        created.append(f"created_at.lt.{sl_day_start(date.fromisoformat(date_to) + timedelta(days=1))}")
     if created:
         params["and"] = "(" + ",".join(created) + ")"
     return await bot.select("leads", params)
