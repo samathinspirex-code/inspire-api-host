@@ -33,6 +33,47 @@ def _searchable_phone(column: Any) -> Any:
     )
 
 
+COLOMBO_OFFSET = timedelta(hours=5, minutes=30)
+
+
+def _local_window(column: Any, start: Optional[datetime], end: Optional[datetime]) -> Any:
+    """A Sri Lanka calendar window on a lead timestamp.
+
+    Imported workbook timestamps are Sri Lanka wall-clock values;
+    CRM-created timestamps are UTC values in the same naive column.
+    """
+    imported = [CrmLead.external_record_id.is_not(None)]
+    live = [CrmLead.external_record_id.is_(None)]
+    if start:
+        imported.append(column >= start)
+        live.append(column >= start - COLOMBO_OFFSET)
+    if end:
+        imported.append(column < end)
+        live.append(column < end - COLOMBO_OFFSET)
+    return or_(and_(*imported), and_(*live))
+
+
+def period_condition(start: Optional[datetime], end: Optional[datetime], include_old: bool = False) -> Any:
+    """Leads that belong to a Sri Lanka calendar window.
+
+    By default a lead belongs to the window it was created in. With include_old,
+    an older lead also belongs when a counsellor worked it (logged an activity)
+    or it was assigned in the window. This is one condition on lead rows, so a
+    lead that was created and also worked in the window still counts once.
+    """
+    created = _local_window(CrmLead.created_at, start, end)
+    if not include_old:
+        return created
+    assigned = _local_window(CrmLead.assigned_at, start, end)
+    activity = [CrmActivity.lead_id == CrmLead.lead_id, CrmActivity.counsellor_id.is_not(None)]
+    if start:
+        activity.append(CrmActivity.created_at >= start - COLOMBO_OFFSET)
+    if end:
+        activity.append(CrmActivity.created_at < end - COLOMBO_OFFSET)
+    worked = select(CrmActivity.activity_id).where(*activity).exists()
+    return or_(created, assigned, worked)
+
+
 class CrmLeadRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -97,18 +138,7 @@ class CrmLeadRepository:
                 matches.append(_searchable_phone(CrmLead.phone).like(f"%{phone_digits}%"))
             filters.append(or_(*matches))
         if created_from or created_to:
-            # Imported workbook timestamps are Sri Lanka wall-clock values;
-            # CRM-created timestamps are UTC values in the same naive column.
-            colombo_offset = timedelta(hours=5, minutes=30)
-            imported = [CrmLead.external_record_id.is_not(None)]
-            live = [CrmLead.external_record_id.is_(None)]
-            if created_from:
-                imported.append(CrmLead.created_at >= created_from)
-                live.append(CrmLead.created_at >= created_from - colombo_offset)
-            if created_to:
-                imported.append(CrmLead.created_at < created_to)
-                live.append(CrmLead.created_at < created_to - colombo_offset)
-            filters.append(or_(and_(*imported), and_(*live)))
+            filters.append(period_condition(created_from, created_to, bool(extra.get("include_old"))))
         extra = extra or {}
         if extra.get("priority") in ("high", "medium", "low"):
             filters.append(CrmLead.priority == extra["priority"])
@@ -251,11 +281,12 @@ class CrmLeadRepository:
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
         priority: Optional[str] = None,
+        include_old: bool = False,
     ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
         """Stage totals plus a short card preview. Each stage is limited on its own so the board does not sort every lead column."""
         filters = self._build_filters(
             None, None, counsellor_id, None, False, awarding_body, programme, unassigned,
-            created_from, created_to, {"priority": priority},
+            created_from, created_to, {"priority": priority, "include_old": include_old},
         )
         counts: dict[str, int] = {stage: 0 for stage in stages}
         display_stage = case((CrmLead.stage.in_(LEGACY_NOT_INTERESTED_STAGES), "not_interested"), else_=CrmLead.stage)
@@ -332,11 +363,12 @@ class CrmLeadRepository:
         unassigned: bool = False,
         created_from: Optional[datetime] = None,
         created_to: Optional[datetime] = None,
+        include_old: bool = False,
     ) -> list[dict[str, Any]]:
         """Just what the lead score needs, for every lead the board's filters match."""
         filters = self._build_filters(
             None, None, counsellor_id, None, False, awarding_body, programme, unassigned,
-            created_from, created_to,
+            created_from, created_to, {"include_old": include_old},
         )
         display_stage = case((CrmLead.stage.in_(LEGACY_NOT_INTERESTED_STAGES), "not_interested"), else_=CrmLead.stage)
         rows = await self.db.execute(

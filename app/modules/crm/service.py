@@ -20,7 +20,7 @@ from app.modules.crm.models.lead import CrmLead
 from app.modules.crm.models.activity import CrmActivity
 from app.modules.crm.models.counsellor_status import CrmCounsellorStatus
 from app.modules.crm.models.assignment_settings import CrmAssignmentSettings
-from app.modules.crm.repository import CrmActivityRepository, CrmLeadRepository
+from app.modules.crm.repository import CrmActivityRepository, CrmLeadRepository, period_condition
 from app.modules.insights.scoring import auto_priority, hours_since, next_action, score_lead, win_probability
 from app.modules.crm.schemas import (
     CALL_OUTCOME_LABELS,
@@ -1279,13 +1279,15 @@ async def get_pipeline(
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
     priority: Optional[str] = None,
+    include_old: bool = False,
 ) -> CrmPipelineResponse:
     await _ensure_awarding_body_column(db)
     await _ensure_lead_indexes()
     limit = max(1, min(preview_per_stage, PIPELINE_PREVIEW_MAX))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     previews, counts = await CrmLeadRepository(db).pipeline_snapshot(
-        PIPELINE_STAGES, limit, counsellor_id, awarding_body, programme, unassigned, created_from, created_to, priority
+        PIPELINE_STAGES, limit, counsellor_id, awarding_body, programme, unassigned, created_from, created_to, priority,
+        include_old=include_old,
     )
     return CrmPipelineResponse(
         stages=[
@@ -1310,12 +1312,13 @@ async def get_priority_queue(
     unassigned: bool = False,
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
+    include_old: bool = False,
 ) -> CrmPriorityQueueResponse:
     await _ensure_awarding_body_column(db)
     repo = CrmLeadRepository(db)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     open_stages = [stage for stage in PIPELINE_STAGES if stage not in ("enrolled", "not_interested")]
-    rows = await repo.pipeline_scoring_rows(open_stages, counsellor_id, awarding_body, programme, unassigned, created_from, created_to)
+    rows = await repo.pipeline_scoring_rows(open_stages, counsellor_id, awarding_body, programme, unassigned, created_from, created_to, include_old=include_old)
     top = [row["lead_id"] for row in rank_priority_rows(rows, now)]
     cards = {card["lead_id"]: card for card in await repo.pipeline_cards(top)}
     leads = [
@@ -1326,7 +1329,7 @@ async def get_priority_queue(
     return CrmPriorityQueueResponse(leads=leads, open_leads=len(rows), expected_enrolments=round(expected, 1))
 
 
-async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, date_from: Optional[date] = None, date_to: Optional[date] = None) -> CrmDashboardResponse:
+async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, date_from: Optional[date] = None, date_to: Optional[date] = None, include_old: bool = False) -> CrmDashboardResponse:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     thirty_days_ago = now - timedelta(days=30)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1335,7 +1338,9 @@ async def get_dashboard(db: AsyncSession, counsellor_id: Optional[int] = None, d
     active = and_(CrmLead.is_archived == False, CrmLead.assigned_counsellor_id == counsellor_id) if counsellor_id is not None else CrmLead.is_archived == False  # noqa: E712
     if date_from is not None and date_to is not None:
         start, end, _, _ = _period_bounds(date_from, date_to)
-        active = and_(active, CrmLead.created_at >= start, CrmLead.created_at < end)
+        created_in_period = and_(CrmLead.created_at >= start, CrmLead.created_at < end)
+        # With old leads on, every lead counted without the tick is still counted, once.
+        active = and_(active, or_(created_in_period, period_condition(start, end, True)) if include_old else created_in_period)
 
     totals = (
         await db.execute(
@@ -1580,6 +1585,7 @@ async def get_counsellor_report(
     all_time: bool = False,
     stage: Optional[str] = None,
     source: Optional[str] = None,
+    include_old: bool = False,
 ) -> CrmCounsellorReportResponse:
     if all_time:
         start, end = datetime(1900, 1, 1), datetime(9999, 12, 31)
@@ -1616,6 +1622,9 @@ async def get_counsellor_report(
         and_(CrmLead.external_record_id.is_not(None), assignment_time >= start, assignment_time < end),
         and_(CrmLead.external_record_id.is_(None), assignment_time >= start - colombo_offset, assignment_time < end - colombo_offset),
     )
+    if include_old and not all_time:
+        # Older leads worked or assigned in the period join the cohort; each lead row still counts once.
+        in_created = or_(in_created, period_condition(start, end, True))
     in_updated = and_(CrmLead.updated_at >= start, CrmLead.updated_at < end)
     in_follow = and_(CrmLead.followup_date >= start, CrmLead.followup_date < end)
     local_now = datetime.now(COLOMBO)

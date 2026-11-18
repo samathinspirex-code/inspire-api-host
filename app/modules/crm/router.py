@@ -170,6 +170,7 @@ async def list_leads(
     followup_to: Optional[date] = Query(None),
     days_since_contact: Optional[int] = Query(None, ge=0),
     followup_state: Optional[str] = Query(None),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmLeadListResponse:
@@ -179,7 +180,7 @@ async def list_leads(
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
     extra = {"city": city, "country": country, "campaign": campaign, "intake": intake, "free_foundation": free_foundation, "priority": priority, "sort": sort,
              "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes,
-             "days_since_contact": days_since_contact, "followup_state": followup_state}
+             "days_since_contact": days_since_contact, "followup_state": followup_state, "include_old": include_old}
     for field, start, end in (
         ("updated_at", modified_from, modified_to),
         ("last_contacted_at", contacted_from, contacted_to),
@@ -242,6 +243,7 @@ async def get_pipeline(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     priority: Optional[Literal["high", "medium", "low"]] = Query(None),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmPipelineResponse:
@@ -259,6 +261,7 @@ async def get_pipeline(
         created_from,
         created_to,
         priority,
+        include_old=include_old,
     )
 
 
@@ -270,6 +273,7 @@ async def get_priority_queue(
     unassigned: bool = Query(False),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmPriorityQueueResponse:
@@ -277,7 +281,7 @@ async def get_priority_queue(
         counsellor_id, unassigned = current_user.user_id, False
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
-    return await service.get_priority_queue(db, counsellor_id, awarding_body, programme, unassigned, created_from, created_to)
+    return await service.get_priority_queue(db, counsellor_id, awarding_body, programme, unassigned, created_from, created_to, include_old=include_old)
 
 
 @router.get("/leads/dashboard", response_model=CrmDashboardResponse)
@@ -285,6 +289,7 @@ async def get_dashboard(
     counsellor_id: int | None = Query(None, gt=0),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmDashboardResponse:
@@ -292,7 +297,7 @@ async def get_dashboard(
         from app.core.errors import ValidationError
         raise ValidationError("Choose a valid dashboard date range")
     scoped_id = current_user.user_id if _counsellor_only(current_user) else counsellor_id
-    return await service.get_dashboard(db, scoped_id, date_from, date_to)
+    return await service.get_dashboard(db, scoped_id, date_from, date_to, include_old)
 
 
 @router.get("/leads/followups", response_model=list[CrmLeadSummary])
@@ -322,6 +327,7 @@ async def counsellor_report(
     programme: Optional[str] = Query(None),
     stage: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmCounsellorReportResponse:
@@ -329,7 +335,7 @@ async def counsellor_report(
         # Counsellors may read their own aggregate figures, never another person's.
         counsellor_id = current_user.user_id
     try:
-        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time, stage, source)
+        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time, stage, source, include_old)
     except APIError:
         raise
     except Exception as exc:
@@ -363,6 +369,7 @@ async def export_leads_csv(
     followup_from: Optional[date] = Query(None),
     followup_to: Optional[date] = Query(None),
     format: Optional[str] = Query("template"),
+    include_old: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> StreamingResponse:
@@ -371,7 +378,7 @@ async def export_leads_csv(
     created_from = datetime.combine(date_from, time.min) if date_from else None
     created_to = datetime.combine(date_to + timedelta(days=1), time.min) if date_to else None
     extra = {"priority": priority, "city": city, "intake": intake, "free_foundation": free_foundation, "followup_state": followup_state,
-             "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes}
+             "stages": stages, "sources": sources, "awarding_bodies": awarding_bodies, "programmes": programmes, "include_old": include_old}
     for field, start, end in (
         ("updated_at", modified_from, modified_to),
         ("last_contacted_at", contacted_from, contacted_to),
