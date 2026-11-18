@@ -1,0 +1,14 @@
+[Unit]
+Description=Check every night at 01:30 Sri Lanka time; back up the database every second night
+
+# The script skips the run when the S3 backup is under 36 hours old, so a backup
+# is taken every 2 nights. If a night fails, the next night tries again.
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 Asia/Colombo
+Persistent=true
+RandomizedDelaySec=10min
+Unit=inspire-db-backup.service
+
+[Install]
+WantedBy=timers.target

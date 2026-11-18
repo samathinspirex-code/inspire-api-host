@@ -27,7 +27,7 @@ from app.core.config import settings  # noqa: E402
 from app.core.database import AsyncSessionLocal, engine  # noqa: E402
 from app.modules.cms.media_service import ASSIGNMENT_DOCUMENT_TYPES, PPTX_CONTENT_TYPE, _client, _public_url  # noqa: E402
 
-SKIP_FOLDERS = {"assignment-submissions", "profile-images", "profile-photos", "admissions"}
+SKIP_FOLDERS = {"assignment-submissions", "profile-images", "profile-photos", "admissions", "backups"}
 TYPES = {
     ".mp4": ("video", "video/mp4"), ".webm": ("video", "video/webm"),
     ".jpg": ("image", "image/jpeg"), ".jpeg": ("image", "image/jpeg"), ".png": ("image", "image/png"),
