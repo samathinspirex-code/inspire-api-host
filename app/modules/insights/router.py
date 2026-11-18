@@ -42,9 +42,9 @@ async def get_dashboard(counsellor_id: int | None = None, user: CurrentUser = De
 
 
 @router.get("/command-centre")
-async def get_command(range_days: int = Query(30, alias="range", ge=7, le=90), period: str = "all", start_date: date | None = None, end_date: date | None = None, counsellor_id: int | None = None, user: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
+async def get_command(range_days: int = Query(30, alias="range", ge=7, le=90), period: str = "all", start_date: date | None = None, end_date: date | None = None, counsellor_id: int | None = None, include_old: bool = False, user: CurrentUser = Depends(require_command), db: AsyncSession = Depends(get_db)):
     start, end = period_bounds(period, start_date, end_date)
-    return await service.command_centre(db, _scope(user, counsellor_id), range_days, start, end)
+    return await service.command_centre(db, _scope(user, counsellor_id), range_days, start, end, include_old)
 
 
 class MissionIn(BaseModel):

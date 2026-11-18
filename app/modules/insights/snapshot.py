@@ -55,15 +55,43 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _where(counsellor_id: int | None, start: datetime | None = None, end: datetime | None = None) -> str:
+COLOMBO_OFFSET = timedelta(hours=5, minutes=30)
+
+
+def _window(column: str, start: datetime | None, end: datetime | None, suffix: str = "") -> str:
+    parts = ([f"{column} >= :period_start{suffix}"] if start is not None else []) + ([f"{column} < :period_end{suffix}"] if end is not None else [])
+    return " AND ".join(parts)
+
+
+def _lead_window(column: str, start: datetime | None, end: datetime | None) -> str:
+    """Sri Lanka calendar window on a lead timestamp, matching the CRM screens.
+
+    Leads imported from the old workbooks store Sri Lanka wall-clock times;
+    leads created in the CRM store UTC. :period_start/:period_end are UTC.
+    """
+    return (
+        f"((l.external_record_id IS NOT NULL AND {_window(column, start, end, '_local')}) "
+        f"OR (l.external_record_id IS NULL AND {_window(column, start, end)}))"
+    )
+
+
+def _where(counsellor_id: int | None, start: datetime | None = None, end: datetime | None = None, include_old: bool = False) -> str:
     clause = "l.is_archived = false"
     if counsellor_id is not None:
         clause += " AND l.assigned_counsellor_id = :cid"
-    if start is not None:
-        clause += " AND l.created_at >= :period_start"
-    if end is not None:
-        clause += " AND l.created_at < :period_end"
-    return clause
+    if start is None and end is None:
+        return clause
+    created = _lead_window("l.created_at", start, end)
+    if not include_old:
+        return f"{clause} AND {created}"
+    # Older leads a counsellor worked or was assigned in the window also count.
+    # One condition per lead row, so a lead that matches several ways counts once.
+    assigned = _lead_window("l.assigned_at", start, end)
+    worked = (
+        "EXISTS (SELECT 1 FROM crm_activities ca WHERE ca.lead_id = l.lead_id "
+        f"AND ca.counsellor_id IS NOT NULL AND {_window('ca.created_at', start, end)})"
+    )
+    return f"{clause} AND (({created}) OR ({assigned}) OR {worked})"
 
 
 def _params(counsellor_id: int | None, **extra) -> dict:
@@ -100,25 +128,26 @@ def _streak(days: set, today) -> int:
     return streak
 
 
-async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None) -> dict:
-    key = (counsellor_id, start, end)
+async def load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None, include_old: bool = False) -> dict:
+    include_old = include_old and (start is not None or end is not None)
+    key = (counsellor_id, start, end, include_old)
     lock = _snapshot_locks.setdefault(key, asyncio.Lock())
     async with lock:
         cached = _snapshot_cache.get(key)
         if cached and time.monotonic() - cached[0] < _SNAPSHOT_TTL:
             return cached[1]
         await _ensure_lead_indexes()
-        result = await _load_snapshot(db, counsellor_id, start, end)
+        result = await _load_snapshot(db, counsellor_id, start, end, include_old)
         _snapshot_cache[key] = (time.monotonic(), result)
         return result
 
 
-async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None) -> dict:
+async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None, start: datetime | None = None, end: datetime | None = None, include_old: bool = False) -> dict:
     now = _now()
     since = now - timedelta(days=90)
     daily_since = start or since
     month = now - timedelta(days=30)
-    where = _where(counsellor_id, start, end)
+    where = _where(counsellor_id, start, end, include_old)
     params = _params(
         counsellor_id,
         since=since,
@@ -131,6 +160,8 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None, sta
         week_ago=now - timedelta(days=7),
         period_start=start,
         period_end=end,
+        period_start_local=start + COLOMBO_OFFSET if start is not None else None,
+        period_end_local=end + COLOMBO_OFFSET if end is not None else None,
     )
     pack = (await db.execute(text(f"""
         SELECT
