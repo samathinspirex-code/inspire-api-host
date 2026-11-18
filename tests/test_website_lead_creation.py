@@ -122,12 +122,14 @@ async def _admission_and_main_crm_leads_commit_together():
         patch.object(service, "send_public_form_email", AsyncMock(return_value=SimpleNamespace(sent=False, error="mail unavailable"))) as sender,
         patch("app.modules.crm.service.apply_auto_assignment", new_callable=AsyncMock),
         patch("app.modules.crm.service._ensure_counsellor_status_table", new_callable=AsyncMock),
+        patch("app.modules.crm.offer_service.send_offer_letter", new_callable=AsyncMock) as offer,
     ):
         response = await service.create_admission_lead(db, payload)
 
     assert response["lead_id"] == 101
-    assert sender.await_count == 2
-    assert sender.await_args.kwargs["to_email"] == "student@example.com"
+    # Staff get the application email; the student gets their Conditional Offer instead of a plain confirmation.
+    assert sender.await_count == 1
+    offer.assert_awaited_once_with(db, 202, origin="website_admission")
     db.commit.assert_awaited_once()
     db.rollback.assert_not_awaited()
     statements = [str(call.args[0]) for call in db.execute.await_args_list]

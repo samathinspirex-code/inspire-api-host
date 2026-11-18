@@ -99,25 +99,133 @@ async def send_public_form_email(subject: str, text_body: str, html_body: str, r
         )
 
 
-def confirmation_email_content(name: str, *, admission: bool) -> tuple[str, str, str]:
-    title = "Your application is received" if admission else "Thank you for getting in touch"
-    received = "We have received your admission application." if admission else "We have received your message."
-    next_step = "A counsellor will contact you shortly to discuss your interests, answer your questions and guide you through the next steps."
-    text = f"Hi {name},\n\n{received}\n\n{next_step}\n\nWe look forward to helping you take your next step with Inspire College.\n\nWarm regards,\nThe Inspire College Admissions Team"
-    markup = (
+def branded_email(body_html: str, footer: str) -> str:
+    """The purple Inspire College layout used for emails sent to students."""
+    return (
         '<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f5f3f8;font-family:Arial,sans-serif;color:#1a0840">'
         '<table role="presentation" style="width:100%;max-width:600px;margin:auto;border-spacing:0;background:#fff;border:1px solid #e8dff0;border-radius:16px;overflow:hidden">'
         '<tr><td style="padding:30px 28px;background:#3f007c;color:#fff">'
         '<div style="font-size:24px;font-weight:bold">inspire<span style="font-weight:normal"> college</span></div>'
         '<div style="margin-top:10px;font-size:12px;letter-spacing:2px">YOUR NEXT CHAPTER STARTS HERE</div></td></tr>'
-        '<tr><td style="padding:32px 28px;line-height:1.7">'
+        f'<tr><td style="padding:32px 28px;line-height:1.7">{body_html}</td></tr>'
+        '<tr><td style="padding:20px 28px;border-top:1px solid #e8dff0;font-size:12px;color:#766d7d;line-height:1.6">'
+        f'{html.escape(footer)}</td></tr>'
+        '</table></body></html>'
+    )
+
+
+def confirmation_email_content(name: str, *, admission: bool) -> tuple[str, str, str]:
+    title = "Your application is received" if admission else "Thank you for getting in touch"
+    received = "We have received your admission application." if admission else "We have received your message."
+    next_step = "A counsellor will contact you shortly to discuss your interests, answer your questions and guide you through the next steps."
+    text = f"Hi {name},\n\n{received}\n\n{next_step}\n\nWe look forward to helping you take your next step with Inspire College.\n\nWarm regards,\nThe Inspire College Admissions Team"
+    body = (
         f'<h1 style="margin:0 0 24px;font-size:26px;line-height:1.3">{title}</h1>'
         f'<p>Hi {html.escape(name)},</p><p>{received}</p>'
         f'<div style="padding:20px;margin:24px 0;border-left:4px solid #7b3ec8;background:#f6f0fb"><strong>What happens next?</strong><p style="margin:8px 0 0">{next_step}</p></div>'
         '<p>We look forward to helping you take your next step with Inspire College.</p>'
-        '<p style="margin-bottom:0">Warm regards,<br><strong>The Inspire College Admissions Team</strong></p></td></tr>'
-        '<tr><td style="padding:20px 28px;border-top:1px solid #e8dff0;font-size:12px;color:#766d7d;line-height:1.6">'
-        'This is an automatic confirmation of your website submission. Our team will be in touch shortly.</td></tr>'
-        '</table></body></html>'
+        '<p style="margin-bottom:0">Warm regards,<br><strong>The Inspire College Admissions Team</strong></p>'
     )
+    markup = branded_email(body, "This is an automatic confirmation of your website submission. Our team will be in touch shortly.")
     return f"{title} | Inspire College", text, markup
+
+
+OFFER_EMAIL_SUBJECT = "Congratulations! Your Conditional Offer of Admission – Inspire College"
+OFFER_REQUIRED_DOCUMENTS = (
+    # (document type, name, note, required to fulfil the offer)
+    ("nic_passport", "NIC or Passport", "A clear copy of your National Identity Card or Passport.", True),
+    ("qualification", "Highest Educational Qualification", "Certificate or results sheet.", True),
+    ("transcript", "Academic Transcript", "If applicable.", False),
+)
+_OFFER_INTRO = (
+    "Your application has been successfully received and reviewed based on the information provided in your admission form. "
+    "We are delighted to welcome you to the next stage of your journey with Inspire College."
+)
+_OFFER_NEXT_STEPS = (
+    "To secure your place, please complete the remaining admission requirements, including submission and verification of the "
+    "required supporting documents and completion of the applicable registration/payment requirements."
+)
+_OFFER_NEXT_STEPS_RECEIVED = (
+    "We have received your supporting documents, and our Admissions Team is now verifying them. To secure your place, please "
+    "complete the applicable registration/payment requirements."
+)
+_OFFER_DOCUMENTS_RECEIVED = "Thank you, we have already received your documents. You do not need to submit them again."
+_OFFER_CLOSING = (
+    "Once your documents have been submitted and verified, and the programme entry requirements have been met, our Admissions Team will guide you through the final enrolment process.",
+    "Once all admission conditions have been successfully fulfilled, your admission will be confirmed, and you will receive the relevant enrolment and programme commencement information.",
+    "Please note that this offer remains conditional until all admission requirements have been satisfied and verified by Inspire College.",
+    "We are excited about the opportunity to have you join the Inspire College community and look forward to supporting you throughout your academic journey.",
+    "Once again, congratulations on receiving your Conditional Offer!",
+)
+
+
+def offer_letter_email_content(first_name: str, full_name: str, programme: str, link: str, expiry: str, received: frozenset[str] | set[str] = frozenset()) -> tuple[str, str, str]:
+    """The Conditional Offer of Admission email.
+
+    Documents in `received` (document types already uploaded) are not asked for again.
+    When every required document is in, the upload request is left out entirely.
+    """
+    details = (("Student Name", full_name), ("Programme", programme), ("Study Mode", "Online"), ("Offer Status", "Conditional Offer"))
+    outstanding = [(name, note) for doc_type, name, note, _required in OFFER_REQUIRED_DOCUMENTS if doc_type not in received]
+    received_names = [name for doc_type, name, _note, _required in OFFER_REQUIRED_DOCUMENTS if doc_type in received]
+    all_required_in = all(doc_type in received for doc_type, _name, _note, required in OFFER_REQUIRED_DOCUMENTS if required)
+    next_steps = _OFFER_NEXT_STEPS_RECEIVED if all_required_in else _OFFER_NEXT_STEPS
+    already = f"We have already received: {', '.join(received_names)}." if received_names else ""
+
+    if all_required_in:
+        doc_text = ["DOCUMENTS", "", _OFFER_DOCUMENTS_RECEIVED, ""]
+    else:
+        doc_text = [
+            "REQUIRED DOCUMENTS & SUBMISSION", "",
+            "To fulfil the conditions of your offer and proceed with admission, please submit the following documents:", "",
+            *(f"- {name} – {note}" for name, note in outstanding), "",
+            *([already, ""] if already else []),
+            f"Submit Your Documents: {link}", "",
+        ]
+    text = "\n".join([
+        f"Dear {first_name},", "", f"Congratulations, {first_name}!", "",
+        "We are pleased to offer you a Conditional Offer of Admission to study at Inspire College.", "",
+        "YOUR OFFER DETAILS", "", *(f"{label}: {value}" for label, value in details), "",
+        _OFFER_INTRO, "", "YOUR NEXT STEPS", "", next_steps, "",
+        *doc_text, f"Offer Valid Until: {expiry}", "",
+        *[line for paragraph in _OFFER_CLOSING for line in (paragraph, "")],
+        "Warm regards,", "Admissions Team", "Inspire College", "071 199 3331",
+    ])
+
+    e = html.escape
+    heading = 'style="margin:28px 0 10px;font-size:14px;letter-spacing:1.5px;color:#3f007c"'
+    detail_rows = "".join(
+        f'<tr><td style="padding:6px 0;color:#5c5266;width:140px">{e(label)}</td><td style="padding:6px 0;font-weight:bold">{e(value)}</td></tr>'
+        for label, value in details
+    )
+    if all_required_in:
+        documents_html = (
+            f'<h2 {heading}>DOCUMENTS</h2>'
+            f'<div style="padding:14px 18px;border-left:4px solid #7b3ec8;background:#f6f0fb">{e(_OFFER_DOCUMENTS_RECEIVED)}</div>'
+        )
+    else:
+        bullets = "".join(f'<li style="margin-bottom:6px"><strong>{e(name)}</strong> – {e(note)}</li>' for name, note in outstanding)
+        documents_html = (
+            f'<h2 {heading}>REQUIRED DOCUMENTS &amp; SUBMISSION</h2>'
+            '<p>To fulfil the conditions of your offer and proceed with admission, please submit the following documents:</p>'
+            f'<ul style="padding-left:20px;margin:0 0 20px">{bullets}</ul>'
+            + (f'<p style="color:#5c5266">{e(already)}</p>' if already else "")
+            + '<p style="margin:24px 0 8px"><strong>Submit Your Documents:</strong></p>'
+            f'<p style="margin:0 0 8px"><a href="{e(link)}" style="display:inline-block;padding:12px 24px;background-color:#3f007c;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold">Submit your documents</a></p>'
+            f'<p style="margin:0 0 20px;font-size:12px;color:#766d7d;word-break:break-all">{e(link)}</p>'
+        )
+    body = (
+        '<h1 style="margin:0 0 24px;font-size:26px;line-height:1.3">Congratulations! Your Conditional Offer of Admission</h1>'
+        f'<p>Dear {e(first_name)},</p><p><strong>Congratulations, {e(first_name)}!</strong></p>'
+        '<p>We are pleased to offer you a Conditional Offer of Admission to study at Inspire College.</p>'
+        f'<h2 {heading}>YOUR OFFER DETAILS</h2>'
+        f'<div style="padding:16px 20px;border-left:4px solid #7b3ec8;background:#f6f0fb"><table role="presentation" style="width:100%;border-spacing:0">{detail_rows}</table></div>'
+        f'<p style="margin-top:20px">{e(_OFFER_INTRO)}</p>'
+        f'<h2 {heading}>YOUR NEXT STEPS</h2><p>{e(next_steps)}</p>'
+        + documents_html
+        + f'<p style="margin-top:20px"><strong>Offer Valid Until:</strong> {e(expiry)}</p>'
+        + "".join(f"<p>{e(paragraph)}</p>" for paragraph in _OFFER_CLOSING)
+        + '<p style="margin-bottom:0">Warm regards,<br><strong>Admissions Team</strong><br>Inspire College<br>071 199 3331</p>'
+    )
+    markup = branded_email(body, "This offer remains conditional until all admission requirements have been satisfied and verified by Inspire College.")
+    return OFFER_EMAIL_SUBJECT, text, markup

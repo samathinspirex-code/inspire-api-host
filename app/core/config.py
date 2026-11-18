@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     CONTACT_RECAPTCHA_ALLOWED_HOSTNAMES: str = "inspirecollege.lk,www.inspirecollege.lk"
     CRM_REGISTRATION_FORM_URL: str = "https://docs.google.com/forms/d/1hz96j-mr0xfSK1gGjB8TmD6-XkKY_KCSagSTCeRGwfw/viewform?edit_requested=true"
     CRM_OFFER_LETTER_PATH: str = "app/modules/crm/assets/offer-letter-template.docx"
+    # Public website that hosts the offer document upload page (/offer-documents/<token>).
+    PUBLIC_WEBSITE_URL: str = "https://inspirecollege.lk"
     CRM_INTEGRATION_API_TOKEN: str = ""
 
     # WhatsApp bot (CRM -> WhatsApp Bot). The API reads the bot's own Supabase
