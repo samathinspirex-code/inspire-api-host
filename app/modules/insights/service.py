@@ -142,9 +142,9 @@ def _gap(snap: dict, forecast: dict) -> str:
     return f"That's {forecast['short']} short.{where}"
 
 
-async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int, start: datetime | None = None, end: datetime | None = None) -> dict:
+async def command_centre(db: AsyncSession, counsellor_id: int | None, days: int, start: datetime | None = None, end: datetime | None = None, include_old: bool = False) -> dict:
     base = await load_snapshot(db, counsellor_id)
-    snap = await load_snapshot(db, counsellor_id, start, end) if start or end else base
+    snap = await load_snapshot(db, counsellor_id, start, end, include_old) if start or end else base
     bot = await load_whatsapp(db, counsellor_id)
     goal = await get_mission(db)
     today = datetime.now(ZoneInfo("Asia/Colombo")).date()
