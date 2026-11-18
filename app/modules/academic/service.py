@@ -1242,9 +1242,12 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
             raise ValidationError("Link this Course page to the academic catalogue before creating a class")
         if payload.academic_course_id is None:
             # A reusable template may intentionally create a programme-level
-            # Common class with no exact catalogue course or study-mode link.
+            # Common class with no exact catalogue course link. It still runs
+            # as a Full-time or Part-time intake, so the study mode is kept.
+            if payload.study_mode is None:
+                raise ValidationError("Select a study mode")
             target_course_id = None
-            study_mode = None
+            study_mode = payload.study_mode
         else:
             if payload.study_mode is None:
                 raise ValidationError("Select a study mode")
