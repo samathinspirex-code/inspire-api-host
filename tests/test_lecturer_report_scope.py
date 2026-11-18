@@ -42,6 +42,8 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
             model.__table__.create(self.engine)
         with self.engine.begin() as connection:
             connection.exec_driver_sql("CREATE TABLE academic_schools (school_id INTEGER PRIMARY KEY, name TEXT)")
+            # Created by SQL migration, not a model: classes a live class is shared with.
+            connection.exec_driver_sql("CREATE TABLE lms_meeting_audience_classes (meeting_id BIGINT NOT NULL, class_id BIGINT NOT NULL, PRIMARY KEY (meeting_id, class_id))")
             connection.exec_driver_sql("CREATE TABLE academic_programmes (programme_id INTEGER PRIMARY KEY, name TEXT)")
             connection.exec_driver_sql("CREATE TABLE academic_courses (course_id INTEGER PRIMARY KEY, awarding_body TEXT, school_id INTEGER, programme_id INTEGER, legacy_program_id INTEGER)")
             connection.exec_driver_sql("CREATE TABLE academic_course_study_options (course_id INTEGER, study_mode TEXT, is_enabled BOOLEAN)")
@@ -158,6 +160,15 @@ class LecturerReportScopeTests(unittest.IsolatedAsyncioTestCase):
         withdrawn = await attendance_service.list_my_attendance(self.db(), 20)
         self.assertEqual(withdrawn.data, [])
         self.assertEqual(withdrawn.total_sessions, 0)
+
+    async def test_student_sees_attendance_for_a_live_class_shared_with_their_class(self):
+        # Meeting 2 belongs to Batch 2 (student 20 is not in it) but was also sent to
+        # Batch 1, which the student is in. Its session is stored against Batch 2.
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("INSERT INTO lms_meeting_audience_classes VALUES (2, 2), (2, 1)")
+        response = await attendance_service.list_my_attendance(self.db(), 20)
+        self.assertEqual(sorted(item.attendance_record_id for item in response.data), [1, 2])
+        self.assertTrue(all(item.scheduled_seconds == 3600 for item in response.data))
 
     async def test_lecturer_profile_lists_only_current_teaching_classes(self):
         profile = await profile_service.get_lecturer_directory_profile(self.db(), 10)

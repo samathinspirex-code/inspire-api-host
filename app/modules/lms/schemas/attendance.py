@@ -66,6 +66,8 @@ class StudentAttendanceItem(BaseModel):
     status: AttendanceStatus
     attended_seconds: int
     attendance_percentage: float
+    scheduled_seconds: int = 0
+    threshold_percentage: int = 75
     source: Literal["google_meet", "zoom", "manual_override"]
 
 

@@ -27,7 +27,7 @@ class AttendanceSession(Base):
     provider_reference: Mapped[str | None] = mapped_column(String(255))
     actual_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    threshold_percentage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=50)
+    threshold_percentage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=75)
     sync_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     sync_error: Mapped[str | None] = mapped_column(Text)
     unmatched_participants: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
