@@ -33,6 +33,48 @@ class StudyOptionUpsert(BaseModel):
     is_enabled: bool = True
 
 
+ShortText = Annotated[str, Field(max_length=255)]
+LongText = Annotated[str, Field(max_length=1000)]
+
+
+class PaymentPlanRow(BaseModel):
+    label: ShortText = ""
+    calculation: ShortText = ""
+    amount: ShortText = ""
+    emphasis: bool = False
+
+
+class PaymentPlanCard(BaseModel):
+    eyebrow: ShortText = ""
+    title: ShortText = ""
+    amount: ShortText = ""
+    amount_note: ShortText = ""
+    badge: ShortText = ""
+    featured: bool = False
+    rows: list[PaymentPlanRow] = Field(default_factory=list, max_length=15)
+    footnote: LongText = ""
+
+
+class PaymentPlanFeeRow(BaseModel):
+    label: ShortText = ""
+    amount: ShortText = ""
+    due: ShortText = ""
+
+
+class PaymentPlanExtraFees(BaseModel):
+    title: ShortText = ""
+    note: LongText = ""
+    rows: list[PaymentPlanFeeRow] = Field(default_factory=list, max_length=15)
+
+
+class PaymentPlans(BaseModel):
+    heading: ShortText = ""
+    highlight: ShortText = ""
+    intro: LongText = ""
+    cards: list[PaymentPlanCard] = Field(default_factory=list, max_length=12)
+    extra_fees: PaymentPlanExtraFees = Field(default_factory=PaymentPlanExtraFees)
+
+
 class CourseCreate(BaseModel):
     programme_id: int = Field(..., gt=0)
     school_id: int = Field(..., gt=0)
@@ -51,6 +93,14 @@ class CourseCreate(BaseModel):
     topics: list[CourseContentItem] = Field(default_factory=list, max_length=100)
     outcomes: list[CourseContentItem] = Field(default_factory=list, max_length=100)
     study_options: list[StudyOptionUpsert] = Field(default_factory=list)
+    payment_plans_enabled: bool = False
+    payment_plans: PaymentPlans = Field(default_factory=PaymentPlans)
+
+    @model_validator(mode="after")
+    def payment_plans_need_a_card(self):
+        if self.payment_plans_enabled and not any(card.title.strip() for card in self.payment_plans.cards):
+            raise ValueError("Payment plans are switched on: add at least one card with a title, or switch them off")
+        return self
 
     @model_validator(mode="after")
     def study_options_share_commercial_terms(self):

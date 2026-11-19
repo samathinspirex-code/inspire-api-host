@@ -244,6 +244,8 @@ async def get_program_by_slug(db: AsyncSession, slug: str) -> ProgramDetailWithT
         **ProgramDetail.model_validate(program).model_dump(),
         topics=[TopicEmbedded.model_validate(topic) for topic in topics],
         outcomes=[OutcomeEmbedded.model_validate(outcome) for outcome in outcomes],
+        payment_plans_enabled=bool(getattr(program, "payment_plans_enabled", False)),
+        payment_plans=getattr(program, "payment_plans", None) or None,
     )
 
 
