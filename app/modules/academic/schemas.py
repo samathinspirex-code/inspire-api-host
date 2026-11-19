@@ -51,6 +51,8 @@ class PaymentPlanCard(BaseModel):
     amount_note: ShortText = ""
     badge: ShortText = ""
     featured: bool = False
+    limited_offer: bool = False
+    limited_offer_label: ShortText = ""
     rows: list[PaymentPlanRow] = Field(default_factory=list, max_length=15)
     footnote: LongText = ""
 
