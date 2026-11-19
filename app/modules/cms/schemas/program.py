@@ -60,6 +60,8 @@ class ProgramDetail(ProgramListItem):
 class ProgramDetailWithTopicsOutcomes(ProgramDetail):
     topics: list[TopicEmbedded] = []
     outcomes: list[OutcomeEmbedded] = []
+    payment_plans_enabled: bool = False
+    payment_plans: Optional[dict] = None
 
 
 class ProgramListResponse(BaseModel):

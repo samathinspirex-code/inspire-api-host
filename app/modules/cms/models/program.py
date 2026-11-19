@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, Text, Integer, Boolean, false
+from sqlalchemy import JSON, String, Text, Integer, Boolean, false, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -30,6 +31,9 @@ class Program(Base):
     image_url: Mapped[Optional[str]] = mapped_column(Text)
     blurb: Mapped[str] = mapped_column(Text, nullable=False)
     popularity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payment_plans_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    # JSONB on Postgres; plain JSON elsewhere so the SQLite test database can still create the table.
+    payment_plans: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict, server_default=text("'{}'"))
 
     topics: Mapped[list["Topic"]] = relationship(back_populates="program", cascade="all, delete-orphan")
     outcomes: Mapped[list["Outcome"]] = relationship(back_populates="program", cascade="all, delete-orphan")
