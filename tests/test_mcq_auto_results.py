@@ -78,6 +78,45 @@ class McqAutoResultsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(assignment.grades_released)
         self.assertTrue(linked_exam.grades_released)
 
+    async def test_release_accepts_marked_results_without_quiz_attempts(self):
+        assignment = SimpleNamespace(assignment_id=2, course_id=3, submission_type="mcq", grades_released=False)
+        submission = SimpleNamespace(student_user_id=8, status="reviewed", marks_awarded=Decimal("9"), marked_at=None)
+        linked_exam = SimpleNamespace(grades_released=False)
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [submission])),
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+            SimpleNamespace(scalar_one_or_none=lambda: linked_exam),
+        ])
+        db.commit = AsyncMock()
+        repo = MagicMock()
+        repo.get_assignment = AsyncMock(return_value=assignment)
+        repo.get_assignment_context = AsyncMock(return_value="context")
+        with patch.object(gradebook_service, "CourseworkRepository", return_value=repo),              patch.object(gradebook_service, "_ensure_lecturer_course", new=AsyncMock()),              patch.object(gradebook_service, "_assignment_item", return_value="released"),              patch.object(gradebook_service, "sync_points_for_assignment", new=AsyncMock()),              patch.object(gradebook_service.notification_service, "notify_grade_release", new=AsyncMock()):
+            result = await gradebook_service.set_grade_release(db, 2, True, 9)
+
+        self.assertEqual(result, "released")
+        self.assertEqual(submission.marks_awarded, Decimal("9"))
+        self.assertTrue(assignment.grades_released)
+        self.assertTrue(linked_exam.grades_released)
+
+    async def test_releasing_already_released_results_changes_nothing(self):
+        assignment = SimpleNamespace(assignment_id=2, course_id=3, submission_type="mcq", grades_released=True)
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+        repo = MagicMock()
+        repo.get_assignment = AsyncMock(return_value=assignment)
+        repo.get_assignment_context = AsyncMock(return_value="context")
+        notify = AsyncMock()
+        with patch.object(gradebook_service, "CourseworkRepository", return_value=repo),              patch.object(gradebook_service, "_ensure_lecturer_course", new=AsyncMock()),              patch.object(gradebook_service, "_assignment_item", return_value="released"),              patch.object(gradebook_service.notification_service, "notify_grade_release", new=notify):
+            result = await gradebook_service.set_grade_release(db, 2, True, 9)
+
+        self.assertEqual(result, "released")
+        db.execute.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        notify.assert_not_awaited()
+
     async def test_timer_expiry_returns_the_finalized_attempt(self):
         attempt = SimpleNamespace(attempt_id=4, exam_id=3, student_user_id=8, status="reviewed")
         exam = SimpleNamespace(exam_id=3)

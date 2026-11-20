@@ -301,6 +301,10 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
     if assignment is None:
         raise NotFoundError("Assignment not found")
     await _ensure_lecturer_course(db, assignment.course_id, user_id)
+    if released and assignment.grades_released:
+        # Already released (e.g. a stale page clicked again): nothing to change, no second notification.
+        context = await CourseworkRepository(db).get_assignment_context(assignment_id)
+        return _assignment_item(context)
     if assignment.submission_type != "mcq":
         from app.modules.lms import rubric_service
         rubric = await rubric_service.get_assignment_rubric(db, assignment_id)
@@ -331,10 +335,12 @@ async def set_grade_release(db: AsyncSession, assignment_id: int, released: bool
                 attempt.manual_marks = Decimal("0")
                 attempt.marked_at = attempt.submitted_at
                 attempt.status = "reviewed"
-            if submission.marks_awarded is None or attempt is None or attempt.total_marks is None:
+            # A result entered by the lecturer has marks but no LMS quiz attempt; it is ready to release.
+            if submission.marks_awarded is None or (attempt is not None and attempt.total_marks is None):
                 raise ValidationError("Wait until every multiple-choice attempt has been marked before releasing results")
             submission.grade_band = None
-            attempt.grade_band = None
+            if attempt is not None:
+                attempt.grade_band = None
     elif released:
         submissions = (await db.execute(
             select(LmsCourseworkSubmission).where(LmsCourseworkSubmission.assignment_id == assignment_id)

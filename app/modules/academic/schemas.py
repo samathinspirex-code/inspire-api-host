@@ -44,19 +44,6 @@ class PaymentPlanRow(BaseModel):
     emphasis: bool = False
 
 
-class PaymentPlanCard(BaseModel):
-    eyebrow: ShortText = ""
-    title: ShortText = ""
-    amount: ShortText = ""
-    amount_note: ShortText = ""
-    badge: ShortText = ""
-    featured: bool = False
-    limited_offer: bool = False
-    limited_offer_label: ShortText = ""
-    rows: list[PaymentPlanRow] = Field(default_factory=list, max_length=15)
-    footnote: LongText = ""
-
-
 class PaymentPlanFeeRow(BaseModel):
     label: ShortText = ""
     amount: ShortText = ""
@@ -69,11 +56,24 @@ class PaymentPlanExtraFees(BaseModel):
     rows: list[PaymentPlanFeeRow] = Field(default_factory=list, max_length=15)
 
 
+class PaymentPlanCard(BaseModel):
+    eyebrow: ShortText = ""
+    title: ShortText = ""
+    amount: ShortText = ""
+    amount_note: ShortText = ""
+    badge: ShortText = ""
+    featured: bool = False
+    rows: list[PaymentPlanRow] = Field(default_factory=list, max_length=15)
+    extra_fees: PaymentPlanExtraFees = Field(default_factory=PaymentPlanExtraFees)
+    footnote: LongText = ""
+
+
 class PaymentPlans(BaseModel):
     heading: ShortText = ""
     highlight: ShortText = ""
     intro: LongText = ""
     cards: list[PaymentPlanCard] = Field(default_factory=list, max_length=12)
+    # Legacy plan-level fees; new plans keep their fees inside each card.
     extra_fees: PaymentPlanExtraFees = Field(default_factory=PaymentPlanExtraFees)
 
 
@@ -97,6 +97,10 @@ class CourseCreate(BaseModel):
     study_options: list[StudyOptionUpsert] = Field(default_factory=list)
     payment_plans_enabled: bool = False
     payment_plans: PaymentPlans = Field(default_factory=PaymentPlans)
+    limited_offer_enabled: bool = False
+    limited_offer_label: str = Field("Limited Offer", max_length=40)
+    monthly_instalment: int | None = Field(None, ge=0)
+    limited_offer_price: int | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def payment_plans_need_a_card(self):

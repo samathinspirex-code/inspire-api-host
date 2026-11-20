@@ -196,7 +196,9 @@ async def list_courses(
     )
 
 
-async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
+async def create_course(
+    db: AsyncSession, payload: CourseCreate, user_id: int, assign_creator: bool = False
+) -> CourseItem:
     programme = None if payload.is_orientation else await db.get(Program, payload.program_id)
     if not payload.is_orientation and programme is None:
         raise NotFoundError(f"Programme {payload.program_id} not found")
@@ -224,13 +226,14 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
     # Every course receives a dedicated, non-required Practice Test section.
     from app.modules.lms.exam_service import ensure_practice_test_section
     await ensure_practice_test_section(db, course.course_id, user_id)
-    # A staff member can hold both an admin role and a lecturer profile.  Give
-    # lecturer-creators immediate access even when they create the reusable
-    # Course page from the shared Admin/Super Admin catalogue.
+    # Only a Course page created as a lecturer joins that lecturer's teaching
+    # list. Admin-portal creations stay unassigned, so an admin who also holds a
+    # lecturer profile sees only explicitly assigned work in the Lecturer portal.
     people_repo = PeopleRepository(db)
     assignment_repo = AssignmentRepository(db)
     if (
-        await people_repo.get_lecturer_profile(user_id) is not None
+        assign_creator
+        and await people_repo.get_lecturer_profile(user_id) is not None
         and await assignment_repo.get_course_lecturer(course.course_id, user_id) is None
     ):
         await assignment_repo.assign_course_lecturer(course.course_id, user_id, user_id)
@@ -239,7 +242,7 @@ async def create_course(db: AsyncSession, payload: CourseCreate, user_id: int) -
 
 async def create_lecturer_course(db: AsyncSession, payload: CourseCreate, user_id: int) -> CourseItem:
     """Create a draft course and give its creating lecturer immediate ownership."""
-    course = await create_course(db, payload.model_copy(update={"status": "draft"}), user_id)
+    course = await create_course(db, payload.model_copy(update={"status": "draft"}), user_id, assign_creator=True)
     if await AssignmentRepository(db).get_course_lecturer(course.course_id, user_id) is None:
         # This endpoint is also available to admins.  Only a genuine lecturer
         # profile can own a Course page as a lecturer.
@@ -414,7 +417,9 @@ async def list_classes(
     )
 
 
-async def create_class(db: AsyncSession, payload: ClassCreate, user_id: int) -> ClassItem:
+async def create_class(
+    db: AsyncSession, payload: ClassCreate, user_id: int, assign_creator: bool = False
+) -> ClassItem:
     course_row = await CourseRepository(db).get_with_program(payload.course_id)
     if course_row is None:
         raise NotFoundError(f"Course {payload.course_id} not found")
@@ -437,7 +442,9 @@ async def create_class(db: AsyncSession, payload: ClassCreate, user_id: int) -> 
             "created_by": user_id,
         }
     )
-    if await PeopleRepository(db).get_lecturer_profile(user_id) is not None:
+    # Admin-created classes are not added to the creator's lecturer list; the
+    # teaching team is assigned explicitly.
+    if assign_creator and await PeopleRepository(db).get_lecturer_profile(user_id) is not None:
         assignments = AssignmentRepository(db)
         if await assignments.get_course_lecturer(class_.course_id, user_id) is None:
             await assignments.assign_course_lecturer(class_.course_id, user_id, user_id)

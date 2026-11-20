@@ -710,6 +710,7 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
     values = payload.model_dump(exclude={"study_options", "topics", "outcomes", "popularity"}) | {"course_id": course_id}
     values["slug"] = payload.slug.strip()
     values["payment_plans"] = json.dumps(payload.payment_plans.model_dump())
+    values["limited_offer_label"] = payload.limited_offer_label.strip() or "Limited Offer"
     duplicate = (await db.execute(text("""
         SELECT title FROM academic_courses
         WHERE lower(slug)=lower(:slug) AND course_id IS DISTINCT FROM :course_id
@@ -727,9 +728,9 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
     if course_id is None:
         row = (await db.execute(text("""
             INSERT INTO academic_courses
-                (programme_id, level_id, school_id, slug, code, title, subtitle_enabled, subtitle, awarding_body, entry_requirements, progression_route, blurb, image_url, status, payment_plans_enabled, payment_plans)
+                (programme_id, level_id, school_id, slug, code, title, subtitle_enabled, subtitle, awarding_body, entry_requirements, progression_route, blurb, image_url, status, payment_plans_enabled, payment_plans, limited_offer_enabled, limited_offer_label, monthly_instalment, limited_offer_price)
             VALUES
-                (:programme_id, NULL, :school_id, :slug, :code, :title, :subtitle_enabled, :subtitle, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status, :payment_plans_enabled, CAST(:payment_plans AS jsonb))
+                (:programme_id, NULL, :school_id, :slug, :code, :title, :subtitle_enabled, :subtitle, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status, :payment_plans_enabled, CAST(:payment_plans AS jsonb), :limited_offer_enabled, :limited_offer_label, :monthly_instalment, :limited_offer_price)
             RETURNING course_id
         """), values)).mappings().one()
         course_id = row["course_id"]
@@ -739,7 +740,8 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
                 slug=:slug, code=:code, title=:title, subtitle_enabled=:subtitle_enabled, subtitle=:subtitle, awarding_body=:awarding_body,
                 entry_requirements=:entry_requirements, progression_route=:progression_route, blurb=:blurb,
                 image_url=:image_url, status=:status, payment_plans_enabled=:payment_plans_enabled,
-                payment_plans=CAST(:payment_plans AS jsonb), updated_at=now()
+                payment_plans=CAST(:payment_plans AS jsonb), limited_offer_enabled=:limited_offer_enabled,
+                limited_offer_label=:limited_offer_label, monthly_instalment=:monthly_instalment, limited_offer_price=:limited_offer_price, updated_at=now()
             WHERE course_id=:course_id RETURNING course_id
         """), values)
         if changed.first() is None:
@@ -761,11 +763,13 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         "image_url": course["image_url"], "blurb": course["blurb"], "image_label": course["title"][:100],
         "popularity": payload.popularity,
         "payment_plans_enabled": payload.payment_plans_enabled, "payment_plans": values["payment_plans"],
+        "limited_offer_enabled": payload.limited_offer_enabled, "limited_offer_label": values["limited_offer_label"],
+        "monthly_instalment": payload.monthly_instalment, "limited_offer_price": payload.limited_offer_price,
     }
     if course["legacy_program_id"] is None:
         legacy_id = await db.scalar(text("""
-            INSERT INTO programs (slug,title,subtitle_enabled,subtitle,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity,payment_plans_enabled,payment_plans)
-            VALUES (:slug,:title,:subtitle_enabled,:subtitle,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity,:payment_plans_enabled,CAST(:payment_plans AS jsonb))
+            INSERT INTO programs (slug,title,subtitle_enabled,subtitle,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity,payment_plans_enabled,payment_plans,limited_offer_enabled,limited_offer_label,monthly_instalment,limited_offer_price)
+            VALUES (:slug,:title,:subtitle_enabled,:subtitle,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity,:payment_plans_enabled,CAST(:payment_plans AS jsonb),:limited_offer_enabled,:limited_offer_label,:monthly_instalment,:limited_offer_price)
             RETURNING program_id
         """), legacy_values)
         await db.execute(text("UPDATE academic_courses SET legacy_program_id=:legacy_id WHERE course_id=:course_id"), {"legacy_id": legacy_id, "course_id": course_id})
@@ -774,7 +778,8 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
             UPDATE programs SET slug=:slug,title=:title,subtitle_enabled=:subtitle_enabled,subtitle=:subtitle,level=:level,school=:school,
               awarding_body=:awarding_body,code=:code,duration=:duration,price_from=:price_from,
               image_label=:image_label,image_url=:image_url,blurb=:blurb,popularity=:popularity,
-              payment_plans_enabled=:payment_plans_enabled,payment_plans=CAST(:payment_plans AS jsonb)
+              payment_plans_enabled=:payment_plans_enabled,payment_plans=CAST(:payment_plans AS jsonb),
+              limited_offer_enabled=:limited_offer_enabled,limited_offer_label=:limited_offer_label,monthly_instalment=:monthly_instalment,limited_offer_price=:limited_offer_price
             WHERE program_id=:legacy_id
         """), {**legacy_values, "legacy_id": course["legacy_program_id"]})
     legacy_program_id = course["legacy_program_id"]
@@ -1246,7 +1251,9 @@ async def ensure_staff_can_manage_lms_course(db: AsyncSession, course_id: int, u
         raise ValidationError("You must be assigned to the Course page before creating its class")
 
 
-async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseRequest, user_id: int):
+async def create_class_from_course(
+    db: AsyncSession, payload: ClassFromCourseRequest, user_id: int, assign_creator: bool = False
+):
     """Create a batch with a fully independent visual Course Studio copy."""
     master = (await db.execute(text("""
         SELECT lc.*, ac.course_id AS academic_course_id
@@ -1408,28 +1415,22 @@ async def create_class_from_course(db: AsyncSession, payload: ClassFromCourseReq
             FROM lms_exam_questions WHERE exam_id=:old_exam
         """), {"new_exam": new_exam_id, "old_exam": exam["exam_id"]})
 
-    await db.execute(text("""
-        INSERT INTO lms_course_lecturers (course_id,lecturer_user_id,assigned_by)
-        SELECT :new_course,lecturer_user_id,:user_id FROM lms_course_lecturers WHERE course_id=:source_course
-        ON CONFLICT DO NOTHING
-    """), {"new_course": copied_course_id, "source_course": payload.source_course_id, "user_id": user_id})
-    await db.execute(text("""
-        INSERT INTO lms_class_lecturers (class_id,lecturer_user_id,assigned_by)
-        SELECT :class_id,lecturer_user_id,:user_id FROM lms_course_lecturers WHERE course_id=:new_course
-        ON CONFLICT DO NOTHING
-    """), {"class_id": class_id, "new_course": copied_course_id, "user_id": user_id})
-    await db.execute(text("""
-        INSERT INTO lms_course_lecturers (course_id,lecturer_user_id,assigned_by)
-        SELECT :new_course,:user_id,:user_id WHERE EXISTS
-          (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
-        ON CONFLICT DO NOTHING
-    """), {"new_course": copied_course_id, "user_id": user_id})
-    await db.execute(text("""
-        INSERT INTO lms_class_lecturers (class_id,lecturer_user_id,assigned_by)
-        SELECT :class_id,:user_id,:user_id WHERE EXISTS
-          (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
-        ON CONFLICT DO NOTHING
-    """), {"class_id": class_id, "user_id": user_id})
+    # Template lecturers are not copied onto every new class: a lecturer sees a
+    # class only when assigned to it. The creator joins the teaching team only
+    # when creating from the Lecturer portal.
+    if assign_creator:
+        await db.execute(text("""
+            INSERT INTO lms_course_lecturers (course_id,lecturer_user_id,assigned_by)
+            SELECT :new_course,:user_id,:user_id WHERE EXISTS
+              (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+            ON CONFLICT DO NOTHING
+        """), {"new_course": copied_course_id, "user_id": user_id})
+        await db.execute(text("""
+            INSERT INTO lms_class_lecturers (class_id,lecturer_user_id,assigned_by)
+            SELECT :class_id,:user_id,:user_id WHERE EXISTS
+              (SELECT 1 FROM lms_lecturer_profiles WHERE user_id=:user_id)
+            ON CONFLICT DO NOTHING
+        """), {"class_id": class_id, "user_id": user_id})
     await db.commit()
     return {"class_id": class_id, "course_id": copied_course_id,
             "source_course_id": payload.source_course_id, "study_mode": study_mode}

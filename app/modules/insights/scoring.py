@@ -50,10 +50,11 @@ MEDIUM_SCORE = 35
 HIGH_QUALITY_SOURCE = 8
 UNANSWERED_POINTS = 3
 UNANSWERED_MAX = 12
+# Same names as the CRM (CMS-UI src/redesign/api/crmSources.ts); keep the two in step.
 SOURCE_LABELS = {
-    "website_admission": "Admission form",
-    "website_contact": "Contact form",
-    "whatsapp": "WhatsApp",
+    "website_admission": "Website Form",
+    "website_contact": "Contact Form",
+    "whatsapp": "WhatsApp Bot",
     "meta": "Meta Ads (WhatsApp)",
     "meta_lead_forms": "Meta Lead Forms",
     "facebook_chat": "Facebook Chat",
@@ -61,19 +62,24 @@ SOURCE_LABELS = {
     "tiktok_chat": "TikTok Chat",
     "tiktok_lead_forms": "TikTok Lead Forms",
     "tiktok": "TikTok Lead Forms",
+    "tik_tok": "TikTok Lead Forms",
     "linkedin": "LinkedIn",
     "referral": "Referral",
     "fair": "Education Fair",
     "walk_in": "Walk-in",
     "hotline_call": "Direct Calls",
-    "manual": "Manual",
-    "wtc_registrations_form": "WTC registration form",
+    "manual": "Manual Entry",
+    "cold_call": "Cold Calls",
+    "webchat": "Web Chat",
+    "advertisement": "Advertisement",
+    "legacy_import": "Legacy Import",
+    "wtc_registrations_form": "WTC Registration Form",
 }
 
 
 def source_label(key: str | None) -> str:
     if not key:
-        return "Manual"
+        return "Manual Entry"
     return SOURCE_LABELS.get(key, key.replace("_", " ").title())
 
 

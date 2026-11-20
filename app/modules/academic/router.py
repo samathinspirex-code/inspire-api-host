@@ -267,4 +267,5 @@ async def update_class_details(class_id: int, payload: ClassDetailsUpdate, user:
 @lms_router.post("/classes/from-course", response_model=AcademicResponse, status_code=201)
 async def class_from_course(payload: ClassFromCourseRequest, user: CurrentUser = Depends(require_academic_staff), db: AsyncSession = Depends(get_db)):
     await service.ensure_staff_can_manage_lms_course(db, payload.source_course_id, user)
-    return {"data": await service.create_class_from_course(db, payload, user.user_id)}
+    lecturer_portal = "LECTURER" in user.access and not any(role in user.access for role in ("SUPER_ADMIN", "ADMIN"))
+    return {"data": await service.create_class_from_course(db, payload, user.user_id, assign_creator=lecturer_portal)}
