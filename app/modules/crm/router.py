@@ -328,6 +328,7 @@ async def counsellor_report(
     stage: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     include_old: bool = Query(False),
+    awarding_body: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_crm_staff),
 ) -> CrmCounsellorReportResponse:
@@ -335,7 +336,7 @@ async def counsellor_report(
         # Counsellors may read their own aggregate figures, never another person's.
         counsellor_id = current_user.user_id
     try:
-        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time, stage, source, include_old)
+        return await service.get_counsellor_report(db, date_from, date_to, counsellor_id, programme, all_time, stage, source, include_old, awarding_body)
     except APIError:
         raise
     except Exception as exc:
