@@ -51,7 +51,7 @@ HIGH_QUALITY_SOURCE = 8
 UNANSWERED_POINTS = 3
 UNANSWERED_MAX = 12
 SOURCE_LABELS = {
-    "website_admission": "Admission form",
+    "website_admission": "Website Form",
     "website_contact": "Contact form",
     "whatsapp": "WhatsApp",
     "meta": "Meta Ads (WhatsApp)",
