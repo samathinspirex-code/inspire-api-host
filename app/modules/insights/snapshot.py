@@ -15,7 +15,7 @@ from app.modules.insights.scoring import factors, heat, hours_since, next_action
 
 CONTACT_SQL = ", ".join(f"'{item}'" for item in sorted(CONTACT_ACTIVITY_TYPES))
 STAGE_LABELS = {
-    "new_lead": "New Lead",
+    "new_lead": "New Leads (Unattended)",
     "uncontactable": "Uncontactable",
     "contacted": "Contacted",
     "follow_up": "Follow-Up",

@@ -54,7 +54,7 @@ SOURCE_LABELS = {
     "website_admission": "Admission form",
     "website_contact": "Contact form",
     "whatsapp": "WhatsApp",
-    "meta": "Meta Ads",
+    "meta": "Meta Ads (WhatsApp)",
     "meta_lead_forms": "Meta Lead Forms",
     "facebook_chat": "Facebook Chat",
     "instagram": "Instagram",

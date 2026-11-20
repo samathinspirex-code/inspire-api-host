@@ -1586,6 +1586,7 @@ async def get_counsellor_report(
     stage: Optional[str] = None,
     source: Optional[str] = None,
     include_old: bool = False,
+    awarding_body: Optional[str] = None,
 ) -> CrmCounsellorReportResponse:
     if all_time:
         start, end = datetime(1900, 1, 1), datetime(9999, 12, 31)
@@ -1615,6 +1616,8 @@ async def get_counsellor_report(
         lead_scope.append(CrmLead.stage.in_(("not_interested", "lost_to_competitor", "cant_afford")) if stage == "not_interested" else CrmLead.stage == stage)
     if source:
         lead_scope.append(CrmLead.source == source)
+    if awarding_body:
+        lead_scope.append(CrmLead.awarding_body == awarding_body)
 
     assignment_time = func.coalesce(CrmLead.assigned_at, CrmLead.created_at)
     colombo_offset = timedelta(hours=5, minutes=30)
@@ -1983,7 +1986,7 @@ async def export_leads_csv(
             ]
         )
         stage_display = {
-            "new_lead": "New Lead",
+            "new_lead": "New Leads (Unattended)",
             "uncontactable": "Uncontactable",
             "contacted": "Contacted",
             "follow_up": "Follow-Up",
@@ -1995,7 +1998,7 @@ async def export_leads_csv(
             "enrolled": "Enrolled",
         }
         source_display = {
-            "meta": "Meta Ads",
+            "meta": "Meta Ads (WhatsApp)",
             "meta_lead_forms": "Meta Lead Forms",
             "whatsapp": "WhatsApp Bot",
             "facebook_chat": "Facebook Chat",
