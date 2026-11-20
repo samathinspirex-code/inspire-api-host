@@ -99,6 +99,8 @@ class CourseCreate(BaseModel):
     payment_plans: PaymentPlans = Field(default_factory=PaymentPlans)
     limited_offer_enabled: bool = False
     limited_offer_label: str = Field("Limited Offer", max_length=40)
+    monthly_instalment: int | None = Field(None, ge=0)
+    limited_offer_price: int | None = Field(None, ge=0)
 
     @model_validator(mode="after")
     def payment_plans_need_a_card(self):

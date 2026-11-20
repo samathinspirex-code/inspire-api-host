@@ -52,6 +52,8 @@ class ProgramListItem(BaseModel):
     popularity: int
     limited_offer_enabled: bool = False
     limited_offer_label: str = "Limited Offer"
+    monthly_instalment: Optional[int] = None
+    limited_offer_price: Optional[int] = None
 
 
 class ProgramDetail(ProgramListItem):

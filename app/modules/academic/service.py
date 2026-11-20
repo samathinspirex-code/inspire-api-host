@@ -728,9 +728,9 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
     if course_id is None:
         row = (await db.execute(text("""
             INSERT INTO academic_courses
-                (programme_id, level_id, school_id, slug, code, title, subtitle_enabled, subtitle, awarding_body, entry_requirements, progression_route, blurb, image_url, status, payment_plans_enabled, payment_plans, limited_offer_enabled, limited_offer_label)
+                (programme_id, level_id, school_id, slug, code, title, subtitle_enabled, subtitle, awarding_body, entry_requirements, progression_route, blurb, image_url, status, payment_plans_enabled, payment_plans, limited_offer_enabled, limited_offer_label, monthly_instalment, limited_offer_price)
             VALUES
-                (:programme_id, NULL, :school_id, :slug, :code, :title, :subtitle_enabled, :subtitle, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status, :payment_plans_enabled, CAST(:payment_plans AS jsonb), :limited_offer_enabled, :limited_offer_label)
+                (:programme_id, NULL, :school_id, :slug, :code, :title, :subtitle_enabled, :subtitle, :awarding_body, :entry_requirements, :progression_route, :blurb, :image_url, :status, :payment_plans_enabled, CAST(:payment_plans AS jsonb), :limited_offer_enabled, :limited_offer_label, :monthly_instalment, :limited_offer_price)
             RETURNING course_id
         """), values)).mappings().one()
         course_id = row["course_id"]
@@ -741,7 +741,7 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
                 entry_requirements=:entry_requirements, progression_route=:progression_route, blurb=:blurb,
                 image_url=:image_url, status=:status, payment_plans_enabled=:payment_plans_enabled,
                 payment_plans=CAST(:payment_plans AS jsonb), limited_offer_enabled=:limited_offer_enabled,
-                limited_offer_label=:limited_offer_label, updated_at=now()
+                limited_offer_label=:limited_offer_label, monthly_instalment=:monthly_instalment, limited_offer_price=:limited_offer_price, updated_at=now()
             WHERE course_id=:course_id RETURNING course_id
         """), values)
         if changed.first() is None:
@@ -764,11 +764,12 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
         "popularity": payload.popularity,
         "payment_plans_enabled": payload.payment_plans_enabled, "payment_plans": values["payment_plans"],
         "limited_offer_enabled": payload.limited_offer_enabled, "limited_offer_label": values["limited_offer_label"],
+        "monthly_instalment": payload.monthly_instalment, "limited_offer_price": payload.limited_offer_price,
     }
     if course["legacy_program_id"] is None:
         legacy_id = await db.scalar(text("""
-            INSERT INTO programs (slug,title,subtitle_enabled,subtitle,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity,payment_plans_enabled,payment_plans,limited_offer_enabled,limited_offer_label)
-            VALUES (:slug,:title,:subtitle_enabled,:subtitle,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity,:payment_plans_enabled,CAST(:payment_plans AS jsonb),:limited_offer_enabled,:limited_offer_label)
+            INSERT INTO programs (slug,title,subtitle_enabled,subtitle,level,school,awarding_body,code,duration,price_from,tag,icon,image_label,image_url,blurb,popularity,payment_plans_enabled,payment_plans,limited_offer_enabled,limited_offer_label,monthly_instalment,limited_offer_price)
+            VALUES (:slug,:title,:subtitle_enabled,:subtitle,:level,:school,:awarding_body,:code,:duration,:price_from,NULL,'grad',:image_label,:image_url,:blurb,:popularity,:payment_plans_enabled,CAST(:payment_plans AS jsonb),:limited_offer_enabled,:limited_offer_label,:monthly_instalment,:limited_offer_price)
             RETURNING program_id
         """), legacy_values)
         await db.execute(text("UPDATE academic_courses SET legacy_program_id=:legacy_id WHERE course_id=:course_id"), {"legacy_id": legacy_id, "course_id": course_id})
@@ -778,7 +779,7 @@ async def upsert_course(db: AsyncSession, payload: CourseCreate, course_id: int 
               awarding_body=:awarding_body,code=:code,duration=:duration,price_from=:price_from,
               image_label=:image_label,image_url=:image_url,blurb=:blurb,popularity=:popularity,
               payment_plans_enabled=:payment_plans_enabled,payment_plans=CAST(:payment_plans AS jsonb),
-              limited_offer_enabled=:limited_offer_enabled,limited_offer_label=:limited_offer_label
+              limited_offer_enabled=:limited_offer_enabled,limited_offer_label=:limited_offer_label,monthly_instalment=:monthly_instalment,limited_offer_price=:limited_offer_price
             WHERE program_id=:legacy_id
         """), {**legacy_values, "legacy_id": course["legacy_program_id"]})
     legacy_program_id = course["legacy_program_id"]
