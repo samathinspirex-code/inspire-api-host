@@ -31,6 +31,8 @@ class Program(Base):
     image_url: Mapped[Optional[str]] = mapped_column(Text)
     blurb: Mapped[str] = mapped_column(Text, nullable=False)
     popularity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    limited_offer_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    limited_offer_label: Mapped[str] = mapped_column(String(40), nullable=False, default="Limited Offer", server_default=text("'Limited Offer'"))
     payment_plans_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     # JSONB on Postgres; plain JSON elsewhere so the SQLite test database can still create the table.
     payment_plans: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict, server_default=text("'{}'"))

@@ -77,6 +77,13 @@ FOUNDATION_PLAN = {
 }
 
 
+# Additional fees now live inside each card (Year 1 fee in the Year 1 card, and so on).
+from migrate_limited_offer_and_card_fees import fees_into_cards  # noqa: E402
+
+HND_PLAN = fees_into_cards(HND_PLAN)
+FOUNDATION_PLAN = fees_into_cards(FOUNDATION_PLAN)
+
+
 def plan_for(title: str, programme: str):
     text = f"{title} {programme}".casefold()
     if re.search(r"\bhnd\b", text):

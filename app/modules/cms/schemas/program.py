@@ -50,6 +50,8 @@ class ProgramListItem(BaseModel):
     image_url: Optional[str]
     blurb: str
     popularity: int
+    limited_offer_enabled: bool = False
+    limited_offer_label: str = "Limited Offer"
 
 
 class ProgramDetail(ProgramListItem):
