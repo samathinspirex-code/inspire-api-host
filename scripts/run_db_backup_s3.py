@@ -1,6 +1,7 @@
 """Encrypted database backup to S3, keeping only the latest copy.
 
-Runs pg_dump (custom format) of the public schema, checks the dump with
+Runs pg_dump (custom format) of the whole database - the app's public and
+payments schemas plus Supabase's own (auth, storage, ...) - checks the dump with
 pg_restore --list, encrypts it with AES-256-GCM and uploads it to
 DB_BACKUP_S3_KEY in MEDIA_BUCKET. The upload replaces the previous backup, and
 only happens after the new dump has passed the check, so a failed run leaves the
@@ -21,7 +22,9 @@ second night, and a failed night is retried the next night.
                                                        pg_restore-ready file
     python scripts/run_db_backup_s3.py --decrypt IN.enc OUT.dump
 
-Restore: pg_restore --no-owner --no-privileges -d <database url> OUT.dump
+Restore the app data into a new Supabase project (its own auth/storage
+schemas already exist there, so restore only the app schemas):
+    pg_restore --no-owner --no-privileges -n public -n payments -d <database url> OUT.dump
 """
 
 import argparse
@@ -104,7 +107,7 @@ def pg_env() -> dict:
 
 def dump_database(out: Path) -> int:
     cmd = [settings.PG_DUMP_PATH, "-h", settings.POSTGRES_HOST, "-p", str(settings.POSTGRES_PORT),
-           "-U", settings.POSTGRES_USER, "-d", settings.POSTGRES_DB, "-n", "public",
+           "-U", settings.POSTGRES_USER, "-d", settings.POSTGRES_DB,
            "--no-owner", "--no-privileges", "-Fc", "-f", str(out)]
     result = subprocess.run(cmd, env=pg_env(), capture_output=True, text=True, timeout=3600)
     if result.returncode != 0:
@@ -180,7 +183,7 @@ def download(out: Path) -> None:
         enc = Path(tmpdir) / "download.enc"
         _client().download_file(settings.MEDIA_BUCKET, settings.DB_BACKUP_S3_KEY, str(enc))
         decrypt_file(enc, out)
-    print(f"Saved {out} - restore with: pg_restore --no-owner --no-privileges -d <database url> {out}")
+    print(f"Saved {out} - restore with: pg_restore --no-owner --no-privileges -n public -n payments -d <database url> {out}")
 
 
 def main() -> None:
