@@ -155,7 +155,23 @@ def _meeting_message_at_delivery(message: str, start_time: datetime, time_zone: 
     return MEETING_TIME_PATTERN.sub(local_time(start_time, time_zone or "Asia/Colombo"), message, count=1)
 
 
-async def _audience_user_ids(db: AsyncSession, audience_type: str, audience_id: int | None) -> list[int]:
+STUDY_MODE_AUDIENCES = {"part_time": "part-time", "full_time": "full-time"}
+
+
+async def _study_mode_class_ids(db: AsyncSession, study_mode: str) -> list[int]:
+    """Planned and running classes of one study mode (finished and removed classes are left out)."""
+    result = await db.execute(select(LmsClass.class_id).where(
+        LmsClass.study_mode == study_mode, LmsClass.status.in_(("planned", "active"))))
+    return list(result.scalars().all())
+
+
+async def _audience_user_ids(db: AsyncSession, audience_type: str, audience_id: int | None, class_ids: list[int] | None = None) -> list[int]:
+    if audience_type in {"classes", *STUDY_MODE_AUDIENCES}:
+        chosen = (class_ids or []) if audience_type == "classes" else await _study_mode_class_ids(db, audience_type)
+        users: set[int] = set()
+        for class_id in chosen:
+            users.update(await _audience_user_ids(db, "class", class_id))
+        return list(users)
     if audience_type == "all":
         result = await db.execute(select(User.user_id).join(UserAccessLevel, UserAccessLevel.user_id == User.user_id).join(AccessLevel, AccessLevel.access_level_id == UserAccessLevel.access_level_id).where(User.is_active.is_(True), AccessLevel.access_key == "LMS").distinct())
         return list(result.scalars().all())
@@ -216,8 +232,15 @@ def _assignment_title(prefix: str, title: str) -> str:
     return f"{prefix}: {title}"[:255]
 
 
-async def _audience_label(db: AsyncSession, audience_type: str, audience_id: int | None) -> str:
+async def _audience_label(db: AsyncSession, audience_type: str, audience_id: int | None, class_ids: list[int] | None = None) -> str:
     if audience_type == "all": return "Everyone in the LMS"
+    if audience_type in STUDY_MODE_AUDIENCES: return f"All {STUDY_MODE_AUDIENCES[audience_type]} classes"
+    if audience_type == "classes":
+        ids = class_ids or []
+        codes = {row.class_id: row.code for row in (await db.execute(select(LmsClass.class_id, LmsClass.code).where(LmsClass.class_id.in_(ids)))).all()} if ids else {}
+        names = [codes[class_id] for class_id in ids if class_id in codes]
+        shown = ", ".join(names[:4]) + (f" +{len(names) - 4} more" if len(names) > 4 else "")
+        return f"{len(ids)} classes · {shown}" if shown else f"{len(ids)} classes"
     if audience_type == "admin": return "LMS Admins"
     if audience_type == "super_admin": return "LMS Super Admins"
     if audience_type == "course":
@@ -225,13 +248,24 @@ async def _audience_label(db: AsyncSession, audience_type: str, audience_id: int
     item = await db.get(LmsClass, audience_id); return f"{item.code} · {item.name}" if item else "Class"
 
 
-async def _can_manage_audience(db: AsyncSession, role: str, user_id: int, audience_type: str, audience_id: int | None) -> None:
+async def _lecturer_can_announce_to_class(db: AsyncSession, user_id: int, class_id: int) -> bool:
+    class_ = await db.get(LmsClass, class_id)
+    return bool(class_ and (await db.get(ClassLecturer, (class_id, user_id)) is not None or await db.get(CourseLecturer, (class_.course_id, user_id)) is not None))
+
+
+async def _can_manage_audience(db: AsyncSession, role: str, user_id: int, audience_type: str, audience_id: int | None, class_ids: list[int] | None = None) -> None:
+    if audience_type == "classes":
+        found = set((await db.execute(select(LmsClass.class_id).where(LmsClass.class_id.in_(class_ids or []), LmsClass.status != "cancelled"))).scalars().all())
+        if found != set(class_ids or []): raise ValidationError("One of the chosen classes no longer exists")
     if role in {"SUPER_ADMIN", "ADMIN"}: return
+    if role == "LECTURER" and audience_type in STUDY_MODE_AUDIENCES: raise ForbiddenError("Only administrators can announce to every part-time or full-time class")
     if role != "LECTURER" or audience_type == "all": raise ForbiddenError("Only administrators can announce to the entire LMS")
+    if audience_type == "classes":
+        for class_id in class_ids or []:
+            if not await _lecturer_can_announce_to_class(db, user_id, class_id): break
+        else: return
     if audience_type == "course" and await db.get(CourseLecturer, (audience_id, user_id)) is not None: return
-    if audience_type == "class":
-        class_ = await db.get(LmsClass, audience_id)
-        if class_ and (await db.get(ClassLecturer, (audience_id, user_id)) is not None or await db.get(CourseLecturer, (class_.course_id, user_id)) is not None): return
+    if audience_type == "class" and await _lecturer_can_announce_to_class(db, user_id, audience_id): return
     raise ForbiddenError("You can announce only to courses or classes assigned to you")
 
 
@@ -273,7 +307,8 @@ async def _announcement_item(db: AsyncSession, item: LmsAnnouncement) -> Announc
         select(MediaAsset).where(MediaAsset.media_asset_id.in_(ids), MediaAsset.status == "ready")
     )).scalars().all()} if ids else {}
     return AnnouncementItem(announcement_id=item.announcement_id, audience_type=item.audience_type,
-        audience_id=item.audience_id, audience_label=await _audience_label(db, item.audience_type, item.audience_id),
+        audience_id=item.audience_id, audience_class_ids=item.audience_class_ids or [],
+        audience_label=await _audience_label(db, item.audience_type, item.audience_id, item.audience_class_ids),
         title=item.title, message=item.message, importance=item.importance, publish_at=item.publish_at,
         attachments=[AnnouncementAttachment(media_asset_id=asset.media_asset_id,
             name=asset.original_filename, content_type=asset.content_type,
@@ -284,7 +319,7 @@ async def _announcement_item(db: AsyncSession, item: LmsAnnouncement) -> Announc
 
 
 async def create_announcement(db: AsyncSession, payload, user_id: int, role: str) -> AnnouncementItem:
-    await _can_manage_audience(db, role, user_id, payload.audience_type, payload.audience_id)
+    await _can_manage_audience(db, role, user_id, payload.audience_type, payload.audience_id, payload.audience_class_ids)
     if payload.attachment_asset_ids:
         assets = (await db.execute(select(MediaAsset).where(MediaAsset.media_asset_id.in_(payload.attachment_asset_ids)))).scalars().all()
         if len(assets) != len(payload.attachment_asset_ids) or any(
@@ -322,6 +357,11 @@ async def list_announcements(db: AsyncSession, user_id: int, role: str) -> Annou
             lecturer_filters.append(
                 and_(LmsAnnouncement.audience_type == "class",
                      LmsAnnouncement.audience_id.in_(taught_class_ids))
+            )
+            lecturer_filters.extend(
+                and_(LmsAnnouncement.audience_type == "classes",
+                     LmsAnnouncement.audience_class_ids.contains([class_id]))
+                for class_id in taught_class_ids
             )
         stmt = stmt.where(or_(*lecturer_filters))
     elif role not in {"SUPER_ADMIN", "ADMIN"}:
@@ -369,7 +409,7 @@ async def update_announcement_status(db: AsyncSession, announcement_id: int, sta
 
 async def materialize_announcement(db: AsyncSession, item: LmsAnnouncement, now: datetime) -> int:
     if item.status in {"cancelled", "expired", "draft"}: return 0
-    users = await _audience_user_ids(db, item.audience_type, item.audience_id)
+    users = await _audience_user_ids(db, item.audience_type, item.audience_id, item.audience_class_ids)
     created = await _enqueue(db, users, f"announcement:{item.announcement_id}", "announcement", item.title,
         item.message, f"{settings.LMS_UI_URL.rstrip('/')}?view=announcements&announcement_id={item.announcement_id}", item.importance,
         item.publish_at, item.email_enabled)

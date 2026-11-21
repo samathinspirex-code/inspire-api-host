@@ -14,6 +14,8 @@ class LmsAnnouncement(Base):
     announcement_id: Mapped[int] = mapped_column(primary_key=True)
     audience_type: Mapped[str] = mapped_column(String(20), nullable=False)
     audience_id: Mapped[int | None] = mapped_column(Integer)
+    # Filled only when audience_type is "classes".
+    audience_class_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     attachment_asset_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
