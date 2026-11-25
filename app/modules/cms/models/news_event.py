@@ -27,6 +27,9 @@ class NewsEvent(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="Draft")
     published_on: Mapped[Optional[date]] = mapped_column(Date)
     event_date: Mapped[Optional[date]] = mapped_column(Date)
+    video_url: Mapped[Optional[str]] = mapped_column(Text)
+    video_orientation: Mapped[Optional[str]] = mapped_column(String(20))
+    video_poster_url: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

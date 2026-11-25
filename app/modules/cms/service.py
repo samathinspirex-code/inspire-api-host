@@ -277,6 +277,8 @@ async def create_news_event(db: AsyncSession, payload: NewsEventCreate) -> NewsE
         raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
     data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
+    data["video_url"] = await media_service.resolve_media_reference(db, data.get("video_url"))
+    data["video_poster_url"] = await media_service.resolve_media_reference(db, data.get("video_poster_url"))
     if data["status"] == "Published" and data["published_on"] is None:
         data["published_on"] = date.today()
     item = await repo.create(data)
@@ -302,6 +304,8 @@ async def update_news_event(
         raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
     data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
+    data["video_url"] = await media_service.resolve_media_reference(db, data.get("video_url"))
+    data["video_poster_url"] = await media_service.resolve_media_reference(db, data.get("video_poster_url"))
     if data["status"] == "Published" and data["published_on"] is None:
         data["published_on"] = date.today()
     item = await repo.update(item, data)
