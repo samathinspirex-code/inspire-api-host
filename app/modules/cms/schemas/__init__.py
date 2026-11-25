@@ -26,6 +26,7 @@ from app.modules.cms.schemas.news_event import (
     NewsEventCreate,
     NewsEventItem,
     NewsEventListResponse,
+    NewsEventReorderRequest,
     NewsEventUpdate,
     PublicNewsEventListResponse,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "NewsEventCreate",
     "NewsEventItem",
     "NewsEventListResponse",
+    "NewsEventReorderRequest",
     "NewsEventUpdate",
     "PublicNewsEventListResponse",
     "MediaAssetUpdate",

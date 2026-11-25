@@ -105,8 +105,13 @@ class NewsEventItem(BaseModel):
     video_url: Optional[str] = None
     video_orientation: Optional[VideoOrientation] = None
     video_poster_url: Optional[str] = None
+    position: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+class NewsEventReorderRequest(BaseModel):
+    news_event_ids: list[int] = Field(..., min_length=1, max_length=500)
 
 
 class NewsEventListResponse(BaseModel):

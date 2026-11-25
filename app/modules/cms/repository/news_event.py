@@ -1,9 +1,17 @@
 from typing import Any, List, Optional
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cms.models.news_event import NewsEvent
+
+
+# Website order: CMS position first (0 = not arranged, so it leads), then newest first.
+WEBSITE_ORDER = (
+    NewsEvent.position.asc(),
+    NewsEvent.published_on.desc().nullslast(),
+    NewsEvent.news_event_id.desc(),
+)
 
 
 class NewsEventRepository:
@@ -39,7 +47,7 @@ class NewsEventRepository:
         stmt = (
             select(NewsEvent)
             .where(*where)
-            .order_by(NewsEvent.updated_at.desc(), NewsEvent.news_event_id.desc())
+            .order_by(*WEBSITE_ORDER)
             .offset((page - 1) * size)
             .limit(size)
         )
@@ -52,7 +60,7 @@ class NewsEventRepository:
         stmt = (
             select(NewsEvent)
             .where(*where)
-            .order_by(NewsEvent.published_on.desc().nullslast(), NewsEvent.news_event_id.desc())
+            .order_by(*WEBSITE_ORDER)
             .limit(limit)
         )
         return list((await self.db.execute(stmt)).scalars().all())
@@ -81,6 +89,21 @@ class NewsEventRepository:
         await self.db.commit()
         await self.db.refresh(item)
         return item
+
+    async def ids_in_website_order(self) -> list[int]:
+        stmt = select(NewsEvent.news_event_id).order_by(*WEBSITE_ORDER)
+        return list((await self.db.execute(stmt)).scalars().all())
+
+    async def reorder(self, ordered_ids: list[int]) -> None:
+        """Give the listed posts positions 1..n in the order given."""
+        positions = {news_event_id: index for index, news_event_id in enumerate(ordered_ids, start=1)}
+        await self.db.execute(
+            update(NewsEvent)
+            .where(NewsEvent.news_event_id.in_(ordered_ids))
+            .values(position=case(positions, value=NewsEvent.news_event_id))
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.commit()
 
     async def delete(self, item: NewsEvent) -> None:
         await self.db.delete(item)

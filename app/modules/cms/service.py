@@ -30,6 +30,7 @@ from app.modules.cms.schemas import (
     NewsEventCreate,
     NewsEventItem,
     NewsEventListResponse,
+    NewsEventReorderRequest,
     NewsEventUpdate,
     PublicNewsEventListResponse,
 )
@@ -310,6 +311,20 @@ async def update_news_event(
         data["published_on"] = date.today()
     item = await repo.update(item, data)
     return NewsEventItem.model_validate(item)
+
+
+async def reorder_news_events(db: AsyncSession, payload: NewsEventReorderRequest) -> None:
+    ids = payload.news_event_ids
+    if len(ids) != len(set(ids)):
+        raise ValidationError("news_event_ids must not contain duplicates")
+    repo = NewsEventRepository(db)
+    current = await repo.ids_in_website_order()
+    missing = set(ids) - set(current)
+    if missing:
+        raise NotFoundError(f"News or event {sorted(missing)[0]} not found")
+    # Posts not in the list keep their current order after the listed ones, so none jump to the top.
+    listed = set(ids)
+    await repo.reorder(ids + [news_event_id for news_event_id in current if news_event_id not in listed])
 
 
 async def delete_news_event(db: AsyncSession, news_event_id: int) -> None:
