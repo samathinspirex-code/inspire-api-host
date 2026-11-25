@@ -2,12 +2,29 @@ import re
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.cms.schemas.common import Pagination
 
 NewsEventStatus = Literal["Draft", "Review", "Published"]
 NewsEventKind = Literal["News", "Event"]
+VideoOrientation = Literal["portrait", "landscape"]
+
+
+def _clean_media_reference(value: Optional[str]) -> Optional[str]:
+    """Accept an HTTPS URL or a media-library asset name; blank means no media."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if "://" in value or value.startswith("//"):
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("Use an HTTPS media URL or a media library name")
+    return value
 
 
 class NewsEventCreate(BaseModel):
@@ -22,6 +39,24 @@ class NewsEventCreate(BaseModel):
     status: NewsEventStatus = "Draft"
     published_on: Optional[date] = None
     event_date: Optional[date] = None
+    video_url: Optional[str] = None
+    video_orientation: Optional[VideoOrientation] = None
+    video_poster_url: Optional[str] = None
+
+    @field_validator("video_url", "video_poster_url", mode="before")
+    @classmethod
+    def validate_video_media(cls, value):
+        return _clean_media_reference(value)
+
+    @model_validator(mode="after")
+    def match_video_fields(self):
+        if self.video_url:
+            if self.video_orientation is None:
+                self.video_orientation = "landscape"
+        else:
+            self.video_orientation = None
+            self.video_poster_url = None
+        return self
 
     @field_validator("slug")
     @classmethod
@@ -67,6 +102,9 @@ class NewsEventItem(BaseModel):
     status: NewsEventStatus
     published_on: Optional[date]
     event_date: Optional[date]
+    video_url: Optional[str] = None
+    video_orientation: Optional[VideoOrientation] = None
+    video_poster_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
