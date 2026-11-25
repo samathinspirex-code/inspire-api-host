@@ -41,6 +41,7 @@ from app.modules.cms.schemas import (
     NewsEventCreate,
     NewsEventItem,
     NewsEventListResponse,
+    NewsEventReorderRequest,
     NewsEventUpdate,
     MediaAssetListResponse,
     MediaAssetResponse,
@@ -227,6 +228,12 @@ async def create_news_event(
     payload: NewsEventCreate, db: AsyncSession = Depends(get_db)
 ) -> NewsEventItem:
     return await service.create_news_event(db, payload)
+
+
+# Declared before /news-events/{news_event_id} so "reorder" is not read as an id.
+@router.put("/news-events/reorder", status_code=204)
+async def reorder_news_events(payload: NewsEventReorderRequest, db: AsyncSession = Depends(get_db)) -> None:
+    await service.reorder_news_events(db, payload)
 
 
 @router.get("/news-events/{news_event_id}", response_model=NewsEventItem)
