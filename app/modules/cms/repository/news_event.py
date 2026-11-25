@@ -90,11 +90,11 @@ class NewsEventRepository:
         await self.db.refresh(item)
         return item
 
-    async def ids_in_website_order(self) -> list[int]:
+    async def ids_in_website_order(self) -> List[int]:
         stmt = select(NewsEvent.news_event_id).order_by(*WEBSITE_ORDER)
         return list((await self.db.execute(stmt)).scalars().all())
 
-    async def reorder(self, ordered_ids: list[int]) -> None:
+    async def reorder(self, ordered_ids: List[int]) -> None:
         """Give the listed posts positions 1..n in the order given."""
         positions = {news_event_id: index for index, news_event_id in enumerate(ordered_ids, start=1)}
         await self.db.execute(
