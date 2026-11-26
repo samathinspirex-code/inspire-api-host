@@ -190,7 +190,7 @@ def offer_letter_email_content(first_name: str, full_name: str, programme: str, 
         _OFFER_INTRO, "", "YOUR NEXT STEPS", "", next_steps, "",
         *doc_text, f"Offer Valid Until: {expiry}", "",
         *[line for paragraph in _OFFER_CLOSING for line in (paragraph, "")],
-        "Warm regards,", "Admissions Team", "Inspire College", "071 199 3331",
+        "Warm regards,", "Admissions Team", "Inspire College", "076 097 4225",
     ])
 
     # Plain personal-letter HTML: no banner, coloured boxes, images or buttons.
@@ -226,7 +226,7 @@ def offer_letter_email_content(first_name: str, full_name: str, programme: str, 
         lines.append(f'<p>Submit your documents: <a href="{e(link)}">{e(link)}</a></p>')
     lines.append(f"<p>Offer valid until: {e(expiry)}</p>")
     lines += [para(paragraph) for paragraph in _OFFER_CLOSING]
-    lines.append("<p>Warm regards,<br>Admissions Team<br>Inspire College<br>071 199 3331</p>")
+    lines.append("<p>Warm regards,<br>Admissions Team<br>Inspire College<br>076 097 4225</p>")
     markup = (
         '<!doctype html><html><body><div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#222">'
         + "".join(lines)

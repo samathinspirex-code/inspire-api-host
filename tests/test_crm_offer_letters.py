@@ -39,7 +39,7 @@ def test_offer_email_has_details_bullets_link_and_expiry():
     assert "Submit Your Documents: https://site/offer-documents/abc" in text and "Offer Valid Until: 18 January 2027" in text
     assert "Nimal &lt;Perera&gt;" in markup and "<Perera>" not in markup
     assert markup.count("<li") == 3 and "NIC or Passport" in markup and "Academic Transcript" in markup
-    assert 'href="https://site/offer-documents/abc"' in markup and "071 199 3331" in markup
+    assert 'href="https://site/offer-documents/abc"' in markup and "076 097 4225" in markup
     assert "background" not in markup and "<table" not in markup and "<img" not in markup  # plain letter, so Gmail keeps it in Primary
     assert text.count("We are pleased to offer you") == 1
 
