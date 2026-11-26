@@ -282,9 +282,9 @@ async def public_upload_document(db: AsyncSession, token: str, payload) -> dict:
     await ensure_offer_tables(db)
     offer = await _offer_by_token(db, token)
     if offer is None:
-        raise APIError(404, "OFFER_NOT_FOUND", "This offer link is not valid. Please contact admissions on 071 199 3331.")
+        raise APIError(404, "OFFER_NOT_FOUND", "This offer link is not valid. Please contact admissions on 076 097 4225.")
     if offer["expires_at"] <= datetime.now(timezone.utc):
-        raise APIError(410, "OFFER_EXPIRED", "This offer has expired. Please contact admissions on 071 199 3331.")
+        raise APIError(410, "OFFER_EXPIRED", "This offer has expired. Please contact admissions on 076 097 4225.")
     label = DOCUMENT_TYPES[payload.document_type]
     key = await store_private_document(payload, f"admissions/offer-documents/{offer['lead_id']}", label=label.lower())
     file_name = re.sub(r"[\r\n]", "", payload.filename.replace("\\", "/").split("/")[-1])[:255] or "document"

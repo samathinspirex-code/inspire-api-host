@@ -606,6 +606,11 @@ async def _is_host_participant(db: AsyncSession, meeting_id: int, obj: dict, par
     return bool(host_email and email == host_email)
 
 
+def _host_ended_for_all(participant: dict) -> bool:
+    """Zoom's leave reason when the host chose End Meeting for All."""
+    return "host ended the meeting" in str(participant.get("leave_reason") or "").casefold()
+
+
 async def receive_webhook(db: AsyncSession, event: dict) -> None:
     name=event.get("event",""); obj=event.get("payload",{}).get("object",{}); meeting_id=str(obj.get("id") or "")
     local=await db.scalar(text("SELECT meeting_id FROM lms_online_meetings WHERE provider='zoom' AND provider_meeting_id=:id ORDER BY meeting_id DESC LIMIT 1"),{"id":meeting_id})
@@ -624,18 +629,29 @@ async def receive_webhook(db: AsyncSession, event: dict) -> None:
             await db.execute(text("""UPDATE lms_online_meetings
               SET host_joined_uuid=:uuid,host_joined_at=now()
               WHERE meeting_id=:id AND status='scheduled'"""),{"uuid":obj["uuid"],"id":local})
-    if name=="meeting.ended":
-        # Zoom also sends meeting.ended when students joined before the host and
-        # then all left, so the event alone never completes a class. It completes
-        # the class only when the host account joined this same occurrence (End
-        # for All in the Zoom app) or after an LMS-confirmed End for All. Anything
-        # else is left to sweep_finished_meetings and its participant report.
+    if name=="meeting.participant_left" and obj.get("uuid") and _host_ended_for_all(obj.get("participant") or {}):
+        # End Meeting for All in the Zoom app: every participant, the host
+        # included, leaves with Zoom's "Host ended the meeting" reason. A host
+        # who only clicks Leave Meeting gets "left the meeting" instead.
         completed=await db.scalar(text("""UPDATE lms_online_meetings
           SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
           WHERE meeting_id=:id AND status='scheduled' AND (
-            (CAST(:uuid AS VARCHAR) IS NOT NULL AND host_joined_uuid=CAST(:uuid AS VARCHAR))
-            OR (processing_status='end_requested' AND updated_at >= now()-interval '2 minutes')
-          ) RETURNING meeting_id"""),{"id":local,"uuid":obj.get("uuid") or None})
+            CAST(:started AS TIMESTAMPTZ) IS NULL
+            OR CAST(:started AS TIMESTAMPTZ) BETWEEN start_time-interval '2 hours' AND end_time+interval '2 hours'
+          ) RETURNING meeting_id"""),{"id":local,"started":instance_started})
+        if completed:
+            kinds.append("attendance")
+    if name=="meeting.ended":
+        # Zoom sends meeting.ended whenever the last person leaves: a lecturer
+        # who opened early and clicked Leave Meeting, or students who joined and
+        # left. It never says whether the host ended it for all, so on its own it
+        # completes nothing. Only an LMS-confirmed End for All completes here;
+        # the Zoom app's End for All arrives as participant_left above.
+        completed=await db.scalar(text("""UPDATE lms_online_meetings
+          SET status='completed',processing_status='attendance_pending',processing_error=NULL,updated_at=now()
+          WHERE meeting_id=:id AND status='scheduled'
+            AND processing_status='end_requested' AND updated_at >= now()-interval '2 minutes'
+          RETURNING meeting_id"""),{"id":local})
         if completed:
             kinds.append("attendance")
     if name=="recording.completed":
@@ -768,6 +784,17 @@ def _host_attended(participants: list[dict], host: dict) -> bool:
             return True
         email = str(participant.get("user_email") or participant.get("email") or "").strip().casefold()
         if host_email and email == host_email:
+            return True
+    return False
+
+
+def _others_in_scheduled_time(participants: list[dict], meeting: dict, host: dict) -> bool:
+    """Someone other than the host account was still there once the class began."""
+    for participant in participants:
+        if _host_attended([participant], host):
+            continue
+        left = _dt(participant.get("leave_time"))
+        if left is None or left >= meeting["start_time"]:
             return True
     return False
 
@@ -1194,12 +1221,16 @@ async def sweep_finished_meetings(db: AsyncSession, now: datetime, limit: int=10
             participants=await _past_participants(dict(meeting),token)
             if not _participants_near_class(participants,dict(meeting)):
                 continue
-            # Students who joined early and left end a Zoom occurrence too.
-            # Keep the class scheduled until the host's own session has ended.
-            # A class taught without the host account only completes once its
-            # scheduled time is well past and Zoom no longer reports it live.
-            if not _host_attended(participants,dict(host)):
+            # An ended occurrence is not a finished class: a lecturer who opened
+            # it early and clicked Leave Meeting, or students who joined and left,
+            # end one too. Complete at once only when the report shows End for
+            # All. Otherwise this is the fallback for a missed webhook: the
+            # scheduled time is well past, someone besides the host account was in
+            # the class during its scheduled time, and Zoom no longer reports it live.
+            if not any(_host_ended_for_all(p) for p in participants):
                 if now < meeting["end_time"]+timedelta(minutes=NO_HOST_COMPLETION_GRACE_MINUTES):
+                    continue
+                if not _others_in_scheduled_time(participants,dict(meeting),dict(host)):
                     continue
                 if await _meeting_may_be_live(dict(meeting),token):
                     continue

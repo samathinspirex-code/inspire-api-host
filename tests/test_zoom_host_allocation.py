@@ -232,16 +232,46 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(any("host_joined_uuid=:uuid" in item[0] for item in database.statements))
 
-    async def test_meeting_ended_completes_only_the_occurrence_the_host_joined(self):
-        database = _WebhookDatabase()
+    async def test_meeting_ended_alone_never_completes_after_host_joined(self):
+        # Lecturer opened early and clicked Leave Meeting: Zoom still sends meeting.ended.
+        database = _WebhookDatabase(completed=None)
 
         await receive_webhook(database, {
             "event": "meeting.ended",
             "payload": {"object": {"id": "123456", "uuid": "lecturer-uuid"}},
         })
 
-        self.assertIn("host_joined_uuid=CAST(:uuid AS VARCHAR)", database.statements[0][0])
-        self.assertEqual(database.statements[0][1]["uuid"], "lecturer-uuid")
+        self.assertNotIn("host_joined_uuid", database.statements[0][0])
+        self.assertIn("processing_status='end_requested'", database.statements[0][0])
+        self.assertEqual(len(database.statements), 1)
+
+    async def test_zoom_app_end_for_all_completes_class(self):
+        database = _WebhookDatabase()
+
+        await receive_webhook(database, {
+            "event": "meeting.participant_left",
+            "payload": {"object": {"id": "123456", "uuid": "lecturer-uuid",
+                                   "start_time": "2026-10-10T09:00:00Z",
+                                   "participant": {"user_name": "Student",
+                                                   "leave_reason": "Student left the meeting.<br>Reason : Host ended the meeting."}}},
+        })
+
+        self.assertIn("SET status='completed'", database.statements[0][0])
+        self.assertNotIn("end_requested", database.statements[0][0])
+        self.assertEqual(database.statements[1][1]["kind"], "attendance")
+
+    async def test_host_leaving_without_end_for_all_does_not_complete(self):
+        database = _WebhookDatabase()
+
+        await receive_webhook(database, {
+            "event": "meeting.participant_left",
+            "payload": {"object": {"id": "123456", "uuid": "lecturer-uuid", "host_id": "host-zoom-id",
+                                   "participant": {"id": "host-zoom-id",
+                                                   "leave_reason": "inspire college left the meeting.<br>Reason : left the meeting."}}},
+        })
+
+        self.assertEqual(database.statements, [])
+        self.assertEqual(database.commits, 1)
 
     async def test_meeting_started_updates_only_the_scheduled_occurrence(self):
         database = _WebhookDatabase()
@@ -302,7 +332,7 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
             {"join_time": "2026-10-16T08:02:00Z", "leave_time": "2026-10-16T08:12:00Z"},
         ]
         with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")), \
-             patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)):
+             patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)),              patch("app.modules.lms.zoom_service._meeting_may_be_live", new=AsyncMock(return_value=False)):
             completed = await sweep_finished_meetings(database, start + timedelta(hours=1))
         self.assertEqual(completed, 1)
         self.assertTrue(any("SET status='completed'" in sql for sql in database.statements))
@@ -345,6 +375,43 @@ class ZoomHostAllocationTests(unittest.IsolatedAsyncioTestCase):
             completed = await sweep_finished_meetings(database, start + timedelta(minutes=95))
         self.assertEqual(completed, 0)
         self.assertFalse(any("SET status='completed'" in sql for sql in database.statements))
+
+    async def test_lecturer_opening_early_and_leaving_does_not_complete_on_return(self):
+        start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+        database = _FinishedMeetingDatabase({
+            "meeting_id": 264, "zoom_host_connection_id": 1,
+            "start_time": start, "end_time": start + timedelta(minutes=60),
+        })
+        participants = [{"id": "host-zoom-id", "join_time": "2026-10-16T07:40:00Z",
+                         "leave_time": "2026-10-16T07:45:00Z", "leave_reason": "left the meeting"}]
+        with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")),              patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)),              patch("app.modules.lms.zoom_service._meeting_may_be_live", new=AsyncMock(return_value=False)):
+            soon = await sweep_finished_meetings(database, start - timedelta(minutes=10), grace_minutes=-60)
+            later = await sweep_finished_meetings(database, start + timedelta(hours=3))
+        self.assertEqual((soon, later), (0, 0))
+        self.assertFalse(any("SET status='completed'" in sql for sql in database.statements))
+
+    async def test_students_joining_after_start_without_end_for_all_wait_for_class_time(self):
+        start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+        database = _FinishedMeetingDatabase({
+            "meeting_id": 265, "zoom_host_connection_id": 1,
+            "start_time": start, "end_time": start + timedelta(minutes=60),
+        })
+        participants = [{"name": "Student", "join_time": "2026-10-16T08:01:00Z", "leave_time": "2026-10-16T08:05:00Z"}]
+        with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")),              patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)),              patch("app.modules.lms.zoom_service._meeting_may_be_live", new=AsyncMock(return_value=False)):
+            completed = await sweep_finished_meetings(database, start + timedelta(minutes=20))
+        self.assertEqual(completed, 0)
+
+    async def test_report_showing_end_for_all_completes_on_return(self):
+        start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
+        database = _FinishedMeetingDatabase({
+            "meeting_id": 266, "zoom_host_connection_id": 1,
+            "start_time": start, "end_time": start + timedelta(minutes=60),
+        })
+        participants = [{"id": "host-zoom-id", "join_time": "2026-10-16T08:00:00Z", "leave_time": "2026-10-16T08:40:00Z",
+                         "leave_reason": "left the meeting. Reason : Host ended the meeting."}]
+        with patch("app.modules.lms.zoom_service._access_token", new=AsyncMock(return_value="token")),              patch("app.modules.lms.zoom_service._past_participants", new=AsyncMock(return_value=participants)):
+            completed = await sweep_finished_meetings(database, start + timedelta(minutes=41), grace_minutes=0)
+        self.assertEqual(completed, 1)
 
     async def test_finished_meeting_sweep_waits_for_zoom_report(self):
         start = datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc)
