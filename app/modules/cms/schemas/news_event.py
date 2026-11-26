@@ -28,7 +28,9 @@ def _clean_media_reference(value: Optional[str]) -> Optional[str]:
 
 
 class NewsEventCreate(BaseModel):
-    slug: str = Field(..., min_length=1, max_length=255)
+    # The link is written by the server (AI on create, kept as is on edit). Still accepted so an
+    # older CMS build that sends it keeps working, but the value is ignored.
+    slug: Optional[str] = Field(default=None, max_length=255)
     title: str = Field(..., min_length=1, max_length=255)
     kind: NewsEventKind = "News"
     category: str = Field(..., min_length=1, max_length=100)
@@ -60,7 +62,9 @@ class NewsEventCreate(BaseModel):
 
     @field_validator("slug")
     @classmethod
-    def validate_slug(cls, value: str) -> str:
+    def validate_slug(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return None
         normalized = value.strip().lower()
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", normalized):
             raise ValueError("must contain lowercase letters, numbers, and single hyphens only")
@@ -105,6 +109,8 @@ class NewsEventItem(BaseModel):
     video_url: Optional[str] = None
     video_orientation: Optional[VideoOrientation] = None
     video_poster_url: Optional[str] = None
+    meta_title: Optional[str] = None
+    meta_description: Optional[str] = None
     position: int = 0
     created_at: datetime
     updated_at: datetime
