@@ -22,6 +22,7 @@ logging.disable(logging.INFO)
 from sqlalchemy import text  # noqa: E402
 
 from app.core.database import AsyncSessionLocal, engine  # noqa: E402
+from app.modules.lms import zoom_service  # noqa: E402
 from app.modules.lms.zoom_service import _access_token, sync_attendance  # noqa: E402
 
 UTC = timezone.utc
@@ -41,6 +42,10 @@ def _class(meeting_id: int, zoom_id: str, day: str, start: str, end: str, slot: 
 # by the topic in each class recording's title. Choose a group with --class NAME.
 # Class students who get no absent records (test or staff accounts), per group.
 SKIP_ABSENT = {"market-research": {2}}  # Vishwa
+# Zoom display names that are a class student under a misspelt name, per group.
+NAME_LINKS = {
+    "ft-c-l4-m1": {"Meepage Sanoj Bandara": "Meppage Sanoj Bandara", "Rasheeda!": "Rasheedha Muhas"},
+}
 GROUPS = {
     # AI Leadership and Business Productivity Mastery (class 11), 4:00-6:00 PM Sri Lanka.
     "ai-leadership": [
@@ -75,6 +80,77 @@ GROUPS = {
     "ai-for-hr": [
         _class(248, "86191457996", "2026-11-01", "03:30", "06:30", "9:00 AM-12:00 PM SL"),
         _class(247, "83531271368", "2026-11-08", "03:30", "06:30", "9:00 AM-12:00 PM SL"),
+    ],
+    # How Business and Organizations Works, PT_B_L3_M2 September 2026 (class 21), Saturdays
+    # from 3:00 PM Sri Lanka, booked for 3 hours. Both classes ended about an hour early, so
+    # the class time is how long they really ran in Zoom. 3 and 16 Oct aren't in Zoom.
+    "pt-b-l3-m2": [
+        _class(251, "89154674688", "2026-10-31", "09:31:08", "11:39:31", "3:01-5:09 PM SL (ended early)"),
+        _class(250, "85860792138", "2026-11-07", "09:29:39", "11:28:59", "3:00-4:59 PM SL (ended early)"),
+    ],
+    # Marketing Mix, PT_B_L4_M6 September Intake (class 22), 3-hour classes on the second
+    # Zoom account (host 2). Zoom has no record of the classes before 1 Nov.
+    "pt-b-l4-m6": [
+        _class(255, "82920898292", "2026-11-01", "08:30", "11:30", "2:00-5:00 PM SL", host=2),
+        # Booked in Zoom for Sunday 8 Nov but held on Saturday 7 Nov, ending at 12:00 PM.
+        _class(254, "87119353227", "2026-11-07", "03:30", "06:30", "9:00 AM-12:00 PM SL", host=2),
+    ],
+    # Introduction to Computer Programming, FT-L3_C_M1 August 2026 (class 9), 10:00-11:00 AM
+    # Sri Lanka. Classes before 21 Oct used a recurring Zoom meeting whose past occurrences
+    # Zoom no longer returns; 2 Nov, 4 Nov, 9 Nov and 13 Nov aren't available either.
+    "ft-l3-c-m1": [
+        _class(34, "82179149549", "2026-10-21", "04:30", "05:30", "10:00-11:00 AM SL"),
+        _class(33, "86467001331", "2026-10-23", "04:30:13", "05:15:10", "10:00-10:45 AM SL (ended early)"),
+        _class(32, "81221868873", "2026-10-26", "04:30", "05:30", "10:00-11:00 AM SL"),
+        _class(30, "84993183418", "2026-10-28", "04:30", "05:30", "10:00-11:00 AM SL"),
+        _class(28, "87533381734", "2026-10-30", "04:30", "05:30", "10:00-11:00 AM SL"),
+        _class(27, "81617327273", "2026-11-06", "04:30", "05:30", "10:00-11:00 AM SL"),
+        _class(26, "81300986731", "2026-11-11", "04:30", "05:30", "10:00-11:00 AM SL"),
+    ],
+    # Communication Skills for Business, B_HND_M4_FT November (class 2). These classes were
+    # held at other times than booked in Zoom and were short, so each class time is how long
+    # it really ran in Zoom (first join to last leave). Other dates aren't in Zoom.
+    "b-hnd-m4-ft": [
+        _class(264, "88352669597", "2026-10-19", "07:30:23", "08:07:47", "1:00-1:38 PM SL (as held)"),
+        _class(262, "86558505362", "2026-10-23", "07:41:05", "09:00:43", "1:11-2:31 PM SL (as held)"),
+        _class(261, "82944246689", "2026-10-30", "06:04:18", "06:21:06", "11:34-11:51 AM SL (as held)"),
+        _class(260, "81536071245", "2026-11-06", "05:16:31", "05:54:22", "10:46-11:24 AM SL (as held)"),
+    ],
+    # Introduction to Computing Mathematics, PT_C_L3 September 2026 (class 24), Sundays
+    # 3:00-6:00 PM Sri Lanka. Only 1 Nov is still in Zoom.
+    "pt-c-l3": [
+        _class(273, "82841228523", "2026-11-01", "09:30", "12:30", "3:00-6:00 PM SL"),
+    ],
+    # Programming and Scripting, FT_C_L4_M1 September Intake (class 23), 9:00-10:00 AM Sri
+    # Lanka. Classes before 21 Oct used a recurring Zoom meeting whose past occurrences Zoom
+    # no longer returns; 4 Nov's Zoom meeting only had a one-person join.
+    "ft-c-l4-m1": [
+        _class(284, "87126968131", "2026-10-21", "03:30", "04:30", "9:00-10:00 AM SL"),
+        _class(283, "87687576410", "2026-10-23", "03:30", "04:30", "9:00-10:00 AM SL"),
+        _class(281, "87965662976", "2026-10-30", "03:30", "04:30", "9:00-10:00 AM SL"),
+        _class(279, "82167826935", "2026-11-09", "03:30", "04:30", "9:00-10:00 AM SL"),
+        _class(278, "85308710375", "2026-11-11", "03:30", "04:30", "9:00-10:00 AM SL"),
+        _class(277, "84088768840", "2026-11-13", "03:30", "04:30", "9:00-10:00 AM SL"),
+    ],
+    # Data Preparation and Quality Risks, FT_C_L4_PATHWAYS/AI_M6 September 2026 (class 25),
+    # 2:00-3:00 PM Sri Lanka. 23 Oct was two short feedback sessions and 30 Oct ended early,
+    # so those use how long they really ran. Other dates aren't in Zoom.
+    "ft-c-l4-ai-m6": [
+        _class(302, "89099143723", "2026-10-21", "08:30", "09:30", "2:00-3:00 PM SL"),
+        _class(301, "88117954736", "2026-10-23", "07:17:08", "07:45:59", "12:47-1:16 PM SL (feedback session)"),
+        _class(300, "83134071194", "2026-10-23", "08:22:23", "08:38:48", "1:52-2:09 PM SL (feedback session)"),
+        _class(297, "85906143269", "2026-10-30", "08:15:49", "09:03:15", "1:46-2:33 PM SL (ended early)"),
+        _class(296, "83600897881", "2026-11-06", "08:30", "09:30", "2:00-3:00 PM SL"),
+    ],
+    # Data Preparation and Quality Risks, PT_C_L4_PATHWAYS/AI_M6 September 2026 (class 26),
+    # Saturdays 2:00-5:00 PM Sri Lanka (25 Oct was a Sunday 9:00 AM-12:00 PM class).
+    # 3 Oct and 10 Oct aren't in Zoom.
+    "pt-c-l4-ai-m6": [
+        _class(317, "84006147983", "2026-10-24", "08:30", "11:30", "2:00-5:00 PM SL"),
+        _class(316, "81535562101", "2026-10-25", "03:30", "06:30", "9:00 AM-12:00 PM SL"),
+        _class(315, "83649236021", "2026-10-31", "08:30", "11:30", "2:00-5:00 PM SL"),
+        _class(314, "87800651768", "2026-11-07", "08:30", "11:30", "2:00-5:00 PM SL"),
+        _class(313, "83281428079", "2026-11-14", "08:30", "11:30", "2:00-5:00 PM SL"),
     ],
 }
 
@@ -147,8 +223,26 @@ async def backfill(item: dict, apply: bool, skip: set[int]) -> None:
             await db.rollback()
 
 
+def _link_names(links: dict[str, str]) -> None:
+    """Rename misspelt Zoom display names to the student's LMS name before matching."""
+    if not links:
+        return
+    original = zoom_service._past_participants
+
+    async def renamed(context, token):
+        participants = await original(context, token)
+        for participant in participants:
+            name = (participant.get("name") or "").strip()
+            if name in links:
+                participant["name"] = links[name]
+        return participants
+
+    zoom_service._past_participants = renamed
+
+
 async def main(group: str, apply: bool) -> None:
     engine.echo = False
+    _link_names(NAME_LINKS.get(group, {}))
     try:
         for item in GROUPS[group]:
             await backfill(item, apply, SKIP_ABSENT.get(group, set()))
