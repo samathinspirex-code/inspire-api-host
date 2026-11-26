@@ -3,7 +3,7 @@ from typing import Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, ValidationError
+from app.core.errors import NotFoundError, ValidationError
 from app.modules.cms.repository import (
     OutcomeRepository,
     ProgramRepository,
@@ -34,7 +34,7 @@ from app.modules.cms.schemas import (
     NewsEventUpdate,
     PublicNewsEventListResponse,
 )
-from app.modules.cms import media_service
+from app.modules.cms import media_service, news_seo
 
 
 async def list_programs(
@@ -272,11 +272,29 @@ async def list_news_events(
     )
 
 
+async def _unique_news_slug(repo: NewsEventRepository, base: str, own_id: Optional[int] = None) -> str:
+    """Return base, or base-2, base-3 ... when another post already uses it."""
+    base = base[:240].strip("-") or "news"
+    candidate, number = base, 1
+    while True:
+        owner = await repo.get_by_slug(candidate)
+        if owner is None or owner.news_event_id == own_id:
+            return candidate
+        number += 1
+        candidate = f"{base}-{number}"
+
+
 async def create_news_event(db: AsyncSession, payload: NewsEventCreate) -> NewsEventItem:
     repo = NewsEventRepository(db)
-    if await repo.get_by_slug(payload.slug):
-        raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
+    # The link, meta title and meta description are written by AI; a failed AI call never blocks saving.
+    seo = await news_seo.generate_news_seo(
+        payload.title, payload.excerpt, payload.content, kind=payload.kind, category=payload.category
+    )
+    base_slug = seo["slug"] if seo else news_seo.fallback_slug(payload.title, payload.published_on)
+    data["slug"] = await _unique_news_slug(repo, base_slug)
+    data["meta_title"] = seo["meta_title"] if seo else None
+    data["meta_description"] = seo["meta_description"] if seo else None
     data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
     data["video_url"] = await media_service.resolve_media_reference(db, data.get("video_url"))
     data["video_poster_url"] = await media_service.resolve_media_reference(db, data.get("video_poster_url"))
@@ -300,10 +318,21 @@ async def update_news_event(
     item = await repo.get(news_event_id)
     if item is None:
         raise NotFoundError(f"News or event {news_event_id} not found")
-    slug_owner = await repo.get_by_slug(payload.slug)
-    if slug_owner is not None and slug_owner.news_event_id != news_event_id:
-        raise ConflictError(f"News or event slug '{payload.slug}' already exists")
     data = payload.model_dump()
+    # The link never changes on edit, so old URLs and shared links keep working.
+    data["slug"] = item.slug
+    text_changed = (
+        payload.title != item.title
+        or payload.excerpt != item.excerpt
+        or list(payload.content) != list(item.content or [])
+    )
+    if text_changed or not item.meta_title or not item.meta_description:
+        seo = await news_seo.generate_news_seo(
+            payload.title, payload.excerpt, payload.content, kind=payload.kind, category=payload.category
+        )
+        # When AI is unavailable, clear rather than keep meta that may describe the old text.
+        data["meta_title"] = seo["meta_title"] if seo else None
+        data["meta_description"] = seo["meta_description"] if seo else None
     data["image_url"] = await media_service.resolve_media_reference(db, data.get("image_url"))
     data["video_url"] = await media_service.resolve_media_reference(db, data.get("video_url"))
     data["video_poster_url"] = await media_service.resolve_media_reference(db, data.get("video_poster_url"))

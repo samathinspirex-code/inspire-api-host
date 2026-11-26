@@ -18,7 +18,8 @@ def is_configured() -> bool:
     return bool(settings.OPENAI_API_KEY)
 
 
-def _request(instructions: str, conversation: list[dict], max_output_tokens: int | None, stream: bool) -> dict:
+def _request(instructions: str, conversation: list[dict], max_output_tokens: int | None, stream: bool,
+             json_schema: dict | None = None) -> dict:
     body = {
         "model": settings.OPENAI_MODEL,
         "instructions": instructions,
@@ -28,6 +29,9 @@ def _request(instructions: str, conversation: list[dict], max_output_tokens: int
         "text": {"verbosity": "low"},
         "store": False,
     }
+    if json_schema:
+        # Strict structured output: {"name": ..., "schema": {...}}.
+        body["text"]["format"] = {"type": "json_schema", "strict": True, **json_schema}
     if stream:
         body["stream"] = True
     return body
@@ -46,11 +50,15 @@ def _output_text(data: dict) -> str:
     return "\n".join(text.strip() for text in texts if text.strip()).strip()
 
 
-async def respond(instructions: str, conversation: list[dict], *, max_output_tokens: int | None = None, tag: str = "OpenAI") -> str | None:
-    """Return the reply text, or None when the request fails."""
+async def respond(instructions: str, conversation: list[dict], *, max_output_tokens: int | None = None, tag: str = "OpenAI",
+                  json_schema: dict | None = None, timeout: float | None = None) -> str | None:
+    """Return the reply text, or None when the request fails.
+
+    With json_schema ({"name": ..., "schema": {...}}) the reply is JSON text matching that schema.
+    """
     try:
-        async with httpx.AsyncClient(verify=_download_ssl_context(), timeout=settings.OPENAI_TIMEOUT_SECONDS) as client:
-            response = await client.post(RESPONSES_URL, headers=_headers(), json=_request(instructions, conversation, max_output_tokens, False))
+        async with httpx.AsyncClient(verify=_download_ssl_context(), timeout=timeout or settings.OPENAI_TIMEOUT_SECONDS) as client:
+            response = await client.post(RESPONSES_URL, headers=_headers(), json=_request(instructions, conversation, max_output_tokens, False, json_schema))
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as exc:
