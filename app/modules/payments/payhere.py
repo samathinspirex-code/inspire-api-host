@@ -77,6 +77,10 @@ async def notify(c,body):
         await c.execute('''INSERT INTO gateway_events(provider,order_id,payment_id,status_code,amount,currency,method,signature_valid,outcome,raw)
             VALUES('payhere',$1,$2,$3,$4,$5,$6,$7,$8,$9)''',str(body.get('order_id',''))[:200],str(body.get('payment_id',''))[:200] or None,status,amount,
             str(body.get('payhere_currency',''))[:10],str(body.get('method',''))[:30],valid,outcome,dict(raw,reason=reason))
+        # PayHere took the money (signed, status 2) but Accounts did not record it: a person must refund or post it.
+        if valid and status==2 and outcome=='rejected' and (settings.WEB_API_ENABLED or settings.WEB_CHECKOUT_ENABLED):
+            from app.modules.website import checkout as web_checkout
+            await web_checkout.alert_unposted(c,body,amount,reason)
         return dict(ok=outcome!='rejected',reason=reason)
 
     if not valid: return await log('rejected','invalid signature')

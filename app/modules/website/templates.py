@@ -136,6 +136,18 @@ def slip_rejected(first: str, ref: str, what: str, reason: str, token: str) -> t
     return subject, _layout("We couldn't confirm your slip", body, ("Upload again or pay by card", pay_url(token))), text
 
 
+def finance_capture_alert(order_id: str, payment_id: str, amount, reason: str, student: str) -> tuple[str, str, str]:
+    subject = f"Card payment needs review — {order_id} ({lkr(amount) if amount is not None else 'amount unknown'})"
+    body = (f"<p>PayHere confirmed a card payment, but it was <b>not recorded in Accounts</b>.</p>"
+            f"<p>Order: <b>{escape(order_id)}</b><br>PayHere payment ID: <b>{escape(payment_id or '-')}</b><br>"
+            f"Amount: <b>{escape(lkr(amount) if amount is not None else '-')}</b><br>Student: {escape(student or '-')}<br>Reason: {escape(reason)}</p>"
+            "<p>Check the PayHere dashboard. Either refund the payment in PayHere, or record it on the learner in Payments → Learners & fees.</p>")
+    text = (f"PayHere confirmed a card payment that was NOT recorded in Accounts.\nOrder: {order_id}\nPayHere payment ID: {payment_id or '-'}\n"
+            f"Amount: {lkr(amount) if amount is not None else '-'}\nStudent: {student or '-'}\nReason: {reason}\n"
+            "Refund it in PayHere, or record it on the learner in Payments -> Learners & fees.\n")
+    return subject, _layout("Card payment needs review", body, foot="Inspire website · payments"), text
+
+
 def finance_slip_alert(student: str, ref: str, what: str, amount, reference: str) -> tuple[str, str, str]:
     subject = f"New bank slip to review — {ref} ({lkr(amount)})"
     body = (f"<p>{escape(student)} uploaded a bank slip for <b>{escape(what)}</b>.</p>"

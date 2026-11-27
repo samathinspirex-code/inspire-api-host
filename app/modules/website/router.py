@@ -1,4 +1,5 @@
 """Public routes for the new website (/api/v1/public/web/...) and the PayHere hand-off page (/pay/web/<token>/go)."""
+import hashlib
 import html
 import json
 import logging
@@ -220,13 +221,16 @@ async def upload_slip(token: str, body: SlipIn, request: Request):
     if not 0 < body.amount <= 10_000_000:
         raise ValidationError("Please enter the amount you transferred.")
     data, mime, ext = checkout.decode_slip(body.data_base64)
+    sha256 = hashlib.sha256(data).hexdigest()
     async with transaction() as c:
         await checkout.slip_target(c, token)  # fail fast before storing a file
+        await checkout.check_slip_file(c, sha256)
     key = await checkout.store_slip_file(data, mime, ext)
     async with transaction(write=True) as c:
         target = await checkout.slip_target(c, token)
         await checkout.add_slip(c, target, key=key, file_name=body.file_name, mime=mime, size=len(data), amount=body.amount,
-                                paid_on=body.paid_on.isoformat() if body.paid_on else None, reference=body.reference, note=body.note)
+                                paid_on=body.paid_on.isoformat() if body.paid_on else None, reference=body.reference, note=body.note,
+                                sha256=sha256)
     lead_id = target["order"]["crm_lead_id"] if target["order"] else None
     if lead_id:
         try:
@@ -258,7 +262,10 @@ async def payhere_handoff(token: str, request: Request):
             f"<body style='font-family:Arial,sans-serif;text-align:center;padding:70px 18px;color:#1d1530'>"
             f"<p>Opening the secure PayHere payment page…</p>"
             f"<form id=f method=post action='{html.escape(form['action'], quote=True)}'>{inputs}<button type=submit>Continue to PayHere</button></form>"
-            f"<script>document.getElementById('f').submit()</script></body>")
+            # Coming back here with Back (from PayHere) must not open a new payment: return to the invoice page instead.
+            f"<script>(function(){{var back={json.dumps(back)};var n=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0];"
+            f"if(n&&n.type==='back_forward'){{location.replace(back);return;}}"
+            f"addEventListener('pageshow',function(e){{if(e.persisted)location.replace(back);}});document.getElementById('f').submit();}})()</script></body>")
     headers = {**NO_STORE, "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
                "form-action https://www.payhere.lk https://sandbox.payhere.lk; base-uri 'none'; frame-ancestors 'none'"}
     return HTMLResponse(page, headers=headers)

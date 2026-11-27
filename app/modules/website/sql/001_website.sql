@@ -1,5 +1,6 @@
 -- New website (inspire-web-v2) on the shared API. Additive and safe to rerun: no existing table is changed
--- except two nullable/defaulted columns on payments.payment_links and payments.message_outbox.
+-- except two nullable/defaulted columns on payments.payment_links and payments.message_outbox (plus file_sha256 on the
+-- website's own payments.bank_slips).
 
 -- ---------- Website content (public schema) ----------
 CREATE TABLE IF NOT EXISTS public.website_courses (
@@ -223,6 +224,9 @@ CREATE TABLE IF NOT EXISTS payments.bank_slips (
   CHECK (web_order_id IS NOT NULL OR invoice_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS bank_slips_status_idx ON payments.bank_slips(status, created_at DESC);
+-- SHA-256 of the uploaded file, so the same slip cannot be sent twice (added after the first release; nullable for old rows).
+ALTER TABLE payments.bank_slips ADD COLUMN IF NOT EXISTS file_sha256 text;
+CREATE INDEX IF NOT EXISTS bank_slips_sha_idx ON payments.bank_slips(file_sha256) WHERE file_sha256 IS NOT NULL;
 
 ALTER TABLE payments.payment_links ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'accounts';
 ALTER TABLE payments.message_outbox ADD COLUMN IF NOT EXISTS html_body text;

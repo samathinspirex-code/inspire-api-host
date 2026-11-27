@@ -68,8 +68,23 @@ async def received_date(c, wanted: str | None) -> str:
 
 
 # ---------------------------------------------------------------- orders
+REUSE_MINUTES = 30
+
+
+async def _recent_same_order(c, *, email: str, phone: str, course_id, plan_code: str, method: str, lines: list[dict]) -> dict | None:
+    """The same choices submitted again within 30 minutes (refresh, timeout, second tab): reuse that unpaid order."""
+    return await one(c, f"""SELECT * FROM web_orders WHERE status IN ('pending','reserved') AND learner_id IS NULL
+          AND lower(email)=lower($1) AND right(regexp_replace(phone,'\\D','','g'),9)=$2 AND course_id=$3 AND plan_code=$4
+          AND method=$5 AND lines=$6::jsonb AND created_at > now() - interval '{REUSE_MINUTES} minutes'
+        ORDER BY created_at DESC LIMIT 1 FOR UPDATE""", email.strip(), digits9(phone), course_id, plan_code, method, lines)
+
+
 async def create_order(c, *, course: dict, terms: dict, plan_label: str, lines: list[dict], method: str, name: str, email: str,
                        phone: str, crm_lead_id: int | None, extra: dict) -> dict:
+    same = await _recent_same_order(c, email=email, phone=phone, course_id=course["course_id"], plan_code=terms["code"], method=method, lines=lines)
+    if same:
+        await audit(c, ACTOR, "reuse", "web_order", same["id"], dict(reference=same["reference"]))
+        return {**same, "reused": True}
     amount = sum((money(line["amount"]) for line in lines), money(0))
     for _ in range(5):
         ref = new_reference()
@@ -270,6 +285,14 @@ async def _main_enrolment(c, order: dict) -> dict | None:
         WHERE w.web_order_id=$1 AND w.year=1 ORDER BY (w.plan_label <> 'Add-on · pay in full') DESC, e.created_at LIMIT 1""", order["id"])
 
 
+async def _slip_waiting(c, *, order_id=None, invoice_id=None) -> bool:
+    return bool(await c.fetchval("""SELECT 1 FROM bank_slips WHERE status='pending' AND (($1::uuid IS NOT NULL AND web_order_id=$1)
+        OR ($2::uuid IS NOT NULL AND invoice_id=$2)) LIMIT 1""", order_id, invoice_id))
+
+
+SLIP_WAITING = "We are checking your bank slip. Please wait for finance to confirm it before paying by card, so you are not charged twice."
+
+
 async def _latest_slip(c, *, order_id=None, invoice_id=None) -> dict | None:
     s = await one(c, """SELECT status, reason, created_at FROM bank_slips WHERE ($1::uuid IS NOT NULL AND web_order_id=$1)
         OR ($2::uuid IS NOT NULL AND invoice_id=$2) ORDER BY created_at DESC LIMIT 1""", order_id, invoice_id)
@@ -312,8 +335,8 @@ async def pay_view(c, token: str) -> dict:
         return dict(invoice=_invoice_block(o["reference"], f"{o['course_title']} — {o['plan_label']}".strip(" —"), o["amount"], 0,
                                            o["created_at"].date().isoformat(), "open" if o["amount"] > 0 else "reserved", label, lines),
                     student=dict(first_name=first_name(o["full_name"])), course=o["course_title"], plan=o["plan_label"], schedule=schedule,
-                    summary=None, bank=cfg["bank"], card_enabled=card_ready() and o["amount"] > 0, slip=await _latest_slip(c, order_id=o["id"]),
-                    reference=o["reference"])
+                    summary=None, bank=cfg["bank"], slip=await _latest_slip(c, order_id=o["id"]), reference=o["reference"],
+                    card_enabled=card_ready() and o["amount"] > 0 and not await _slip_waiting(c, order_id=o["id"]))
     if kind == "order":
         o = rec
         enrolment = await _main_enrolment(c, o)
@@ -337,7 +360,8 @@ async def pay_view(c, token: str) -> dict:
                            _label(inv, as_of), [dict(label=inv["description"], amount=inv["amount"])]) if inv else \
         _invoice_block(rec.get("reference", ""), course, 0, 0, None, "paid", "Paid", [])
     return dict(invoice=block, student=dict(first_name=first_name(name)), course=course, plan=plan, schedule=view["schedule"],
-                summary=view["summary"], bank=cfg["bank"], card_enabled=card_ready() and bool(inv and inv["status"] == "open"),
+                summary=view["summary"], bank=cfg["bank"],
+                card_enabled=card_ready() and bool(inv and inv["status"] == "open") and not await _slip_waiting(c, invoice_id=inv["id"] if inv else None),
                 slip=await _latest_slip(c, invoice_id=inv["id"]) if inv else None, reference=o["reference"] if o else (inv["number"] if inv else ""))
 
 
@@ -360,6 +384,8 @@ async def checkout(c, token: str) -> dict:
         o = await one(c, "SELECT * FROM web_orders WHERE id=$1 FOR UPDATE", rec["id"])
         if o["status"] not in ("pending", "expired") or o["amount"] <= 0:
             raise ConflictError("This order has nothing to pay by card")
+        if await _slip_waiting(c, order_id=o["id"]):
+            raise ConflictError(SLIP_WAITING)
         attempt = await c.fetchval("SELECT COUNT(*) FROM web_checkouts WHERE web_order_id=$1", o["id"]) + 1
         order_id = f"WEB-{o['reference']}-{attempt}"
         await c.execute("INSERT INTO web_checkouts(order_id,web_order_id,amount) VALUES($1,$2,$3)", order_id, o["id"], o["amount"])
@@ -383,6 +409,8 @@ async def checkout(c, token: str) -> dict:
         link = await _ensure_link(c, inv)
     else:
         link = rec
+    if await _slip_waiting(c, invoice_id=link["invoice_id"]):
+        raise ConflictError(SLIP_WAITING)
     return await payhere.checkout(c, link["token"])
 
 
@@ -407,6 +435,20 @@ async def notify(c, body: dict, amount, payment_id: str, log) -> dict:
         return await log("rejected", "could not record in Accounts (" + type(exc).__name__ + "); review captured funds manually")
     await log("posted", "verified website payment")
     return dict(ok=True, web_order=o["reference"], learner=result["learner_no"])
+
+
+async def alert_unposted(c, body: dict, amount, reason: str) -> None:
+    """Email finance when PayHere confirmed money that Accounts did not record (second payment, cancelled order, locked month...)."""
+    order_id, payment_id = str(body.get("order_id", ""))[:200], str(body.get("payment_id", ""))[:200]
+    student = await c.fetchval("""SELECT o.full_name FROM web_checkouts w JOIN web_orders o ON o.id=w.web_order_id WHERE w.order_id=$1""", order_id) \
+        if order_id.startswith("WEB-") else await c.fetchval("""SELECT l.first_name||' '||l.last_name FROM checkout_orders co
+            JOIN payment_links pl ON pl.id=co.link_id JOIN learners l ON l.id=pl.learner_id WHERE co.order_id=$1""", order_id)
+    to = (await web_settings(c)).get("finance_email") or ""
+    if not to:
+        logger.warning("Unrecorded PayHere payment %s (%s): no finance email set in Website Payments settings", payment_id, reason)
+        return
+    subject, html, text = T.finance_capture_alert(order_id, payment_id, amount, reason, student or "")
+    await queue_email(c, to, subject, html, text)
 
 
 async def link_receipt(c, link: dict, amount, method: str) -> None:
@@ -498,15 +540,23 @@ async def slip_target(c, token: str) -> dict:
                 ref=inv["number"], what=inv["description"])
 
 
-async def add_slip(c, target: dict, *, key: str, file_name: str, mime: str, size: int, amount, paid_on, reference: str, note: str) -> dict:
+async def check_slip_file(c, sha256: str | None) -> None:
+    """The same slip file can only be used once (a re-upload, or last month's slip sent again)."""
+    if sha256 and await c.fetchval("SELECT 1 FROM bank_slips WHERE file_sha256=$1 AND status IN ('pending','approved') LIMIT 1", sha256):
+        raise ConflictError("We already have this slip. If you made another transfer, please upload the slip for that transfer.")
+
+
+async def add_slip(c, target: dict, *, key: str, file_name: str, mime: str, size: int, amount, paid_on, reference: str, note: str,
+                   sha256: str | None = None) -> dict:
     order, inv = target["order"], target["invoice"]
+    await check_slip_file(c, sha256)
     waiting = await c.fetchval("""SELECT COUNT(*) FROM bank_slips WHERE status='pending' AND (($1::uuid IS NOT NULL AND web_order_id=$1)
         OR ($2::uuid IS NOT NULL AND invoice_id=$2))""", order["id"] if order else None, inv["id"] if inv else None)
     if waiting >= 3:
         raise ConflictError("We already have slips waiting for review on this payment")
-    s = await one(c, """INSERT INTO bank_slips(web_order_id,invoice_id,storage_key,file_name,mime,size_bytes,amount,paid_on,reference,note)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *""", order["id"] if order else None, inv["id"] if inv else None, key,
-                  (file_name or "slip")[:200], mime, size, money(amount), paid_on, (reference or "").strip()[:120], (note or "").strip()[:500])
+    s = await one(c, """INSERT INTO bank_slips(web_order_id,invoice_id,storage_key,file_name,mime,size_bytes,amount,paid_on,reference,note,file_sha256)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *""", order["id"] if order else None, inv["id"] if inv else None, key,
+                  (file_name or "slip")[:200], mime, size, money(amount), paid_on, (reference or "").strip()[:120], (note or "").strip()[:500], sha256)
     subject, html, text = T.slip_received(first_name(target["name"]), target["ref"], target["what"])
     await queue_email(c, target["email"], subject, html, text)
     finance = (await web_settings(c)).get("finance_email") or ""

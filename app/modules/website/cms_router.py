@@ -414,6 +414,20 @@ async def record_reservation(order_id: str, request: Request, user=Depends(finan
     return await once(c, request, user, {"order": order_id}, run)
 
 
+@pay_router.get("/unposted-card-payments")
+async def unposted_card_payments(c=Depends(payments_db, scope="function")):
+    """Card payments PayHere confirmed (signed, status 2) that Accounts did not record: refund or record each one."""
+    return await rows(c, """SELECT g.id, g.received_at AS created_at, g.order_id, g.payment_id, g.amount, g.raw->>'reason' AS reason,
+            COALESCE(o.reference, pl.code) AS ref, COALESCE(o.full_name, l.first_name||' '||l.last_name) AS student
+        FROM gateway_events g
+        LEFT JOIN web_checkouts w ON w.order_id=g.order_id LEFT JOIN web_orders o ON o.id=w.web_order_id
+        LEFT JOIN checkout_orders co ON co.order_id=g.order_id LEFT JOIN payment_links pl ON pl.id=co.link_id
+        LEFT JOIN learners l ON l.id=pl.learner_id
+        WHERE g.provider='payhere' AND g.signature_valid AND g.status_code=2 AND g.outcome='rejected'
+          AND NOT EXISTS (SELECT 1 FROM gateway_events p WHERE p.provider='payhere' AND p.payment_id=g.payment_id AND p.outcome='posted')
+        ORDER BY g.received_at DESC LIMIT 100""")
+
+
 @pay_router.get("/slips")
 async def slips(status: str | None = Query("pending"), c=Depends(payments_db, scope="function")):
     return await rows(c, """SELECT s.id, s.status, s.amount, s.paid_on, s.reference, s.note, s.file_name, s.mime, s.size_bytes, s.reason,
