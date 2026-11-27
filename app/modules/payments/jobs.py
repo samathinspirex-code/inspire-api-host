@@ -17,13 +17,17 @@ async def daily(as_of=None):
         if await c.fetchval('SELECT demo_data FROM module_state WHERE id=true'):
             return dict(skipped='Dummy data loaded; scheduled billing and messaging are disabled')
         s=await billing.settings(c); issued=late=reminders=0
+        has_web=await c.fetchval("SELECT to_regclass('payments.web_enrolments') IS NOT NULL")
         await c.execute("UPDATE payment_links SET status='expired' WHERE status='sent' AND expires_at<now()")
         horizon=(date.fromisoformat(end)+timedelta(days=s['invoice_lead_days'])).isoformat()
         its=await rows(c,"SELECT i.id FROM instalments i JOIN enrolments e ON e.id=i.enrolment_id WHERE i.status='scheduled' AND e.status='active' AND i.due_date<=$1 ORDER BY i.due_date",horizon)
         for it in its:
             inv=await billing.invoice_instalment(c,it['id'],'scheduler',end)
             l=await c.fetchrow('SELECT * FROM learners WHERE id=$1',inv['learner_id'])
-            if l['email'] or l['phone']:
+            web=inv['enrolment_id'] and has_web and await c.fetchval('SELECT 1 FROM web_enrolments WHERE enrolment_id=$1',inv['enrolment_id'])
+            if web and l['email']:
+                await billing.create_link(c,dict(invoice_id=inv['id'],channel='email',origin='website'),'scheduler')
+            elif l['email'] or l['phone']:
                 channel='whatsapp' if l['phone'] and settings.PAYMENTS_WHATSAPP_TOKEN else 'email' if l['email'] else 'sms'
                 await billing.create_link(c,dict(invoice_id=inv['id'],channel=channel),'scheduler')
             else: await audit(c,'scheduler','missing_contact','invoice',inv['id'])
@@ -41,7 +45,11 @@ async def daily(as_of=None):
                 to=link['email'] if link['channel']=='email' else link['phone']
                 if to:
                     msg=f"Hi {link['first_name']},\nReminder: {link['purpose']} of LKR {link['amount']:,.2f}, due {link['due_date']}.\n{billing.link_url(link)}"
-                    await billing.enqueue(c,link['channel'],to,msg,'Fee reminder — Inspire College',link['id'],[link['first_name'],link['purpose'],f"LKR {link['amount']:,.2f}",link['due_date'],billing.link_url(link)])
+                    subject,body_html='Fee reminder — Inspire College',None
+                    if link.get('origin')=='website':
+                        from app.modules.website import templates as web_templates
+                        subject,body_html,msg=web_templates.reminder(link['first_name'],link['purpose'],link['amount'],link['due_date'],link['token'],stage)
+                    await billing.enqueue(c,link['channel'],to,msg,subject,link['id'],[link['first_name'],link['purpose'],f"LKR {link['amount']:,.2f}",link['due_date'],billing.link_url(link)],html=body_html)
                     await c.execute('UPDATE payment_links SET reminders_sent=$1,last_reminder_at=now() WHERE id=$2',stage,link['id']); reminders+=1
         await audit(c,'scheduler','daily','payments',end,dict(invoices=issued,late_fees=late,reminders=reminders))
         return dict(invoices=issued,late_fees=late,reminders=reminders)
@@ -49,7 +57,7 @@ async def daily(as_of=None):
 
 async def deliver(msg):
     if msg['channel']=='email':
-        r=await send_public_form_email(msg['subject'] or 'Inspire College Accounts',msg['body'],'<p style="white-space:pre-wrap">'+html.escape(msg['body'])+'</p>',
+        r=await send_public_form_email(msg['subject'] or 'Inspire College Accounts',msg['body'],msg.get('html_body') or ('<p style="white-space:pre-wrap">'+html.escape(msg['body'])+'</p>'),
             custom_id='payments-'+str(msg['id']),to_email=msg['to_addr'],to_name='Inspire learner')
         if not r.sent: raise RuntimeError(r.error or 'Email delivery failed')
         return

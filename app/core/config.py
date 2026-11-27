@@ -159,6 +159,19 @@ class Settings(BaseSettings):
     MEDIA_UPLOAD_EXPIRE_SECONDS: int = 900
     LIBREOFFICE_PATH: str = ""
 
+    # New website (inspire-web-v2) on this API. Every switch is off until the migration and seed have run.
+    WEB_API_ENABLED: bool = False          # content bundle, leads, news for the new website
+    WEB_CHECKOUT_ENABLED: bool = False     # online enrolment orders and card checkout
+    WEB_SLIPS_ENABLED: bool = False        # bank slip upload on the invoice page
+    WEB_DEMO_ENABLED: bool = False         # free demo LMS accounts
+    WEB_PROXY_SECRET: str = ""             # shared with the website server; lets it pass the visitor's IP for rate limits
+    WEB_SITE_URL: str = "https://inspire-web-v2.vercel.app"   # where /pay/<token> links in emails point
+    # Bank slips are private. Use a bucket that is not served by CloudFront; falls back to MEDIA_BUCKET (private keys, SSE).
+    PAYMENTS_SLIP_BUCKET: str = ""
+    PAYMENTS_MAIL_TEST_TO: str = ""        # while testing: every website payment email goes to this inbox
+    PAYMENTS_SLIP_LOCAL_DIR: str = ""      # local development only: keep slips in this folder when no bucket is set
+    DEMO_TTL_HOURS: int = 24
+
     # Database backup to S3 (scripts/run_db_backup_s3.py). The media bucket is
     # served publicly through CloudFront, so the dump is always encrypted with
     # DB_BACKUP_ENCRYPTION_KEY before upload. Keep a copy of the key offline:

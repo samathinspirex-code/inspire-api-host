@@ -10,7 +10,7 @@ OUTCOMES = [("Uncontactable", {"uncontactable"}), ("Future Prospect", {"future_p
             ("In progress", {"new_lead", "contacted", "follow_up", "potential"}), ("Enrolled", {"enrolled"})]
 MAX_SOURCES = 7
 # Channels whose leads the CRM already records. Their spend is unknown until an ad account is connected.
-LIVE_CHANNELS = {"WhatsApp Business": ("whatsapp",), "Website & SEO": ("website_admission", "website_contact", "wtc_registrations_form")}
+LIVE_CHANNELS = {"WhatsApp Business": ("whatsapp",), "Website & SEO": ("website_admission", "website_contact", "new_website", "wtc_registrations_form")}
 
 
 def _scope(counsellor_id: int | None) -> tuple[str, dict]:

@@ -33,6 +33,8 @@ from app.modules.connectors.router import router as connectors_router
 from app.modules.whatsapp_bot.router import router as whatsapp_bot_router
 from app.modules.ai_copilot.router import router as copilot_router
 from app.modules.payments.db import close_pool as close_payments_pool
+from app.modules.website.router import router as website_public_router, handoff_router as website_handoff_router
+from app.modules.website.cms_router import router as website_cms_router, pay_router as website_payments_router
 
 @asynccontextmanager
 async def lifespan(app):
@@ -84,6 +86,7 @@ app.include_router(crm_public_router)
 app.include_router(crm_offer_public_router)
 app.include_router(crm_integration_router)
 app.include_router(site_assistant_router)
+app.include_router(website_payments_router)
 app.include_router(payments_router)
 app.include_router(payments_public_router)
 app.include_router(insights_router)
@@ -92,4 +95,7 @@ app.include_router(partner_public_router)
 app.include_router(connectors_router)
 app.include_router(whatsapp_bot_router)
 app.include_router(copilot_router)
+app.include_router(website_public_router)
+app.include_router(website_handoff_router)
+app.include_router(website_cms_router)
 

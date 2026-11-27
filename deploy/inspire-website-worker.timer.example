@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the new website housekeeping every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=inspire-website-worker.service
+
+[Install]
+WantedBy=timers.target

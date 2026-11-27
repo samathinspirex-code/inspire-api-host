@@ -412,4 +412,12 @@ async def notify(request:Request):
     # notify() verifies again before posting; only valid signatures reach the DB.
     if not payhere.verify(body): return Response('OK',media_type='text/plain')
     async with transaction(write=True) as c: await payhere.notify(c,body)
+    order_id=str(body.get('order_id',''))
+    if order_id.startswith('WEB-'):
+        # New website: update the student's CRM lead now that the receipt has committed (retried by the website worker).
+        try:
+            from app.modules.website import crm_sync
+            await crm_sync.sync_paid_orders(5,'-'.join(order_id.split('-')[1:3]))
+        except Exception:
+            pass
     return Response('OK',media_type='text/plain')

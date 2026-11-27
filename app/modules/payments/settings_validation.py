@@ -23,5 +23,14 @@ def validate(key,value):
         valid=isinstance(value,dict) and set(value)=={'current','d30','d60','d90','d90p'} and all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and 0<=v<=1 for v in value.values())
     elif key=='payment_methods':
         valid=isinstance(value,list) and bool(value) and all(v in {'payhere','bank_transfer','cash'} for v in value) and len(set(value))==len(value)
+    elif key=='web_checkout':
+        bank=value.get('bank') if isinstance(value,dict) else None
+        year2=value.get('year2') if isinstance(value,dict) else None
+        email=value.get('finance_email','') if isinstance(value,dict) else None
+        valid=(isinstance(value,dict) and set(value)<={'bank','finance_email','year2'} and isinstance(bank,dict)
+            and set(bank)<={'account_name','bank','branch','account_no','note'} and all(isinstance(v,str) and len(v)<=300 for v in bank.values())
+            and isinstance(email,str) and len(email)<=200 and (not email or ('@' in email and ' ' not in email.strip()))
+            and isinstance(year2,dict) and integer(year2.get('instalments'),1,36) and not isinstance(year2.get('instalment_amount'),bool)
+            and money(year2.get('instalment_amount'))>0)
     if key not in DEFAULTS or not valid: raise ValidationError('Invalid value for setting '+key)
     return value

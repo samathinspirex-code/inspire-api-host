@@ -174,8 +174,10 @@ async def clear_sample_ledger(c, actor):
         audit_log, settings, fiscal_periods, journal_lines, journals, learners,
         enrolments, instalments, invoices, payment_links, gateway_events, payments,
         revenue_recognition, fixed_assets, depreciation_runs, close_tasks, suppliers,
-        bills, bank_statement_lines, message_outbox, checkout_orders, request_keys
-        RESTART IDENTITY''')
+        bills, bank_statement_lines, message_outbox, checkout_orders, request_keys'''
+        + ''.join([', '+t for t in ('bank_slips','web_checkouts','web_enrolments','web_orders')
+                   if await c.fetchval("SELECT to_regclass($1) IS NOT NULL", 'payments.'+t)])
+        + ' RESTART IDENTITY')
     for sequence in ('learner_number_seq','invoice_number_seq','journal_number_seq',
                      'payment_link_seq','bill_number_seq'):
         await c.execute(f'ALTER SEQUENCE {sequence} RESTART')

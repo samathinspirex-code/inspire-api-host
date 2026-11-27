@@ -1,0 +1,14 @@
+[Unit]
+Description=New website housekeeping (expired demo accounts, old unpaid orders, CRM retries)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/inspire-api-host
+EnvironmentFile=/home/ubuntu/inspire-api-host/.env
+ExecStart=/home/ubuntu/inspire-api-host/.venv/bin/python scripts/run_website_worker.py
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

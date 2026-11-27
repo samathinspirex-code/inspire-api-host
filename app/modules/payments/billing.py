@@ -104,7 +104,12 @@ async def receipt(c, b, actor):
             await c.execute("UPDATE payment_links SET status='paid',paid_at=now() WHERE invoice_id=$1 AND status='sent'", inv['id'])
     # PayHere queues its acknowledgement after its verified callback is logged.
     # Manual receipts use the same outbox; provider delivery is worker-only.
-    if method in {'cash','bank_transfer'}:
+    from app.core.config import settings as config
+    if inv and (config.WEB_API_ENABLED or config.WEB_CHECKOUT_ENABLED):
+        # New website: start the monthly schedule and keep website links at the remaining balance.
+        from app.modules.website import checkout as web_checkout
+        await web_checkout.after_receipt(c, inv['id'], received)
+    if method in {'cash','bank_transfer'} and not b.get('quiet'):
         learner=await one(c,'SELECT first_name,email FROM learners WHERE id=$1',learner_id)
         if learner and learner['email']:
             lines=[f"Hi {learner['first_name']},",'',
@@ -139,23 +144,39 @@ async def learners(c, as_of=None):
         (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM invoices WHERE issue_date <= $1) x) AS invoices,
         (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM instalments ORDER BY seq) x) AS instalments''', as_of)
     ls, es, invs, its = (data[k] for k in ['learners','enrolments','invoices','instalments'])
-    by_enrol, by_inv, by_inst = {}, {}, {}
-    for e in es: by_enrol[e['learner_id']] = e
+    by_enrol, by_learner_enrols, by_inv, by_inst = {}, {}, {}, {}
+    # Learners with several website enrolments (add-on courses, HND Year 2) are summed across them.
+    # Everyone else keeps the original single-enrolment view.
+    # (Website enrolments are created with counsellor 'New website…'.)
+    web_ids={e['id'] for e in es if str(e.get('counsellor') or '').startswith('New website')}
+    for e in es:
+        by_learner_enrols.setdefault(e['learner_id'], []).append(e)
+        by_enrol[e['learner_id']] = e
     for i in invs: by_inv.setdefault(i['learner_id'], []).append(i)
     for i in its: by_inst.setdefault(i['enrolment_id'], []).append(i)
     result=[]
     for l in ls:
-        e=by_enrol.get(l['id']); invoices=by_inv.get(l['id'], []); instalments=by_inst.get(e['id'], []) if e else []
-        paid=sum((i['amount_paid'] for i in invoices if e and i['enrolment_id']==e['id'] and i['kind'] in {'course','instalment'}), core.ZERO)
+        e=by_enrol.get(l['id']); invoices=by_inv.get(l['id'], []); enrols=by_learner_enrols.get(l['id'], [])
+        if not (len(enrols)>1 and any(x['id'] in web_ids for x in enrols)): enrols=[e] if e else []
+        elif e and e['status']=='withdrawn':
+            e=next((x for x in reversed(enrols) if x['status']!='withdrawn'),e)
+        instalments=by_inst.get(e['id'], []) if e else []
+        if len(enrols)>1:
+            # Several enrolments (website add-on courses, HND Year 2): one schedule across all active ones.
+            instalments=sorted((i for x in enrols if x['status']!='withdrawn' for i in by_inst.get(x['id'],[])),key=lambda i:(i['due_date'],i['seq']))
+        enrol_ids={x['id'] for x in enrols} if len(enrols)>1 else ({e['id']} if e else set())
+        paid=sum((i['amount_paid'] for i in invoices if i['enrolment_id'] in enrol_ids and i['kind'] in {'course','instalment'}), core.ZERO)
         open_invs=[i for i in invoices if i['status']=='open']; overdue=[i for i in open_invs if i['due_date']<as_of]
         open_total=sum((i['amount']-i['amount_paid'] for i in open_invs),core.ZERO)
         # The plan already includes its invoiced tuition. Add every other open
         # invoice (registration, late fees and standalone charges) exactly once.
         balance=open_total
-        if e and e['status']!='withdrawn':
+        for x in (enrols if len(enrols)>1 else ([e] if e else [])):
+            if x['status']=='withdrawn': continue
+            x_paid=sum((i['amount_paid'] for i in invoices if i['enrolment_id']==x['id'] and i['kind'] in {'course','instalment'}),core.ZERO)
             billed_tuition=sum((i['amount']-i['amount_paid'] for i in open_invs
-                if i['enrolment_id']==e['id'] and i['kind'] in {'course','instalment'}),core.ZERO)
-            balance=max(core.ZERO,e['total_fee']-paid)+open_total-billed_tuition
+                if i['enrolment_id']==x['id'] and i['kind'] in {'course','instalment'}),core.ZERO)
+            balance+=max(core.ZERO,x['total_fee']-x_paid)-billed_tuition
         d=max((core.days(i['due_date'],as_of) for i in overdue),default=0)
         ip=sum(i['status']=='paid' for i in instalments); nxt=next((i for i in instalments if i['status'] in {'scheduled','invoiced'}),None)
         status='withdrawn' if e and e['status']=='withdrawn' else 'paid' if balance<=0 else 'at_risk' if d>60 else 'overdue' if d else 'new' if not ip else 'current'
@@ -169,15 +190,19 @@ async def learners(c, as_of=None):
     return result
 
 
-async def enqueue(c, channel, to, body, subject=None, link_id=None, template=None):
+async def enqueue(c, channel, to, body, subject=None, link_id=None, template=None, html=None):
     if not to: raise ValidationError('The learner needs an email address or phone number for this channel')
+    if html:  # website emails (html_body exists once the website migration has run)
+        return await c.fetchval('INSERT INTO message_outbox(channel,to_addr,subject,body,payment_link_id,template,html_body) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+            channel,to,subject,body,link_id,__import__('json').dumps(template) if template else None,html)
     return await c.fetchval('INSERT INTO message_outbox(channel,to_addr,subject,body,payment_link_id,template) VALUES($1,$2,$3,$4,$5,$6) RETURNING id',
         channel,to,subject,body,link_id,__import__('json').dumps(template) if template else None)
 
 
 def link_url(link):
     from app.core.config import settings as config
-    return config.PAYMENTS_PUBLIC_BASE_URL.rstrip('/')+'/pay/'+link['token']
+    base=config.WEB_SITE_URL if link.get('origin')=='website' else config.PAYMENTS_PUBLIC_BASE_URL
+    return base.rstrip('/')+'/pay/'+link['token']
 
 
 async def create_link(c,b,actor):
@@ -199,12 +224,21 @@ async def create_link(c,b,actor):
     core.money(amount,True)
     l=await one(c,'SELECT * FROM learners WHERE id=$1',inv['learner_id'])
     n=await c.fetchval("SELECT nextval('payment_link_seq')")
-    s=await settings(c); channel=b.get('channel','email'); expiry=datetime.now(timezone.utc)+timedelta(days=s['link_expiry_days'])
-    r=await one(c,'''INSERT INTO payment_links(code,token,invoice_id,learner_id,amount,purpose,channel,due_date,expires_at,created_by)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *''',f'PL-{n}',secrets.token_urlsafe(24),inv['id'],l['id'],amount,
-        inv['description'].split(' — ')[0],channel,b.get('due_date') or inv['due_date'],expiry,actor)
+    s=await settings(c); channel=b.get('channel','email'); origin='website' if b.get('origin')=='website' else 'accounts'
+    expiry=None if origin=='website' else datetime.now(timezone.utc)+timedelta(days=s['link_expiry_days'])
+    args=[f'PL-{n}',secrets.token_urlsafe(24),inv['id'],l['id'],amount,inv['description'].split(' — ')[0],channel,b.get('due_date') or inv['due_date'],expiry,actor]
+    if origin=='website':
+        r=await one(c,'''INSERT INTO payment_links(code,token,invoice_id,learner_id,amount,purpose,channel,due_date,expires_at,created_by,origin)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'website') RETURNING *''',*args)
+    else:
+        r=await one(c,'''INSERT INTO payment_links(code,token,invoice_id,learner_id,amount,purpose,channel,due_date,expires_at,created_by)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *''',*args)
     msg=f"Hi {l['first_name']},\nYour Inspire College {r['purpose'].lower()} of LKR {amount:,.2f} is due on {r['due_date']}.\nPay securely:\n{link_url(r)}\nThank you, Inspire College Accounts"
-    await enqueue(c,channel,l['email'] if channel=='email' else l['phone'],msg,'Inspire College — '+r['purpose'],r['id'],[l['first_name'],r['purpose'],f'LKR {amount:,.2f}',r['due_date'],link_url(r)])
+    subject,html='Inspire College — '+r['purpose'],None
+    if origin=='website':
+        from app.modules.website import templates as web_templates
+        subject,html,msg=web_templates.invoice_issued(l['first_name'],inv['number'],r['purpose'],inv['description'].split(' — ')[-1],amount,r['due_date'],r['token'])
+    await enqueue(c,channel,l['email'] if channel=='email' else l['phone'],msg,subject,r['id'],[l['first_name'],r['purpose'],f'LKR {amount:,.2f}',r['due_date'],link_url(r)],html=html)
     await audit(c,actor,'create','payment_link',r['id'])
     return dict(r,url=link_url(r),invoice_number=inv['number'],message_preview=msg,delivery_status='queued')
 

@@ -34,6 +34,7 @@ SOURCE_QUALITY = {
     "whatsapp": 5,
     "website_admission": 8,
     "website_contact": 6,
+    "new_website": 8,
     "wtc_registrations_form": 6,
     "manual": 4,
     "referral": 12,
@@ -54,6 +55,7 @@ UNANSWERED_MAX = 12
 SOURCE_LABELS = {
     "website_admission": "Website Form",
     "website_contact": "Contact Form",
+    "new_website": "New website",
     "whatsapp": "WhatsApp Bot",
     "meta": "Meta Ads (WhatsApp)",
     "meta_lead_forms": "Meta Lead Forms",

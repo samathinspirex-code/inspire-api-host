@@ -56,7 +56,8 @@ async def checkout(c,token):
     if not l['email'] or not l['phone']: raise ValidationError('Please ask Accounts to add your email address and phone number')
     base=settings.PAYMENTS_PUBLIC_BASE_URL.rstrip('/')
     if settings.PAYMENTS_PAYHERE_MODE=='live' and not base.startswith('https://'): raise ConflictError('Live checkout requires a public HTTPS address')
-    fields=dict(merchant_id=settings.PAYMENTS_PAYHERE_MERCHANT_ID,return_url=f'{base}/pay/{token}?status=return',cancel_url=f'{base}/pay/{token}?status=cancelled',
+    back=settings.WEB_SITE_URL.rstrip('/') if r.get('origin')=='website' else base
+    fields=dict(merchant_id=settings.PAYMENTS_PAYHERE_MERCHANT_ID,return_url=f'{back}/pay/{token}?status=return',cancel_url=f'{back}/pay/{token}?status=cancelled',
         notify_url=base+'/api/v1/payments/payhere/notify',order_id=order,items='Inspire College — '+r['purpose'],currency='LKR',amount=f"{r['amount']:.2f}",
         first_name=l['first_name'],last_name=l['last_name'],email=l['email'],phone=l['phone'],address=l['address'] or 'Colombo',city=l['city'] or 'Colombo',country='Sri Lanka',
         custom_1=r['code'],custom_2='',hash=checkout_hash(order,r['amount']))
@@ -83,6 +84,9 @@ async def notify(c,body):
     payment_id=body.get('payment_id','').strip()
     if not payment_id or amount is None or amount<=0: return await log('rejected','missing payment ID or invalid amount')
     if await c.fetchval("SELECT 1 FROM gateway_events WHERE provider='payhere' AND payment_id=$1 AND outcome='posted'",payment_id): return await log('duplicate','duplicate payment')
+    if str(body.get('order_id','')).startswith('WEB-'):
+        from app.modules.website import checkout as web_checkout
+        return await web_checkout.notify(c,body,amount,payment_id,log)
     order=await one(c,'SELECT * FROM checkout_orders WHERE order_id=$1',body.get('order_id',''))
     if not order: return await log('rejected','unknown checkout order')
     link=await one(c,'SELECT * FROM payment_links WHERE id=$1 FOR UPDATE',order['link_id'])
@@ -102,7 +106,10 @@ async def notify(c,body):
         return await log('rejected','accounting period locked; review captured funds manually')
     await log('posted','verified payment')
     l=await one(c,'SELECT * FROM learners WHERE id=$1',link['learner_id'])
-    if l['email']:
+    if link.get('origin')=='website':
+        from app.modules.website import checkout as web_checkout
+        await web_checkout.link_receipt(c,link,amount,'payhere')
+    elif l['email']:
         await billing.enqueue(c,'email',l['email'],f"Hi {l['first_name']},\nWe received LKR {amount:,.2f} for {link['purpose']} (PayHere {payment_id}).\nThank you, Inspire College Accounts",'Payment received — Inspire College')
     return dict(ok=True,posted=r['journal']['number'])
 

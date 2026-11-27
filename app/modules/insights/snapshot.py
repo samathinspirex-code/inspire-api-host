@@ -229,7 +229,7 @@ async def _load_snapshot(db: AsyncSession, counsellor_id: int | None = None, sta
                   + CASE WHEN hours_idle < 24 THEN 12 WHEN hours_idle < 72 THEN 7 WHEN hours_idle < 168 THEN 2 ELSE 0 END
                   + CASE source
                     WHEN 'meta' THEN 2 WHEN 'meta_lead_forms' THEN 2 WHEN 'facebook_chat' THEN 2 WHEN 'instagram' THEN 2
-                    WHEN 'whatsapp' THEN 5 WHEN 'website_admission' THEN 8 WHEN 'website_contact' THEN 6
+                    WHEN 'whatsapp' THEN 5 WHEN 'website_admission' THEN 8 WHEN 'website_contact' THEN 6 WHEN 'new_website' THEN 8
                     WHEN 'wtc_registrations_form' THEN 6 WHEN 'manual' THEN 4 WHEN 'referral' THEN 12
                     WHEN 'walk_in' THEN 11 WHEN 'fair' THEN 6 WHEN 'hotline_call' THEN 4
                     WHEN 'tiktok_lead_forms' THEN 3 WHEN 'tiktok_chat' THEN 3 WHEN 'linkedin' THEN 4

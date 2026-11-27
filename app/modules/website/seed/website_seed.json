@@ -1,0 +1,5021 @@
+{
+ "courses": [
+  {
+   "slug": "hnd-in-computing-software-engineering-software-developer-pathway",
+   "design_key": "hnd-se",
+   "plan_type": "hnd",
+   "short_name": "HND · Software Engineering",
+   "level": "HND",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND",
+   "keywords": "software developer coding web cloud devops mobile",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 0,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Computing – Software Engineering Pathway",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/edc45e586b8c43ee8cba485c84a847bf-hnd-computing-se.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Full-stack + cloud",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Computing – Software Engineering Pathway",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND Software Engineering"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "Level 4 & 5 Extended Diplomas in Computing",
+    "blurb": "A full-stack and cloud-focused qualification designed to develop strong software development, engineering, and deployment skills.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream)",
+    "offer": true,
+    "short": "HND · Software Engineering",
+    "years": [
+     [
+      "Level 4",
+      "Programming, web technologies, databases, networks and computing principles."
+     ],
+     [
+      "Level 5",
+      "Cloud-native development, advanced programming, DevOps, virtualisation and cybersecurity."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units",
+     "IT Systems Development",
+     "Programming and Scripting",
+     "Data and Database Systems",
+     "Computer Systems, Networks & Security",
+     "Legislation, Regulation, Ethics & Codes of Practice"
+    ],
+    "careers": [
+     "Software Developer (Junior)",
+     "Software Engineer (Junior)",
+     "Full-Stack Developer (Junior)"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Two-year total LKR 279,900 plus awarding-body fees in GBP, paid separately within one month of each year’s start. Limited offer.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "Level 4 builds a solid foundation in programming, web technologies, databases, networks, and computing principles. Level 5 advances into cloud-native development, advanced programming, DevOps, virtualisation, cybersecurity, and modern software engineering practices.",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For builders and problem-solvers.",
+    "card_name": "HND-Level Study in Computing – Software Engineering",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to a final-year Top-Up Degree in Computing (e.g. UoB BEng (Hons) Software Engineering Top-Up), or industry roles in IT"
+   },
+   "seo_title": "HND-Level Study in Computing – Software Engineering Pathway",
+   "seo_description": "A full-stack and cloud-focused qualification designed to develop strong software development, engineering, and deployment skills.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "hnd-in-artificial-intelligence",
+   "design_key": "hnd-ai",
+   "plan_type": "hnd",
+   "short_name": "HND · Computing & AI",
+   "level": "HND",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND · AI",
+   "keywords": "ai artificial intelligence machine learning data science",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 1,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Computing & Artificial Intelligence",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/dc8841c0f09c45da87c13c205953f8cf-hnd-ai.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Data science + ML",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Computing & Artificial Intelligence",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND Computing & AI"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "Level 4 & 5 Extended Diplomas in Computing and Artificial Intelligence",
+    "blurb": "A specialised HND designed to develop strong foundations in computing while advancing into data science, machine learning, and artificial intelligence.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream)",
+    "offer": true,
+    "short": "HND · Computing & AI",
+    "years": [
+     [
+      "Year 1",
+      "Programming, databases, statistics, analytics and AI fundamentals."
+     ],
+     [
+      "Year 2",
+      "Digital transformation projects, advanced statistics, AI theory, data engineering and practical machine learning."
+     ]
+    ],
+    "skills": [
+     "IT Systems Development",
+     "Programming and Scripting",
+     "Data and Database Systems",
+     "Practical Probability Theory for Data Science",
+     "Legislation, Regulation, Ethics & Codes of Practice",
+     "Methods & Tools for Analysis"
+    ],
+    "careers": [
+     "AI & Data Analyst (Junior–Mid)",
+     "Machine Learning Engineer (Junior)",
+     "Software Developer / Data Engineer (Junior)"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Two-year total LKR 279,900 plus awarding-body fees in GBP, paid separately within one month of each year’s start. Limited offer.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "Year 1 builds essential skills across programming, databases, statistics, analytics, and AI fundamentals. Year 2 advances into digital transformation projects, advanced statistics, AI theory, data engineering, and practical machine learning applications.",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For the AI generation.",
+    "card_name": "HND-Level Study in Computing & Artificial Intelligence",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to a final-year Top-Up Degree in Computing (e.g. UoB BEng (Hons) Software Engineering Top-Up), or industry roles in IT"
+   },
+   "seo_title": "HND-Level Study in Computing & Artificial Intelligence",
+   "seo_description": "A specialised HND designed to develop strong foundations in computing while advancing into data science, machine learning, and artificial intelligence.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "hnd-in-computing-cyber-security-technologist-pathway",
+   "design_key": "hnd-cyber",
+   "plan_type": "hnd",
+   "short_name": "HND · Cyber Security",
+   "level": "HND",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND",
+   "keywords": "cyber security hacking forensics soc",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 2,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Computing – Cyber Security Pathway",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/c744ff665a2642bfa6a916713ec864d0-hnd-computing-cyber-security.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Route to UK Cyber top-up",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Computing – Cyber Security Pathway",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND Cyber Security"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "HND-Level Study in Computing – Cyber Security Pathway",
+    "blurb": "A specialised HND focused on cybersecurity, risk management, network protection, secure systems, and ethical hacking.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream)",
+    "offer": true,
+    "short": "HND · Cyber Security",
+    "years": [
+     [
+      "Year 1",
+      "Programming, networks, security principles and computing essentials."
+     ],
+     [
+      "Year 2",
+      "Penetration testing, digital forensics, network operations, cloud configuration and defensive strategies."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units",
+     "IT Systems Development",
+     "Programming and Scripting",
+     "Data and Database Systems",
+     "Computer Systems, Networks & Security",
+     "Legislation, Regulation, Ethics & Codes of Practice"
+    ],
+    "careers": [
+     "Cyber Security Analyst (Junior)",
+     "SOC Analyst (Level 1 / Level 2)",
+     "Ethical Hacker / Penetration Testing Assistant"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Two-year total LKR 279,900 plus awarding-body fees in GBP, paid separately within one month of each year’s start. Limited offer.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "Year 1- builds strong foundations in programming, networks, security principles, and computing essentials. Year 2- advances into penetration testing, digital forensics, network operations, cloud configuration, and defensive cybersecurity strategies.",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For digital defenders.",
+    "card_name": "HND-Level Study in Computing – Cyber Security",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to a final-year Top-Up Degree in Computing (e.g. UoB BEng (Hons) Software Engineering Top-Up), or industry roles in IT"
+   },
+   "seo_title": "HND-Level Study in Computing – Cyber Security Pathway",
+   "seo_description": "A specialised HND focused on cybersecurity, risk management, network protection, secure systems, and ethical hacking.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "foundation-in-information-digital-technologies",
+   "design_key": "f-idt",
+   "plan_type": "fnd",
+   "short_name": "Foundation · Digital Technologies",
+   "level": "Foundation",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "Foundation",
+   "keywords": "it digital tech o/l programming app",
+   "monthly_label": "or LKR 5,000 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 3,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – Information & Digital Technologies",
+    "dur": "8 Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/61cf9117d6af44a9ad17173662eb46da-foundation-information-digital-tech.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Leads on to Level 4 and the HND",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – Information & Digital Technologies",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in Information and Digital Technologies",
+    "blurb": "A foundation-level qualification designed to equip learners with essential knowledge and practical digital skills required for higher studies in computing and IT.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics",
+    "offer": true,
+    "short": "Foundation · Digital Technologies",
+    "years": [
+     [
+      "Core areas",
+      "Programming, cybersecurity and digital technologies."
+     ],
+     [
+      "Applied",
+      "Data concepts and modern web and mobile development."
+     ]
+    ],
+    "skills": [
+     "Introduction to Computer Programming",
+     "Introduction to Computer Mathematics",
+     "Introduction to Cyber Security",
+     "Introduction to Digital Technologies",
+     "Introduction to Emerging Technologies",
+     "Introduction to Mobile Application Development"
+    ],
+    "careers": [
+     "Senior IT Support Engineer",
+     "Senior Network Engineer",
+     "Senior Web Developer / Full-Stack Developer"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "The program introduces students to core computing concepts including programming, cybersecurity, digital technologies, data concepts, and modern web/mobile development. It prepares students for entry into Level 4 Diplomas, HND programs, or entry-level roles in technology-driven environments.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step into tech.",
+    "card_name": "Foundation-Level – Information & Digital Technologies",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Computing, or entry-level roles in IT"
+   },
+   "seo_title": "Foundation-Level – Information & Digital Technologies",
+   "seo_description": "A foundation-level qualification designed to equip learners with essential knowledge and practical digital skills required for higher studies in computing and IT.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "foundation-in-business-management",
+   "design_key": "f-bus",
+   "plan_type": "fnd",
+   "short_name": "Foundation · Business",
+   "level": "Foundation",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "Foundation",
+   "keywords": "business management o/l",
+   "monthly_label": "or LKR 5,000 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 4,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – Business",
+    "dur": "8 Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/346e41e736c54fc89f16d9b034edfb53-foundation-in-bm.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Leads on to the HND",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – Business",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in Business",
+    "blurb": "The Diploma in Business is a comprehensive foundation-level program designed to provide learners with essential knowledge and skills in modern business practices. This program prepares students for higher education in business-related fields or entry-level roles in business environments.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics",
+    "offer": true,
+    "short": "Foundation · Business",
+    "years": [
+     [
+      "Core",
+      "Business fundamentals and management."
+     ],
+     [
+      "Applied",
+      "Communication and study skills for higher education."
+     ]
+    ],
+    "skills": [
+     "Business Organisations and Environment",
+     "Introduction to Marketing Essentials",
+     "Introduction to Business Communication",
+     "Business and the Digital Economy",
+     "Fundamentals of Business Finance",
+     "Human Resource Management Essentials"
+    ],
+    "careers": [
+     "Marketing Assistant",
+     "HR Assistant",
+     "Accounts/Finance Clerk"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "The qualification combines theoretical understanding with practical application, covering core areas such as marketing, communication, human resources, finance, and the impact of digital technologies on business.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step after O/Ls.",
+    "card_name": "Foundation in Business",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Business Management or HND in Accounting"
+   },
+   "seo_title": "Foundation-Level – Business",
+   "seo_description": "The Diploma in Business is a comprehensive foundation-level program designed to provide learners with essential knowledge and skills in modern business practices. This program prepares students for higher education in business-related fields or entry-level roles in business environments.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "ai-mastery",
+   "design_key": "c-aimastery",
+   "plan_type": "cpd",
+   "short_name": "AI Mastery",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "ai chatgpt prompt llm",
+   "monthly_label": "CPD-validated · no coding needed",
+   "cpd_addon_fee": 75000,
+   "featured": true,
+   "sort_order": 5,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "AI Mastery",
+    "dur": "12 weeks",
+    "fee": 75000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/12fc3f59436c41318bde0e1e0985dcf9-ai-mastery-with-sri-lankan-ai-expert.png",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "No coding required",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 75,000"
+       ],
+       [
+        "Duration",
+        "12 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "AI Mastery",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "AI Mastery is a practical, non-technical programme designed to help professionals understand, evaluate, and apply Artificial Intelligence in real business and workplace contexts.",
+    "entry": "No prior experience required · Basic English",
+    "offer": false,
+    "short": "AI Mastery",
+    "years": [
+     [
+      "Topics",
+      "Generative AI, large language models, prompt engineering and productivity tools."
+     ],
+     [
+      "Applied",
+      "Decision support, no-code AI solutions and responsible AI adoption, ending with a final use case."
+     ]
+    ],
+    "skills": [
+     "Foundations of Artificial Intelligence",
+     "Data, Algorithms & How AI Learns",
+     "Generative AI & Large Language Models",
+     "Prompt Engineering for Professionals",
+     "AI Tools for Productivity & Decision-Making",
+     "AI Applications Across Business Functions"
+    ],
+    "careers": [
+     "Talk to an advisor about career routes"
+    ],
+    "feeHead": "LKR 75,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "The programme focuses on how AI is actually used across organisations — including generative AI, large language models, prompt engineering, productivity tools, decision support systems, no-code AI solutions, and responsible AI adoption. Rather than teaching theory or coding, this course equips learners with practical AI literacy and applied skills that can be used immediately in professional environments. Learners will work on real-world business scenarios and complete a final applied AI use case.",
+    "startAmt": "from LKR 75,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "card_name": "AI Mastery",
+    "finalLine": "Join the next cohort.",
+    "startNote": "12 weeks · CPD-validated",
+    "monthTrust": "CPD certificate",
+    "progression": "Apply the skills directly at work, or progress to further CPD short courses or diploma-level study"
+   },
+   "seo_title": "AI Mastery",
+   "seo_description": "AI Mastery is a practical, non-technical programme designed to help professionals understand, evaluate, and apply Artificial Intelligence in real business and workplace contexts.",
+   "fee_label": "LKR 75,000"
+  },
+  {
+   "slug": "hnd-in-computing-data-analytics-data-technologist-pathway",
+   "design_key": "hnd-data",
+   "plan_type": "hnd",
+   "short_name": "HND · Data Analytics",
+   "level": "HND",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND",
+   "keywords": "data analytics analyst machine learning",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 6,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Computing – Data Analytics Pathway",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/ab4d706368414081a15a9344373674a9-hnd-computing-data-technologist.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Direct routes to UK top-ups",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Computing – Data Analytics Pathway",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND Data Analytics"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "Level 4 & 5 Extended Diplomas in Computing",
+    "blurb": "A comprehensive two-stage qualification designed to build strong analytical, technical, and computing skills. Year 1 covers the fundamentals of programming, databases, networks, and analytical methods, while Year 2 advances into data engineering, digital transformation, machine learning, and large-scale information systems.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream)",
+    "offer": true,
+    "short": "HND · Data Analytics",
+    "years": [
+     [
+      "Foundations",
+      "Programming, databases and analytical methods."
+     ],
+     [
+      "Advanced",
+      "Data engineering and machine learning."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units",
+     "IT Systems Development",
+     "Programming and Scripting",
+     "Data and Database Systems",
+     "Computer Systems, Networks & Security",
+     "Legislation, Regulation, Ethics & Codes of Practice"
+    ],
+    "careers": [
+     "Cyber Security Analyst (Junior)",
+     "Business Intelligence (BI) Analyst",
+     "Junior Data Engineer"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Two-year total LKR 279,900 plus awarding-body fees in GBP, paid separately within one month of each year’s start. Limited offer.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "Ideal for students after O/L + foundation, A/L, or anyone preparing for careers in data analytics, business intelligence, or data engineering with direct pathways to UK top-up degrees",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For people who love patterns.",
+    "card_name": "HND-Level Study in Computing – Data Analytics",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to a final-year Top-Up Degree in Computing (e.g. UoB BEng (Hons) Software Engineering Top-Up), or industry roles in IT"
+   },
+   "seo_title": "HND-Level Study in Computing – Data Analytics Pathway",
+   "seo_description": "A comprehensive two-stage qualification designed to build strong analytical, technical, and computing skills. Year 1 covers the fundamentals of programming, databases, networks, and analytical methods, while Year 2 advances into data engineering, digital transformation, machine learning, and large-s",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "hnd-in-computing-netdevops-engineer-pathway",
+   "design_key": "hnd-net",
+   "plan_type": "hnd",
+   "short_name": "HND · NetDevOps",
+   "level": "HND",
+   "school": "Computing",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND",
+   "keywords": "network cloud devops automation",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 7,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Computing – NetDevOps Pathway",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/80d14116c34042e9800bbc14db75517b-hnd-computing-netdev.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Network + cloud top-ups",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Computing – NetDevOps Pathway",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND NetDevOps"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "Level 4 & 5 Extended Diplomas in Computing",
+    "blurb": "A specialised HND designed for students aiming to master network engineering, cloud infrastructure, automation, and DevOps operations.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream)",
+    "offer": true,
+    "short": "HND · NetDevOps",
+    "years": [
+     [
+      "Foundations",
+      "Network engineering and computing principles."
+     ],
+     [
+      "Advanced",
+      "Cloud configuration, network automation and DevOps workflows."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units",
+     "IT Systems Development",
+     "Programming and Scripting",
+     "Data and Database Systems",
+     "Computer Systems, Networks & Security",
+     "Legislation, Regulation, Ethics & Codes of Practice"
+    ],
+    "careers": [
+     "Network Technician (Junior)",
+     "Network Engineer (Junior)",
+     "DevOps Support Technician (Entry-Level)"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Two-year total LKR 279,900 plus awarding-body fees in GBP, paid separately within one month of each year’s start. Limited offer.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "Year 1 – builds strong foundations in programming, systems, networks, and security. Year 2- advances into cloud configuration, digital forensics, network automation, DevOps workflows, NetDevOps operations, and secure IT infrastructure practices.",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For the people who keep the internet running.",
+    "card_name": "HND-Level Study in Computing – NetDevOps",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to a final-year Top-Up Degree in Computing (e.g. UoB BEng (Hons) Software Engineering Top-Up), or industry roles in IT"
+   },
+   "seo_title": "HND-Level Study in Computing – NetDevOps Pathway",
+   "seo_description": "A specialised HND designed for students aiming to master network engineering, cloud infrastructure, automation, and DevOps operations.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "hnd-in-accounting",
+   "design_key": "hnd-acc",
+   "plan_type": "hnd",
+   "short_name": "HND · Accounting & Finance",
+   "level": "HND",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "HND",
+   "keywords": "accounting finance tax",
+   "monthly_label": "or LKR 9,999 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 8,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "HND-Level Study in Accounting & Finance",
+    "dur": "18 months",
+    "fee": 280000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/99022282e9964c3ba2298285eb632818-hnd-acc-and-finance.png",
+    "lvl": "HND",
+    "who": [
+     "School leavers after A/Ls",
+     "Foundation graduates moving up",
+     "Working people switching careers",
+     "Learners aiming for a UK top-up degree"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Professional accounting route",
+    "cups": "48 free coffees a year",
+    "fees": [
+     {
+      "h": "Year 1 · LKR 99,900",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 89,900"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 9,999"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 179"
+       ]
+      ]
+     },
+     {
+      "h": "Year 2 · LKR 180,000",
+      "rows": [
+       [
+        "Registration (once)",
+        "LKR 10,000"
+       ],
+       [
+        "Balance",
+        "LKR 170,000"
+       ],
+       [
+        "Monthly",
+        "9 × LKR 18,890"
+       ],
+       [
+        "Awarding-body fee",
+        "GBP 193"
+       ]
+      ]
+     }
+    ],
+    "name": "HND-Level Study in Accounting & Finance",
+    "path": [
+     [
+      "Start",
+      "Foundation (optional)"
+     ],
+     [
+      "You are here",
+      "HND Accounting & Finance"
+     ],
+     [
+      "Next",
+      "UK top-up degree (final year)"
+     ],
+     [
+      "Then",
+      "Master’s"
+     ]
+    ],
+    "plan": "hnd",
+    "qual": "ATHE Level 4 & 5 Extended Diplomas in Accounting and Finance",
+    "blurb": "The HND in Accounting is a 240-credit qualification designed to provide a comprehensive understanding of accounting, finance, and related business areas.",
+    "entry": "Foundation Accounting / Business or equivalent · A/L qualification · Equivalent international qualification · Relevant work experience (for mature learners) · Basic English proficiency required.",
+    "offer": true,
+    "short": "HND · Accounting & Finance",
+    "years": [
+     [
+      "Core",
+      "Accounting principles, finance and the business environment."
+     ],
+     [
+      "Advanced",
+      "Taxation, economics and the legal aspects of accounting."
+     ]
+    ],
+    "skills": [
+     "Financial Accounting 1 (15 Credits)",
+     "Financial Accounting 2 (15 Credits)",
+     "Budgetary Control (15 Credits)",
+     "Cost and Management Accounting (15 Credits)",
+     "Personal Taxation (15 Credits)",
+     "Business Environment (15 Credits)"
+    ],
+    "careers": [
+     "Junior Accountant / Accounts Executive",
+     "Accounts Officer / Finance Executive",
+     "Tax Assistant / Junior Tax Analyst",
+     "Costing Analyst / Budget Analyst"
+    ],
+    "feeHead": "from LKR 280,000",
+    "feeNote": "Year 2 is LKR 180,000 for this programme. Awarding-body fees in GBP are paid separately. Some figures on the live page differ slightly, so admissions confirms the final schedule.",
+    "feeTitle": "Start your HND with LKR 9,999.",
+    "overview": "This programme builds on core accounting principles and expands into taxation, business environment, economics, and legal aspects of accounting, giving learners a broader and more practical understanding of how accounting functions within real organisations. It is ideal for students who want a stronger academic foundation and faster progression into higher education or professional accounting pathways.",
+    "startAmt": "LKR 9,999 / month",
+    "whoTitle": "For future accountants.",
+    "card_name": "HND-Level Study in Accounting & Finance",
+    "finalLine": "Start your HND with LKR 9,999.",
+    "startNote": "after LKR 10,000 registration · Year 1",
+    "monthTrust": "From LKR 9,999 a month",
+    "progression": "Progress to an ATHE Level 6 Top-Up Degree in Management or a UK BSc (Hons) Business Management Top-Up"
+   },
+   "seo_title": "HND-Level Study in Accounting & Finance",
+   "seo_description": "The HND in Accounting is a 240-credit qualification designed to provide a comprehensive understanding of accounting, finance, and related business areas.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "foundation-in-accounting",
+   "design_key": "f-acc",
+   "plan_type": "fnd",
+   "short_name": "Foundation · Accounting",
+   "level": "Foundation",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "Foundation",
+   "keywords": "accounting o/l",
+   "monthly_label": "or LKR 5,000 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 9,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – Accounting",
+    "dur": "8 Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/80d3c2f4c1794ac6b948fee1d8878dc1-fou-acc.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Leads on to HND Accounting",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – Accounting",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in Accounting",
+    "blurb": "Foundation in Accounting is an entry-level UK qualification designed to build fundamental accounting knowledge, practical skills, and academic study abilities.",
+    "entry": "O/L or equivalent (5 subjects) · OR relevant Level 2 qualification · OR work experience (for mature students) · English requirement: · IELTS 5.5 or equivalent",
+    "offer": true,
+    "short": "Foundation · Accounting",
+    "years": [
+     [
+      "Core",
+      "Accounting basics and numeracy."
+     ],
+     [
+      "Applied",
+      "Business finance foundations."
+     ]
+    ],
+    "skills": [
+     "Introduction to Accounting",
+     "Introduction to Accounting Principles",
+     "Financial Accounting Applications",
+     "Introduction to Management Accounting",
+     "Introduction to Cost Accounting Techniques",
+     "Ethical, Social & Political Issues in Accounting Practice"
+    ],
+    "careers": [
+     "Accounts Assistant / Trainee Accountant",
+     "Finance Assistant",
+     "Junior Bookkeeper"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "This programme acts as a foundation pathway for students who want to progress into higher education in accounting, finance, or business-related fields. It focuses on both theoretical understanding and real-world application of accounting principles, preparing learners for Level 4 studies or entry-level roles.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step after O/Ls.",
+    "card_name": "Foundation in Accounting",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Business Management or HND in Accounting"
+   },
+   "seo_title": "Foundation-Level – Accounting",
+   "seo_description": "Foundation in Accounting is an entry-level UK qualification designed to build fundamental accounting knowledge, practical skills, and academic study abilities.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "foundation-in-small-business-social-enterprise-start-up",
+   "design_key": "f-sme",
+   "plan_type": "fnd",
+   "short_name": "Foundation · Small Business Start-up",
+   "level": "Foundation",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "Foundation",
+   "keywords": "startup entrepreneur business",
+   "monthly_label": "or LKR 5,000 a month · limited offer",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 10,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – Small Business & Social Enterprise Start-up",
+    "dur": "8  Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/b571a1e0bbea4b89a1d11051956e6ca9-foun-small-busi.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "For young founders",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – Small Business & Social Enterprise Start-up",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in Small Business and Social Enterprise Start-up",
+    "blurb": "The ATHE Level 3 Diploma in Small Business and Social Enterprise Start-up is a 60-credit qualification that teaches learners how to research, plan, launch, operate, and review a small business or social enterprise.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics",
+    "offer": true,
+    "short": "Foundation · Small Business Start-up",
+    "years": [
+     [
+      "Core",
+      "Starting a business."
+     ],
+     [
+      "Applied",
+      "Social enterprise and planning."
+     ]
+    ],
+    "skills": [
+     "Market Research",
+     "Business and Financial Planning",
+     "Quality Assurance",
+     "Presenting a Business Plan",
+     "Running and Monitoring a Small Enterprise Start-up",
+     "Reviewing Performance of an Enterprise Start-up"
+    ],
+    "careers": [
+     "Small Business Owner / Micro-Entrepreneur",
+     "Social Enterprise Coordinator (Junior)",
+     "Business Development Assistant"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "It combines applied knowledge with hands-on entrepreneurial skills. Learners design an enterprise idea, conduct market research, prepare financial plans, launch the business, monitor progress, and evaluate performance. This qualification is ideal for O/L finishers, early-stage entrepreneurs, career changers, and adults returning to education who want practical business start-up experience or to progress to Level 4 Diplomas and higher education.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step after O/Ls.",
+    "card_name": "Foundation in Small Business & Social Enterprise Start-up",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Business Management or HND in Accounting"
+   },
+   "seo_title": "Foundation-Level – Small Business & Social Enterprise Start-up",
+   "seo_description": "The ATHE Level 3 Diploma in Small Business and Social Enterprise Start-up is a 60-credit qualification that teaches learners how to research, plan, launch, operate, and review a small business or social enterprise.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-educational-leadership-and-management",
+   "design_key": "pg-edu",
+   "plan_type": "pg",
+   "short_name": "PG Dip · Educational Leadership",
+   "level": "Postgraduate",
+   "school": "Education",
+   "body_label": "ATHE (UK)",
+   "card_type": "Postgraduate",
+   "keywords": "education teacher principal leadership",
+   "monthly_label": "or LKR 36,000 a month · Level 7",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 11,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate-Level Study in Strategic Educational Leadership & Management",
+    "dur": "10 - 12 Months ",
+    "fee": 350000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/15a8b4d618a84f3bbd40ce417ba7ffd7-postgraduate-leadership-and-management-banner.png",
+    "lvl": "Postgraduate",
+    "who": [
+     "Senior leaders and principals",
+     "Headteachers",
+     "Academic managers",
+     "School administrators"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "For principals and academic leaders",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 350,000",
+      "rows": [
+       [
+        "Full fee",
+        "LKR 350,000"
+       ],
+       [
+        "Monthly option",
+        "LKR 36,000 / month"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate-Level Study in Strategic Educational Leadership & Management",
+    "path": [
+     [
+      "Today",
+      "Your leadership role"
+     ],
+     [
+      "You are here",
+      "Level 7 PG Diploma"
+     ],
+     [
+      "Next",
+      "Higher-level management"
+     ],
+     [
+      "Ask us",
+      "Progression options"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 7 Extended Diploma in Strategic Educational Leadership and Management",
+    "blurb": "The Postgraduate Diploma in Strategic Educational Leadership and Management is an advanced UK-regulated qualification designed for experienced education professionals working in leadership and management roles.",
+    "entry": "A first degree or equivalent qualification · Teaching qualification or relevant education training · Leadership / managerial experience in an educational context · Suitable English, Maths, and IT skills · English requirement: IELTS 5.5 or equivalent",
+    "offer": false,
+    "short": "PG Dip · Educational Leadership",
+    "years": [
+     [
+      "Leadership",
+      "Strategic leadership, team leadership and change management."
+     ],
+     [
+      "Management",
+      "School operations, resource planning, teaching quality and professional development."
+     ]
+    ],
+    "skills": [
+     "Educational Leadership and Management",
+     "Leading a Team",
+     "Managing Resources to Enable Teaching and Learning",
+     "Developing Self and Others to Enable Teaching and Learning",
+     "Using Data to Improve Instructional Practice and Enhance Student and Organisational Performance",
+     "Research into Contemporary Issues and Developments in Education"
+    ],
+    "careers": [
+     "Principal / Headteacher",
+     "Deputy Principal",
+     "Academic Director",
+     "Education Manager",
+     "School Operations Manager"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "This programme develops strategic leadership, educational management, team leadership, resource planning, teaching quality improvement, school operations, professional development, and change management skills. It is ideal for senior leaders, principals, headteachers, academic managers, school administrators, and education professionals who want to strengthen their leadership capacity and progress into higher-level education management roles.",
+    "startAmt": "LKR 36,000 / month",
+    "whoTitle": "Built for leaders in education.",
+    "card_name": "Strategic Educational Leadership & Management",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "or LKR 350,000 in full · 10–12 months",
+    "monthTrust": "LKR 36,000 a month",
+    "progression": "Progress to a Master’s (MA/MEd) Top-Up in Educational Leadership at a UK university"
+   },
+   "seo_title": "Postgraduate-Level Study in Strategic Educational Leadership & Management",
+   "seo_description": "The Postgraduate Diploma in Strategic Educational Leadership and Management is an advanced UK-regulated qualification designed for experienced education professionals working in leadership and management roles.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-artificial-intelligence",
+   "design_key": "pg-ai",
+   "plan_type": "pg",
+   "short_name": "PG Dip · Computing (AI)",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "UK-regulated",
+   "card_type": "Postgraduate",
+   "keywords": "ai postgraduate pg",
+   "monthly_label": "Level 7",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 12,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate-Level Study in Computing – AI Pathway",
+    "dur": "10 months ",
+    "fee": 350000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/431494bdcd4940f588198ea2c51307ac-pgdip-ai.png",
+    "lvl": "Postgraduate",
+    "who": [
+     "Computing graduates",
+     "Tech professionals",
+     "Career changers with a degree",
+     "Future AI specialists"
+    ],
+    "body": "UK-regulated",
+    "chip": "Level 7 computing",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 400,000"
+       ],
+       [
+        "Duration",
+        "10 or 12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate-Level Study in Computing – AI Pathway",
+    "path": [
+     [
+      "Before",
+      "Degree or equivalent"
+     ],
+     [
+      "You are here",
+      "PG Diploma"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Specialist roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "level 7 Diploma in computing",
+    "blurb": "The Postgraduate Diploma in Computing (Artificial Intelligence) is a rigorous, industry-focused program designed for graduates and professionals who want to build practical, job-ready AI expertise. It develops strong foundations in computing, programming, data handling, machine learning, deep learning, NLP, computer vision, and real-world AI deployment using tools like Python, TensorFlow, PyTorch, and cloud platforms. Learners gain the ability to design end-to-end AI solutions—from problem identification and modelling to evaluation, optimization, ethical governance, and production-level deployment—supported by hands-on labs, real datasets, and a capstone AI project. Ideal for careers such as AI Engineer, Data Scientist, ML Engineer, or AI Product Developer, the program also provides a clear progression pathway to master’s degrees in AI, Data Science, or Computing.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "PG Dip · Computing (AI)",
+    "years": [
+     [
+      "Focus",
+      "Artificial intelligence."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units (5):",
+     "Managing Innovation and Change in Computing",
+     "Systems Development and User Experience (UX)",
+     "Implementing and Managing Cyber Security",
+     "Business Intelligence Systems",
+     "Independent Project"
+    ],
+    "careers": [
+     "AI Engineer",
+     "Machine Learning Engineer",
+     "AI Research Analyst"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "The Postgraduate Diploma in Computing (Artificial Intelligence) is a rigorous, industry-focused program designed for graduates and professionals who want to build practical, job-ready AI expertise. It develops strong foundations in computing, programming, data handling, machine learning, deep learning, NLP, computer vision, and real-world AI deployment using tools like Python, TensorFlow, PyTorch, and cloud platforms. Learners gain the ability to design end-to-end AI solutions—from problem identification and modelling to evaluation, optimization, ethical governance, and production-level deployment—supported by hands-on labs, real datasets, and a capstone AI project. Ideal for careers such as AI Engineer, Data Scientist, ML Engineer, or AI Product Developer, the program also provides a clear progression pathway to master’s degrees in AI, Data Science, or Computing.",
+    "startAmt": "from LKR 400,000",
+    "whoTitle": "For professionals ready to go further.",
+    "card_name": "Postgraduate Diploma in Computing: Artificial Intelligence",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s (MSc) Top-Up in Computing at a UK university, or senior technical roles"
+   },
+   "seo_title": "Postgraduate-Level Study in Computing – AI Pathway",
+   "seo_description": "The Postgraduate Diploma in Computing (Artificial Intelligence) is a rigorous, industry-focused program designed for graduates and professionals who want to build practical, job-ready AI expertise. It develops strong foundations in computing, programming, data handling, machine learning, deep learni",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "uob-beng-hons-software-engineering-top-up",
+   "design_key": "tu-beng",
+   "plan_type": "pg",
+   "short_name": "UoB BEng (Hons) Software Eng. Top-Up",
+   "level": "Top-Up",
+   "school": "Computing",
+   "body_label": "UK university partner",
+   "card_type": "Top-up",
+   "keywords": "degree top-up beng software",
+   "monthly_label": "Honours degree in a year",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 13,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "UoB – BEng (Hons) Software Engineering (Top-Up)",
+    "dur": "12 months",
+    "fee": 400000,
+    "img": "/assets/56b7f2da7a5200c8c69300aedde2c024.webp",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Honours degree in 12 months",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 400,000"
+       ],
+       [
+        "Duration",
+        "12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "UoB – BEng (Hons) Software Engineering (Top-Up)",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Top-Up",
+    "blurb": "The Software Engineering programme at the University of Greater Manchester has been designed collaboratively working with industrial partners to ensure that students study a comprehensive programme of relevant industrial topics. Many of the graduates find successful careers in this lucrative area of employment.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "UoB BEng (Hons) Software Eng. Top-Up",
+    "years": [
+     [
+      "Final year",
+      "Software engineering at honours level."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Undergraduate Project",
+     "Agile Programming",
+     "Enterprise Systems Development"
+    ],
+    "careers": [
+     "Software Engineer",
+     "Software Developer",
+     "Systems Analyst"
+    ],
+    "feeHead": "from LKR 400,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "Coursework prepares students for their post-university career through realistic scenarios, emphasising technical skills and delivering required outputs like technical proposals and reports. Project-based coursework frequently involves group work, emphasising the crucial skill of effective teamwork in modern software engineering. The programme emphasises internationalisation, covering cultural aspects, localisation, and international standards in software engineering and application development. Furthermore, this is a Top-Up programme designed to allow individuals to progress from an appropriate prior qualification to an honours degree level. An induction programme will facilitate an effective transition to honours degree study.",
+    "startAmt": "LKR 400,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "card_name": "UoB BEng (Hons) Software Engineering (Top-Up)",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s degree such as a UoB MSc or MBA"
+   },
+   "seo_title": "UoB – BEng (Hons) Software Engineering (Top-Up)",
+   "seo_description": "The Software Engineering programme at the University of Greater Manchester has been designed collaboratively working with industrial partners to ensure that students study a comprehensive programme of relevant industrial topics. Many of the graduates find successful careers in this lucrative area of",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "top-up-degree-in-management-sales-marketing-pathway",
+   "design_key": "tu-sales",
+   "plan_type": "pg",
+   "short_name": "Top-Up · Sales & Marketing",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "UK university partner",
+   "card_type": "Top-up",
+   "keywords": "degree top-up management marketing",
+   "monthly_label": "Top-up in a year",
+   "cpd_addon_fee": null,
+   "featured": true,
+   "sort_order": 14,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Bachelor’s-Level Study in Management – Sales & Marketing Pathway",
+    "dur": "10 months / 12 months",
+    "fee": 250000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/6ae01b514e1f45d484bec1b4511a3b12-topup-management-sales.png",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Top-up in a year",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 250,000"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Bachelor’s-Level Study in Management – Sales & Marketing Pathway",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 6 Diploma in Management",
+    "blurb": "The Sales & Marketing pathway develops advanced understanding of marketing strategy, branding, sales operations, and communication techniques alongside leadership and quality management. Learners gain the ability to analyse markets, build brands, manage customer relationships, and support organisational revenue growth. It is ideal for those entering digital marketing, sales management, brand strategy, or marketing-technology–driven roles in modern organisations.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "Top-Up · Sales & Marketing",
+    "years": [
+     [
+      "Final year",
+      "Sales and marketing management."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Leadership and Management",
+     "Personal Leadership and Management Development",
+     "Managing Quality and Service Delivery",
+     "Research Project",
+     "Sales & Marketing Pathway Units",
+     "Marketing Strategy"
+    ],
+    "careers": [
+     "Digital Marketing Analyst",
+     "Marketing Technology Associate",
+     "Brand & Content Strategist"
+    ],
+    "feeHead": "from LKR 250,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "The Sales & Marketing pathway develops advanced understanding of marketing strategy, branding, sales operations, and communication techniques alongside leadership and quality management. Learners gain the ability to analyse markets, build brands, manage customer relationships, and support organisational revenue growth. It is ideal for those entering digital marketing, sales management, brand strategy, or marketing-technology–driven roles in modern organisations.",
+    "startAmt": "LKR 250,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "card_name": "Bachelor’s in Management: Sales & Marketing (Top-Up)",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Level 7 Postgraduate Diploma in Strategic Management or an MBA"
+   },
+   "seo_title": "Bachelor’s-Level Study in Management – Sales & Marketing Pathway",
+   "seo_description": "The Sales & Marketing pathway develops advanced understanding of marketing strategy, branding, sales operations, and communication techniques alongside leadership and quality management. Learners gain the ability to analyse markets, build brands, manage customer relationships, and support organisati",
+   "fee_label": "from LKR 250,000"
+  },
+  {
+   "slug": "digital-marketing-analytics-essentials",
+   "design_key": "c-dm",
+   "plan_type": "cpd",
+   "short_name": "Digital Marketing & Analytics",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "marketing social media ads analytics",
+   "monthly_label": "CPD certificate",
+   "cpd_addon_fee": 30000,
+   "featured": true,
+   "sort_order": 15,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Digital Marketing & Analytics Essentials",
+    "dur": "4 weeks",
+    "fee": 30000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/e4585b7a18824c16a4d1647c844e216d-digital-marketing-analytics-essentials.png",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "Campaigns + analytics",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 30,000"
+       ],
+       [
+        "Duration",
+        "4 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Digital Marketing & Analytics Essentials",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "Digital Marketing & Analytics Essentials is a four-week practical course that introduces participants to planning, running and measuring digital marketing campaigns. Learn to define goals, identify target audiences, select advertising platforms and track results. The course covers Google Ads, Meta Ads, campaign budgeting and data-driven optimisation.",
+    "entry": "No prior experience required · Basic English",
+    "offer": false,
+    "short": "Digital Marketing & Analytics",
+    "years": [
+     [
+      "Focus",
+      "Digital marketing and analytics."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Week 1: Strategy, Goals & Targeting",
+     "Week 2: Performance Marketing & KPIs",
+     "Week 3: Ads Execution & Platforms",
+     "Week 4: Tracking & Optimisation"
+    ],
+    "careers": [
+     "Set SMART marketing goals and define audience segments and buyer personas.",
+     "Explain marketing funnel stages and distinguish performance marketing from brand marketing.",
+     "Interpret CTR, CPC, CPA, conversion rate and ROI to assess campaign performance.",
+     "Plan campaign budgets and outline advertising campaigns for Google and Meta.",
+     "Apply lead generation, landing page and basic A/B testing principles."
+    ],
+    "feeHead": "LKR 30,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "Digital Marketing & Analytics Essentials is a four-week practical course that introduces participants to planning, running and measuring digital marketing campaigns. Learn to define goals, identify target audiences, select advertising platforms and track results. The course covers Google Ads, Meta Ads, campaign budgeting and data-driven optimisation.",
+    "startAmt": "LKR 30,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "card_name": "Digital Marketing & Analytics Essentials",
+    "finalLine": "Join the next cohort.",
+    "startNote": "4 weeks · CPD",
+    "monthTrust": "CPD certificate",
+    "progression": "Apply the skills directly at work, or progress to further CPD short courses or diploma-level study"
+   },
+   "seo_title": "Digital Marketing & Analytics Essentials",
+   "seo_description": "Digital Marketing & Analytics Essentials is a four-week practical course that introduces participants to planning, running and measuring digital marketing campaigns. Learn to define goals, identify target audiences, select advertising platforms and track results. The course covers Google Ads, Meta A",
+   "fee_label": "LKR 30,000"
+  },
+  {
+   "slug": "data-analytics-with-google-looker-studio-cpd",
+   "design_key": "c-looker",
+   "plan_type": "cpd",
+   "short_name": "Data Analytics with Looker Studio",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "data excel dashboard looker",
+   "monthly_label": "CPD certificate",
+   "cpd_addon_fee": 35000,
+   "featured": true,
+   "sort_order": 16,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Data Analytics with Google & Looker Studio",
+    "dur": "06 WEEKS",
+    "fee": 35000,
+    "img": "/assets/50497969f86def66413907403d96f5fa.webp",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "Hands-on dashboards",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 35,000"
+       ],
+       [
+        "Duration",
+        "6 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Data Analytics with Google & Looker Studio",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "The Data Analytics with Google & Looker Studio course is a hands-on, 6-week short program designed to equip learners with essential data skills using popular tools like Google Sheets, Google Analytics 4 (GA4), and Looker Studio. Delivered 100% online, the course emphasizes practical, job-ready skills through recorded modules, live Q&A sessions, and real-world assignments. The capstone project ensures learners walk away with a portfolio-worthy dashboard demonstrating their analytics proficiency.",
+    "entry": "STUDENTS AND PROFESSIONALS",
+    "offer": false,
+    "short": "Data Analytics with Looker Studio",
+    "years": [
+     [
+      "Focus",
+      "Google tools and Looker Studio."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Data Analytics with Looker Studio"
+    ],
+    "careers": [
+     "Talk to an advisor about career routes"
+    ],
+    "feeHead": "LKR 35,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "The Data Analytics with Google & Looker Studio course is a hands-on, 6-week short program designed to equip learners with essential data skills using popular tools like Google Sheets, Google Analytics 4 (GA4), and Looker Studio. Delivered 100% online, the course emphasizes practical, job-ready skills through recorded modules, live Q&A sessions, and real-world assignments. The capstone project ensures learners walk away with a portfolio-worthy dashboard demonstrating their analytics proficiency.",
+    "startAmt": "LKR 35,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "card_name": "Data Analytics with Google & Looker Studio",
+    "finalLine": "Join the next cohort.",
+    "startNote": "6 weeks · CPD",
+    "monthTrust": "CPD certificate",
+    "progression": "PROFESSIONALS"
+   },
+   "seo_title": "Data Analytics with Google & Looker Studio",
+   "seo_description": "The Data Analytics with Google & Looker Studio course is a hands-on, 6-week short program designed to equip learners with essential data skills using popular tools like Google Sheets, Google Analytics 4 (GA4), and Looker Studio. Delivered 100% online, the course emphasizes practical, job-ready skill",
+   "fee_label": "LKR 35,000"
+  },
+  {
+   "slug": "ai-for-hr-cpd",
+   "design_key": "c-aihr",
+   "plan_type": "cpd",
+   "short_name": "AI for HR",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "ai hr human resources",
+   "monthly_label": "CPD certificate",
+   "cpd_addon_fee": 50000,
+   "featured": true,
+   "sort_order": 17,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "AI for HR",
+    "dur": "6 weeks",
+    "fee": 50000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/5c76911d33ed4ae4ad06ae24910c3485-screenshot-2026-11-16-125301.png",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "For HR teams",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 50,000"
+       ],
+       [
+        "Duration",
+        "6 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "AI for HR",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "This short course is designed for anyone who wants to upgrade practical skills quickly — whether you’re a student, a fresh A/L graduate, an HND learner, or someone already working. It’s ideal for individuals who want to gain hands-on knowledge, strengthen their CV, and stay competitive in today’s fast-changing job market.",
+    "entry": "No prior experience required · Basic English",
+    "offer": false,
+    "short": "AI for HR",
+    "years": [
+     [
+      "Focus",
+      "AI in HR."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "AI Foundations for HR",
+     "Recruitment & Talent Acquisition",
+     "HR Automation",
+     "Learning & Development",
+     "HR Analytics",
+     "AI Strategy for HR"
+    ],
+    "careers": [
+     "AI basics, HR use cases, bias & privacy risks",
+     "CV screening, bias reduction, candidate matching",
+     "Workflow automation, HR chatbots",
+     "Skill gap analysis, personalized learning plans",
+     "Predictive analytics, attrition insights"
+    ],
+    "feeHead": "LKR 50,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "This short course is designed for anyone who wants to upgrade practical skills quickly — whether you’re a student, a fresh A/L graduate, an HND learner, or someone already working. It’s ideal for individuals who want to gain hands-on knowledge, strengthen their CV, and stay competitive in today’s fast-changing job market.",
+    "startAmt": "LKR 50,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "card_name": "AI for HR",
+    "finalLine": "Join the next cohort.",
+    "startNote": "6 weeks · CPD",
+    "monthTrust": "CPD certificate",
+    "progression": "Apply the skills directly at work, or progress to further CPD short courses or diploma-level study"
+   },
+   "seo_title": "AI for HR",
+   "seo_description": "This short course is designed for anyone who wants to upgrade practical skills quickly — whether you’re a student, a fresh A/L graduate, an HND learner, or someone already working. It’s ideal for individuals who want to gain hands-on knowledge, strengthen their CV, and stay competitive in today’s fa",
+   "fee_label": "LKR 50,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-general-route",
+   "design_key": "pg-gen",
+   "plan_type": "pg",
+   "short_name": "PG Dip · Computing (General)",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "UK-regulated",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 107,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate Diploma in Computing – General Route",
+    "dur": "10 months / 12 months",
+    "fee": 350000,
+    "img": "/assets/56b7f2da7a5200c8c69300aedde2c024.webp",
+    "lvl": "Postgraduate",
+    "who": [
+     "Computing graduates",
+     "Tech professionals",
+     "Career changers with a degree",
+     "Team leads"
+    ],
+    "body": "UK-regulated",
+    "chip": "Level 7 computing",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 400,000"
+       ],
+       [
+        "Duration",
+        "10 or 12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate Diploma in Computing – General Route",
+    "path": [
+     [
+      "Before",
+      "Degree or equivalent"
+     ],
+     [
+      "You are here",
+      "PG Diploma"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Senior roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Postgraduate",
+    "blurb": "The ATHE Postgraduate Diploma in Computing Technologies (General Route) is a 120-credit postgraduate qualification designed for advanced learners seeking broad, high-level expertise across multiple computing disciplines. The programme covers innovation, system development, cybersecurity, business intelligence, and advanced research methods. It prepares learners for senior technical roles, leadership positions, consultancy, and progression to MSc/MBA top-up degrees.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "PG Dip · Computing (General)",
+    "years": [
+     [
+      "Focus",
+      "General computing."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Managing Innovation and Change in Computing",
+     "Systems Development and User Experience (UX)",
+     "Implementing and Managing Cyber Security",
+     "Business Intelligence Systems",
+     "Independent Project",
+     "Optional Units (Choose ANY 2)"
+    ],
+    "careers": [
+     "IT Project Manager / Technical Lead",
+     "Cyber Security Specialist / Manager",
+     "Senior Software Engineer / Solutions Architect"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "The ATHE Postgraduate Diploma in Computing Technologies (General Route) is a 120-credit postgraduate qualification designed for advanced learners seeking broad, high-level expertise across multiple computing disciplines. The programme covers innovation, system development, cybersecurity, business intelligence, and advanced research methods. It prepares learners for senior technical roles, leadership positions, consultancy, and progression to MSc/MBA top-up degrees.",
+    "startAmt": "from LKR 400,000",
+    "whoTitle": "For professionals ready to go further.",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s (MSc) Top-Up in Computing at a UK university, or senior technical roles"
+   },
+   "seo_title": "Postgraduate Diploma in Computing – General Route",
+   "seo_description": "The ATHE Postgraduate Diploma in Computing Technologies (General Route) is a 120-credit postgraduate qualification designed for advanced learners seeking broad, high-level expertise across multiple computing disciplines. The programme covers innovation, system development, cybersecurity, business in",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-software-engineering",
+   "design_key": "pg-se",
+   "plan_type": "pg",
+   "short_name": "PG Dip · Computing (Software Eng.)",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "UK-regulated",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 108,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate Diploma in Computing – Software Engineering",
+    "dur": "10 months / 12 months",
+    "fee": 350000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/2fe92172c01a43e591bc18d6a182cb19-pgdip-se.png",
+    "lvl": "Postgraduate",
+    "who": [
+     "Developers",
+     "Computing graduates",
+     "Tech leads",
+     "Career changers with a degree"
+    ],
+    "body": "UK-regulated",
+    "chip": "Level 7 computing",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 400,000"
+       ],
+       [
+        "Duration",
+        "10 or 12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate Diploma in Computing – Software Engineering",
+    "path": [
+     [
+      "Before",
+      "Degree or equivalent"
+     ],
+     [
+      "You are here",
+      "PG Diploma"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Senior roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Postgraduate",
+    "blurb": "The Postgraduate Diploma in Computing (Software Engineering) is a practical, advanced program designed for graduates and professionals who want to build strong, production-level software development and system design skills. The curriculum focuses on modern programming practices, object-oriented design, data structures, algorithms, software architecture, databases, API development, cloud-native systems, DevOps fundamentals, testing, and secure coding. Learners work with industry tools such as Python, Java, JavaScript, Git, Docker, and cloud platforms while building scalable applications through real-world case studies and agile project workflows. The program strengthens the ability to design, develop, test, deploy, and maintain software systems that meet industry standards, culminating in a capstone project that demonstrates full-stack engineering capability. It prepares learners for roles such as Software Engineer, Full-Stack Developer, Backend Developer, QA Engineer, or for progression into master’s degrees in Software Engineering, Computing, or related fields.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "PG Dip · Computing (Software Eng.)",
+    "years": [
+     [
+      "Focus",
+      "Software engineering."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units (5):",
+     "Managing Innovation and Change in Computing",
+     "Systems Development and User Experience (UX)",
+     "Implementing and Managing Cyber Security",
+     "Business Intelligence Systems",
+     "Independent Project"
+    ],
+    "careers": [
+     "Senior Software Engineer",
+     "Solutions Architect",
+     "ERP Systems Consultant"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "The Postgraduate Diploma in Computing (Software Engineering) is a practical, advanced program designed for graduates and professionals who want to build strong, production-level software development and system design skills. The curriculum focuses on modern programming practices, object-oriented design, data structures, algorithms, software architecture, databases, API development, cloud-native systems, DevOps fundamentals, testing, and secure coding. Learners work with industry tools such as Python, Java, JavaScript, Git, Docker, and cloud platforms while building scalable applications through real-world case studies and agile project workflows. The program strengthens the ability to design, develop, test, deploy, and maintain software systems that meet industry standards, culminating in a capstone project that demonstrates full-stack engineering capability. It prepares learners for roles such as Software Engineer, Full-Stack Developer, Backend Developer, QA Engineer, or for progression into master’s degrees in Software Engineering, Computing, or related fields.",
+    "startAmt": "from LKR 400,000",
+    "whoTitle": "For professionals ready to go further.",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s (MSc) Top-Up in Computing at a UK university, or senior technical roles"
+   },
+   "seo_title": "Postgraduate Diploma in Computing – Software Engineering",
+   "seo_description": "The Postgraduate Diploma in Computing (Software Engineering) is a practical, advanced program designed for graduates and professionals who want to build strong, production-level software development and system design skills. The curriculum focuses on modern programming practices, object-oriented des",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-application-development",
+   "design_key": "pg-app",
+   "plan_type": "pg",
+   "short_name": "PG · Application Development",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "UK-regulated",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 110,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate-Level Study in Computing – Application Development Pathway",
+    "dur": "10 months / 12 months",
+    "fee": 350000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/8a9b8cf96fe94e9cbbc8c44b13b9cfa0-pgdip-application-dev.png",
+    "lvl": "Postgraduate",
+    "who": [
+     "Developers",
+     "Computing graduates",
+     "Product builders",
+     "Career changers with a degree"
+    ],
+    "body": "UK-regulated",
+    "chip": "Level 7 computing",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 350,000"
+       ],
+       [
+        "Duration",
+        "10 or 12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate-Level Study in Computing – Application Development Pathway",
+    "path": [
+     [
+      "Before",
+      "Degree or equivalent"
+     ],
+     [
+      "You are here",
+      "PG Diploma"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Senior roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 7 Extended Diploma in Computing",
+    "blurb": "This pathway focuses on modern application development including mobile app development, AI-driven applications, UX engineering, BI, and security. It prepares learners for high-demand roles in software and mobile application development.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "PG · Application Development",
+    "years": [
+     [
+      "Focus",
+      "Application development."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Managing Innovation and Change in Computing",
+     "Systems Development and User Experience (UX)",
+     "Implementing and Managing Cyber Security",
+     "Business Intelligence Systems",
+     "Independent Project"
+    ],
+    "careers": [
+     "Senior Software Engineer",
+     "Full-Stack Developer",
+     "AI Application Developer"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "This pathway focuses on modern application development including mobile app development, AI-driven applications, UX engineering, BI, and security. It prepares learners for high-demand roles in software and mobile application development.",
+    "startAmt": "from LKR 350,000",
+    "whoTitle": "For professionals ready to go further.",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s (MSc) Top-Up in Computing at a UK university, or senior technical roles"
+   },
+   "seo_title": "Postgraduate-Level Study in Computing – Application Development Pathway",
+   "seo_description": "This pathway focuses on modern application development including mobile app development, AI-driven applications, UX engineering, BI, and security. It prepares learners for high-demand roles in software and mobile application development.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-data-analytics",
+   "design_key": "pg-data",
+   "plan_type": "pg",
+   "short_name": "PG · Data Analytics",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "UK-regulated",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 111,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Postgraduate-Level Study in Computing – Data Analytics Pathway",
+    "dur": "10 months / 12 months",
+    "fee": 350000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/4842dd76dad54968a58cd4d26a28eae9-pgdip-da.png",
+    "lvl": "Postgraduate",
+    "who": [
+     "Analysts",
+     "Graduates",
+     "Managers working with data",
+     "Career changers with a degree"
+    ],
+    "body": "UK-regulated",
+    "chip": "Level 7 computing",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 350,000"
+       ],
+       [
+        "Duration",
+        "10 or 12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Postgraduate-Level Study in Computing – Data Analytics Pathway",
+    "path": [
+     [
+      "Before",
+      "Degree or equivalent"
+     ],
+     [
+      "You are here",
+      "PG Diploma"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Senior roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 7 Extended Diploma in Computing",
+    "blurb": "The Postgraduate Diploma in Computing (Data Analytics) is a practical, industry-driven qualification designed for graduates and professionals aiming to build strong analytical, statistical, and data engineering skills for modern business environments. The program covers advanced data analysis, data modelling, database systems, Python programming, statistical methods, business intelligence, machine learning fundamentals, data visualization, and cloud-based analytics workflows using tools like SQL, Python, Power BI, Tableau, and big-data platforms. Learners are trained to collect, clean, process, and interpret complex datasets to generate actionable insights and support decision-making, while also understanding data governance, ethics, and real-world application. The course culminates in an applied analytics project that builds a professional portfolio and prepares learners for roles such as Data Analyst, Business Analyst, BI Developer, Data Engineer (entry), or for progression into master’s degrees in Data Analytics, Data Science, or Computing.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "PG · Data Analytics",
+    "years": [
+     [
+      "Focus",
+      "Data analytics."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Mandatory Units (5):",
+     "Managing Innovation and Change in Computing",
+     "Systems Development and User Experience (UX)",
+     "Implementing and Managing Cyber Security",
+     "Business Intelligence Systems",
+     "Independent Project"
+    ],
+    "careers": [
+     "Data Scientist",
+     "Senior Data Analyst",
+     "Big Data Engineer"
+    ],
+    "feeHead": "from LKR 350,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements and progression options.",
+    "feeTitle": "Invest in your next level.",
+    "overview": "The Postgraduate Diploma in Computing (Data Analytics) is a practical, industry-driven qualification designed for graduates and professionals aiming to build strong analytical, statistical, and data engineering skills for modern business environments. The program covers advanced data analysis, data modelling, database systems, Python programming, statistical methods, business intelligence, machine learning fundamentals, data visualization, and cloud-based analytics workflows using tools like SQL, Python, Power BI, Tableau, and big-data platforms. Learners are trained to collect, clean, process, and interpret complex datasets to generate actionable insights and support decision-making, while also understanding data governance, ethics, and real-world application. The course culminates in an applied analytics project that builds a professional portfolio and prepares learners for roles such as Data Analyst, Business Analyst, BI Developer, Data Engineer (entry), or for progression into master’s degrees in Data Analytics, Data Science, or Computing.",
+    "startAmt": "from LKR 350,000",
+    "whoTitle": "For professionals ready to go further.",
+    "finalLine": "Talk to an advisor about your plan.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Master’s (MSc) Top-Up in Computing at a UK university, or senior technical roles"
+   },
+   "seo_title": "Postgraduate-Level Study in Computing – Data Analytics Pathway",
+   "seo_description": "The Postgraduate Diploma in Computing (Data Analytics) is a practical, industry-driven qualification designed for graduates and professionals aiming to build strong analytical, statistical, and data engineering skills for modern business environments. The program covers advanced data analysis, data ",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-computing-networking",
+   "design_key": "postgraduate-diploma-in-computing-networking",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Computing – Networking Pathway",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "computing postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 112,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Computing – Networking Pathway",
+   "seo_description": "The Postgraduate Diploma in Computing (Networking) is a hands-on, industry-aligned program designed for graduates and professionals who want advanced skills in network design, administration, security, and large-scale infrastructure management. The curriculum covers core areas such as enterprise net",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "uob-msc-cloud-network-security",
+   "design_key": "uob-msc-cloud-network-security",
+   "plan_type": "pg",
+   "short_name": "UoB – MSc Cloud & Network Security",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "WINC",
+   "card_type": "Postgraduate",
+   "keywords": "computing postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 113,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "UoB – MSc Cloud & Network Security",
+   "seo_description": "The MSc Cloud and Network Security is a 1-year UK postgraduate degree focused on developing advanced skills in cloud infrastructure, cybersecurity, networking, and digital forensics.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "uob-msc-data-analytics-technologies",
+   "design_key": "uob-msc-data-analytics-technologies",
+   "plan_type": "pg",
+   "short_name": "UoB – MSc Data Analytics & Technologies",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "WINC",
+   "card_type": "Postgraduate",
+   "keywords": "computing postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 114,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "UoB – MSc Data Analytics & Technologies",
+   "seo_description": "The MSc Data Analytics and Technologies is a 1-year UK postgraduate degree designed to develop advanced skills in data analysis, machine learning, big data processing, and business-focused decision-making.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "uob-msc-software-engineering-professional-practice",
+   "design_key": "uob-msc-software-engineering-professional-practice",
+   "plan_type": "pg",
+   "short_name": "UoB – MSc Software Engineering (Professional Practice)",
+   "level": "Postgraduate",
+   "school": "Computing",
+   "body_label": "WINC",
+   "card_type": "Postgraduate",
+   "keywords": "computing postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 115,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "UoB – MSc Software Engineering (Professional Practice)",
+   "seo_description": "The MSc Software Engineering (Professional Practice) is a 1-year postgraduate degree designed for individuals with a computing or programming background who want to advance their expertise in software engineering at a professional level.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "foundation-in-applied-statistics",
+   "design_key": "f-stat",
+   "plan_type": "fnd",
+   "short_name": "Foundation · Applied Statistics",
+   "level": "Foundation",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 118,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – Applied Statistics",
+    "dur": " 8 Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/f8664187296c487886a28dd5095392f9-foundation-app-stat.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Leads on to data pathways",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – Applied Statistics",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in Applied Statistics",
+    "blurb": "The ATHE Level 3 Diploma in Applied Statistics is designed for students who want to build strong foundations in data handling, probability, hypothesis testing, sampling, graphical analysis, and statistical tools used in modern business and industry. It is ideal for O/L qualified students, beginners in analytics, and anyone planning to progress toward Level 4 Diplomas or university pathway programs. The qualification also supports entry-level analytical roles in Sri Lanka’s growing data-driven job market.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics",
+    "offer": true,
+    "short": "Foundation · Applied Statistics",
+    "years": [
+     [
+      "Core",
+      "Statistics fundamentals."
+     ],
+     [
+      "Applied",
+      "Working with data."
+     ]
+    ],
+    "skills": [
+     "Introduction to Statistics",
+     "Hypothesis Testing",
+     "Statistics in Industry and Commerce",
+     "ICT in Statistics"
+    ],
+    "careers": [
+     "Junior Statistician",
+     "Statistical Assistant / Statistical Technician",
+     "Junior Data Analyst"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "The ATHE Level 3 Diploma in Applied Statistics is designed for students who want to build strong foundations in data handling, probability, hypothesis testing, sampling, graphical analysis, and statistical tools used in modern business and industry. It is ideal for O/L qualified students, beginners in analytics, and anyone planning to progress toward Level 4 Diplomas or university pathway programs. The qualification also supports entry-level analytical roles in Sri Lanka’s growing data-driven job market.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step after O/Ls.",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Business Management or HND in Accounting"
+   },
+   "seo_title": "Foundation-Level – Applied Statistics",
+   "seo_description": "The ATHE Level 3 Diploma in Applied Statistics is designed for students who want to build strong foundations in data handling, probability, hypothesis testing, sampling, graphical analysis, and statistical tools used in modern business and industry. It is ideal for O/L qualified students, beginners ",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "foundation-in-english-communications-for-business",
+   "design_key": "f-eng",
+   "plan_type": "fnd",
+   "short_name": "Foundation · English & Comms",
+   "level": "Foundation",
+   "school": "Business",
+   "body_label": "ATHE (UK)",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 120,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Foundation-Level – English & Communications for Business",
+    "dur": " 8 Months",
+    "fee": 49500,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/6316047a73f54c049aecc5959148f754-fou-english.png",
+    "lvl": "Foundation",
+    "who": [
+     "Students who have finished O/Ls",
+     "Learners who want a head start",
+     "Anyone planning an HND or degree",
+     "Career starters"
+    ],
+    "body": "ATHE (UK)",
+    "chip": "Confidence for business",
+    "cups": "32 free coffees over 8 months",
+    "fees": [
+     {
+      "h": "Programme fee · LKR 49,500",
+      "rows": [
+       [
+        "Registration (once, non-refundable)",
+        "LKR 9,500"
+       ],
+       [
+        "Monthly",
+        "8 × LKR 5,000"
+       ],
+       [
+        "Total",
+        "LKR 49,500"
+       ]
+      ]
+     }
+    ],
+    "name": "Foundation-Level – English & Communications for Business",
+    "path": [
+     [
+      "Today",
+      "O/Ls done"
+     ],
+     [
+      "You are here",
+      "Foundation · Level 3"
+     ],
+     [
+      "Next",
+      "Level 4 diploma or HND"
+     ],
+     [
+      "Then",
+      "UK top-up degree"
+     ]
+    ],
+    "plan": "fnd",
+    "qual": "Level 3 Diploma in English and Communications for Business",
+    "blurb": "The ATHE Level 3 Diploma in English and Communications for Business is a 60-credit applied qualification designed to develop strong English communication skills for business environments. It covers verbal, non-verbal, written, digital, mobile, and professional communication across various business contexts.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics",
+    "offer": true,
+    "short": "Foundation · English & Comms",
+    "years": [
+     [
+      "Core",
+      "Business English."
+     ],
+     [
+      "Applied",
+      "Communication for work."
+     ]
+    ],
+    "skills": [
+     "Business Communications",
+     "Mobile and Digital Business Communications",
+     "Verbal and Non-Verbal Business Communications",
+     "Business English: Reading and Writing",
+     "Business English: Speaking and Listening"
+    ],
+    "careers": [
+     "Business Communications Assistant",
+     "Customer Service Executive (Business English Focus)",
+     "Administrative & Communications Officer"
+    ],
+    "feeHead": "from LKR 49,500",
+    "feeNote": "Awarding-body fee in GBP is separate (GBP 90 for Information & Digital Technologies), due within one month of the start. Limited offer.",
+    "feeTitle": "UK qualifications from just LKR 5,000 a month.",
+    "overview": "This programme is ideal for students progressing from Level 2, O/L-qualified learners, or adults returning to education who want to improve English proficiency for business, higher education, or employment. It also develops essential study skills such as critical thinking, research, academic writing, digital communication, planning, note-taking, summarising, and reflection.",
+    "startAmt": "LKR 5,000 / month",
+    "whoTitle": "For your first step after O/Ls.",
+    "finalLine": "Start from LKR 5,000 a month.",
+    "startNote": "after LKR 9,500 registration · 8 months",
+    "monthTrust": "From LKR 5,000 a month",
+    "progression": "Progress to an ATHE Level 4/5 HND in Business Management or HND in Accounting"
+   },
+   "seo_title": "Foundation-Level – English & Communications for Business",
+   "seo_description": "The ATHE Level 3 Diploma in English and Communications for Business is a 60-credit applied qualification designed to develop strong English communication skills for business environments. It covers verbal, non-verbal, written, digital, mobile, and professional communication across various business c",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "hnd-in-business-management",
+   "design_key": "hnd-in-business-management",
+   "plan_type": "hnd",
+   "short_name": "HND Business & Management",
+   "level": "HND",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "HND",
+   "keywords": "hnd business",
+   "monthly_label": "or LKR 9,999 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 123,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "HND-Level Study in Business & Management",
+   "seo_description": "A comprehensive higher diploma designed to develop strong theoretical and practical business management skills.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-accounting-and-finance-2024",
+   "design_key": "postgraduate-diploma-in-accounting-and-finance-2024",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Accounting & Finance",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 124,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Accounting & Finance",
+   "seo_description": "The Postgraduate Diploma in Accounting and Finance is a 100-credit postgraduate-level qualification designed to develop advanced strategic, financial, and leadership capabilities.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-management-core-route",
+   "design_key": "postgraduate-diploma-in-strategic-management-core-route",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Strategic Management",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 125,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Strategic Management",
+   "seo_description": "The ATHE Postgraduate Diploma in Strategic Management (Core Route) is a postgraduate-level qualification designed to develop high-level strategic leadership, organisational analysis, financial planning, change management, and global business strategy skills. This programme builds the advanced capabi",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-management-finance-pathway",
+   "design_key": "postgraduate-diploma-in-strategic-management-finance-pathway",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Strategic Management – Finance Pathway",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 126,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Strategic Management – Finance Pathway",
+   "seo_description": "This pathway focuses on advanced international finance, financial strategy, quantitative methods, and global financial decision-making. It prepares learners for high-level financial leadership roles, strategic financial analysis, investment evaluation, and global finance operations. The programme bl",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-management-international-pathway",
+   "design_key": "postgraduate-diploma-in-strategic-management-international-pathway",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Strategic Management – International Pathway",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 127,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Strategic Management – International Pathway",
+   "seo_description": "This pathway specialises in global business analysis, international strategy, cross-border leadership, international finance, and global marketing environments. It prepares learners for global operational roles, multinational leadership positions, and international consultancy.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-management-managing-people-pathway",
+   "design_key": "postgraduate-diploma-in-strategic-management-managing-people-pathway",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Strategic Management – Managing People Pathway",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 128,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Strategic Management – Managing People Pathway",
+   "seo_description": "This pathway focuses on advanced HR strategy, organisational behaviour, change leadership, workforce analytics, and global HR management. It prepares learners for senior people-leadership roles, talent strategy positions, and organisational development leadership.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-strategic-management-marketing-pathway",
+   "design_key": "postgraduate-diploma-in-strategic-management-marketing-pathway",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Strategic Management – Marketing Pathway",
+   "level": "Postgraduate",
+   "school": "Business",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "business postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 129,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Strategic Management – Marketing Pathway",
+   "seo_description": "This pathway develops advanced marketing strategy capability, global marketing analysis, strategic brand positioning, and marketing leadership. Learners gain expertise in creating international marketing strategies, managing corporate communications, and leading digital-first marketing transformatio",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "top-up-degree-in-management-finance-pathway",
+   "design_key": "tu-fin",
+   "plan_type": "pg",
+   "short_name": "Top-Up · Management (Finance)",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "UK university partner",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 130,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Bachelor’s-Level Study in Management – Finance Pathway",
+    "dur": "10 months / 12 months",
+    "fee": 250000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/eb1d8a6d7038406b9fb0b846b62b4202-topup-management-finance.png",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Top-up in a year",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 250,000"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Bachelor’s-Level Study in Management – Finance Pathway",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 6 Diploma in Management",
+    "blurb": "This pathway focuses on advanced financial analysis, decision-making, accounting, economics, and public-sector financial management, combined with leadership and quality management. Ideal for learners pursuing finance management roles.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "Top-Up · Management (Finance)",
+    "years": [
+     [
+      "Final year",
+      "Management with finance."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Leadership and Management",
+     "Personal Leadership and Management Development",
+     "Managing Quality and Service Delivery",
+     "Research Project"
+    ],
+    "careers": [
+     "Financial Data Analyst",
+     "Business Finance Specialist",
+     "Financial Systems Analyst (Tech-Finance)"
+    ],
+    "feeHead": "from LKR 250,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "This pathway focuses on advanced financial analysis, decision-making, accounting, economics, and public-sector financial management, combined with leadership and quality management. Ideal for learners pursuing finance management roles.",
+    "startAmt": "LKR 250,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Level 7 Postgraduate Diploma in Strategic Management or an MBA"
+   },
+   "seo_title": "Bachelor’s-Level Study in Management – Finance Pathway",
+   "seo_description": "This pathway focuses on advanced financial analysis, decision-making, accounting, economics, and public-sector financial management, combined with leadership and quality management. Ideal for learners pursuing finance management roles.",
+   "fee_label": "from LKR 250,000"
+  },
+  {
+   "slug": "top-up-degree-in-management-general-route",
+   "design_key": "tu-gen",
+   "plan_type": "pg",
+   "short_name": "Top-Up · Management (General)",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "UK university partner",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 131,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Bachelor’s-Level Study in Management – General Route",
+    "dur": "10 months / 12 months",
+    "fee": 250000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/bd61955b31494712b6abe10cdb3d8b2b-topup-management-general.png",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Top-up in a year",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 250,000"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Bachelor’s-Level Study in Management – General Route",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 6 Diploma in Management",
+    "blurb": "The ATHE top-up Degree in Management is a comprehensive 120-credit qualification that builds deep expertise in leadership, management, quality assurance, strategy, change management, research, operations, and business systems. It is equivalent to the final year of a UK bachelor’s degree and provides a strong platform for postgraduate stud",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "Top-Up · Management (General)",
+    "years": [
+     [
+      "Final year",
+      "General management."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Leadership and Management",
+     "Personal Leadership and Management Development",
+     "Managing Quality and Service Delivery",
+     "Research Project",
+     "Optional Units (Choose ANY 4):",
+     "Financial Decision-Making"
+    ],
+    "careers": [
+     "IT Project Manager",
+     "Business Analyst",
+     "Operations Manager"
+    ],
+    "feeHead": "from LKR 250,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "The ATHE top-up Degree in Management is a comprehensive 120-credit qualification that builds deep expertise in leadership, management, quality assurance, strategy, change management, research, operations, and business systems. It is equivalent to the final year of a UK bachelor’s degree and provides a strong platform for postgraduate stud",
+    "startAmt": "LKR 250,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Level 7 Postgraduate Diploma in Strategic Management or an MBA"
+   },
+   "seo_title": "Bachelor’s-Level Study in Management – General Route",
+   "seo_description": "The ATHE top-up Degree in Management is a comprehensive 120-credit qualification that builds deep expertise in leadership, management, quality assurance, strategy, change management, research, operations, and business systems. It is equivalent to the final year of a UK bachelor’s degree and provides",
+   "fee_label": "from LKR 250,000"
+  },
+  {
+   "slug": "top-up-degree-in-management-managing-people-pathway",
+   "design_key": "tu-people",
+   "plan_type": "pg",
+   "short_name": "Top-Up · Managing People",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "UK university partner",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 132,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Bachelor’s-Level Study in Management – Managing People Pathway",
+    "dur": "10 months - 12 months",
+    "fee": 250000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/11a880ac5ec44991abaa75abab01a2b4-topup-management-managing-people.png",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Top-up in a year",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 250,000"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Bachelor’s-Level Study in Management – Managing People Pathway",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 6 Diploma in Management",
+    "blurb": "The Managing People pathway focuses on leadership, team development, organisational change, HR practices, and project delivery. Learners develop the ability to lead teams, manage transformation, analyse workforce issues, and improve performance across organisations. This programme suits those aiming for people-management roles, HR-related positions, organisational development, or leadership pathways that require strong interpersonal and strategic management skills.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "Top-Up · Managing People",
+    "years": [
+     [
+      "Final year",
+      "Managing people."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Leadership and Management",
+     "Personal Leadership and Management Development",
+     "Managing Quality and Service Delivery",
+     "Research Project"
+    ],
+    "careers": [
+     "HR Data Analyst",
+     "People Operations Lead",
+     "Talent & Workforce Analyst"
+    ],
+    "feeHead": "from LKR 250,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "The Managing People pathway focuses on leadership, team development, organisational change, HR practices, and project delivery. Learners develop the ability to lead teams, manage transformation, analyse workforce issues, and improve performance across organisations. This programme suits those aiming for people-management roles, HR-related positions, organisational development, or leadership pathways that require strong interpersonal and strategic management skills.",
+    "startAmt": "LKR 250,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Level 7 Postgraduate Diploma in Strategic Management or an MBA"
+   },
+   "seo_title": "Bachelor’s-Level Study in Management – Managing People Pathway",
+   "seo_description": "The Managing People pathway focuses on leadership, team development, organisational change, HR practices, and project delivery. Learners develop the ability to lead teams, manage transformation, analyse workforce issues, and improve performance across organisations. This programme suits those aiming",
+   "fee_label": "from LKR 250,000"
+  },
+  {
+   "slug": "top-up-degree-in-management-operations-management-pathway",
+   "design_key": "tu-ops",
+   "plan_type": "pg",
+   "short_name": "Top-Up · Operations Mgmt",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "UK university partner",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 133,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Bachelor’s-Level Study in Management – Operations Management Pathway",
+    "dur": "10 months / 12 months",
+    "fee": 250000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/c69903325aa547b1ab9e471c93efc3f4-topup-management-operations.png",
+    "lvl": "Top-Up",
+    "who": [
+     "HND graduates",
+     "Working professionals with a Level 5",
+     "Learners after a UK-recognised diploma",
+     "Future managers"
+    ],
+    "body": "UK university partner",
+    "chip": "Top-up in a year",
+    "cups": "40 free coffees",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 250,000"
+       ],
+       [
+        "Duration",
+        "10–12 months"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Bachelor’s-Level Study in Management – Operations Management Pathway",
+    "path": [
+     [
+      "Before",
+      "HND · Level 5"
+     ],
+     [
+      "You are here",
+      "Top-up degree"
+     ],
+     [
+      "Next",
+      "Master’s"
+     ],
+     [
+      "Then",
+      "Leadership roles"
+     ]
+    ],
+    "plan": "pg",
+    "qual": "Level 6 Diploma in Management",
+    "blurb": "This pathway prepares learners for managing business operations, supply chains, risk, quality, information systems, and organisational processes. It gives a strong blend of leadership, analytical, and operational planning skills required in modern workplaces. Ideal for learners targeting operations, logistics, quality management, process improvement, or business systems roles, the programme equips them to optimise workflows and drive organisational efficiency.",
+    "entry": "Completed GCE Ordinary Level (O/L) Minimum of 5 S passes with C passes for English & Mathematics · GCE A/L: Minimum 2 S passes (any stream) · Applicants must have successfully completed the HND in related field",
+    "offer": false,
+    "short": "Top-Up · Operations Mgmt",
+    "years": [
+     [
+      "Final year",
+      "Operations management."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Leadership and Management",
+     "Personal Leadership and Management Development",
+     "Managing Quality and Service Delivery",
+     "Research Project",
+     "Operations Pathway Units (Choose 4):",
+     "Management Information Systems"
+    ],
+    "careers": [
+     "Operations Analyst",
+     "Supply Chain Analyst (Tech-enabled)",
+     "Process Automation Associate"
+    ],
+    "feeHead": "from LKR 250,000",
+    "feeNote": "Payment plans are set with an advisor. Contact admissions for entry requirements.",
+    "feeTitle": "Finish your degree in a year.",
+    "overview": "This pathway prepares learners for managing business operations, supply chains, risk, quality, information systems, and organisational processes. It gives a strong blend of leadership, analytical, and operational planning skills required in modern workplaces. Ideal for learners targeting operations, logistics, quality management, process improvement, or business systems roles, the programme equips them to optimise workflows and drive organisational efficiency.",
+    "startAmt": "LKR 250,000",
+    "whoTitle": "For HND graduates ready to finish a degree.",
+    "finalLine": "Complete your bachelor’s online.",
+    "startNote": "payment plan set with an advisor",
+    "monthTrust": "Monthly plans available",
+    "progression": "Progress to a Level 7 Postgraduate Diploma in Strategic Management or an MBA"
+   },
+   "seo_title": "Bachelor’s-Level Study in Management – Operations Management Pathway",
+   "seo_description": "This pathway prepares learners for managing business operations, supply chains, risk, quality, information systems, and organisational processes. It gives a strong blend of leadership, analytical, and operational planning skills required in modern workplaces. Ideal for learners targeting operations,",
+   "fee_label": "from LKR 250,000"
+  },
+  {
+   "slug": "bsc-hons-business-management-top-up",
+   "design_key": "bsc-hons-business-management-top-up",
+   "plan_type": "pg",
+   "short_name": "BSc (Hons) Business Management (Top-Up)",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "WINC",
+   "card_type": "Top-Up",
+   "keywords": "top-up business",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 135,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "BSc (Hons) Business Management (Top-Up)",
+   "seo_description": "The BSc (Hons) Business Management (Top-Up) programme is designed to enhance your existing knowledge and skills in business management. It provides an international context, real-world experience, and specialist expertise in various subject areas. The programme fosters essential workplace skills and",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "uob-master-of-business-administration-mba-top-up",
+   "design_key": "uob-master-of-business-administration-mba-top-up",
+   "plan_type": "pg",
+   "short_name": "UoB – Master of Business Administration (MBA) Top-Up",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "WINC",
+   "card_type": "Top-Up",
+   "keywords": "top-up business",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 136,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "UoB – Master of Business Administration (MBA) Top-Up",
+   "seo_description": "The MBA Top-Up is a 1-year, full-time postgraduate degree designed for individuals who already hold a Level 7 Diploma in Business or an equivalent professional qualification.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "uob-msc-accountancy-financial-management-top-up",
+   "design_key": "uob-msc-accountancy-financial-management-top-up",
+   "plan_type": "pg",
+   "short_name": "UoB – MSc Accountancy & Financial Management (Top-Up)",
+   "level": "Top-Up",
+   "school": "Business",
+   "body_label": "WINC",
+   "card_type": "Top-Up",
+   "keywords": "top-up business",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 137,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "UoB – MSc Accountancy & Financial Management (Top-Up)",
+   "seo_description": "The MSc Accountancy and Financial Management (Top-Up) is a 1-year postgraduate degree designed for individuals who already hold a Level 7 qualification in Business or an equivalent professional qualification.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "foundation-in-law",
+   "design_key": "foundation-in-law",
+   "plan_type": "fnd",
+   "short_name": "Foundation-Level – Law",
+   "level": "Foundation",
+   "school": "Law",
+   "body_label": "ATHE",
+   "card_type": "Foundation",
+   "keywords": "foundation law",
+   "monthly_label": "or LKR 5,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 138,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Foundation-Level – Law",
+   "seo_description": "The Foundation in Law is a 60-credit foundation qualification designed to introduce learners to key legal principles and the structure of the legal system.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "hnd-in-law",
+   "design_key": "hnd-in-law",
+   "plan_type": "hnd",
+   "short_name": "HND Law",
+   "level": "HND",
+   "school": "Law",
+   "body_label": "ATHE",
+   "card_type": "HND",
+   "keywords": "hnd law",
+   "monthly_label": "or LKR 9,999 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 139,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "HND-Level Study in Law",
+   "seo_description": "The HND in Law is a 240-credit qualification designed to deepen learners’ understanding of advanced legal principles and prepare them for progression to the final year of a law degree.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "foundation-in-health-and-social-care",
+   "design_key": "foundation-in-health-and-social-care",
+   "plan_type": "fnd",
+   "short_name": "Foundation-Level – Health & Social Care",
+   "level": "Foundation",
+   "school": "Health & Social Care",
+   "body_label": "ATHE",
+   "card_type": "Foundation",
+   "keywords": "foundation health & social care",
+   "monthly_label": "or LKR 5,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 140,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Foundation-Level – Health & Social Care",
+   "seo_description": "The Foundation in Health and Social Care is a globally recognized pre-university qualification designed to introduce students to the healthcare and social care sector.",
+   "fee_label": "from LKR 49,500"
+  },
+  {
+   "slug": "hnd-in-health-and-social-care",
+   "design_key": "hnd-in-health-and-social-care",
+   "plan_type": "hnd",
+   "short_name": "HND Health & Social Care",
+   "level": "HND",
+   "school": "Health & Social Care",
+   "body_label": "ATHE",
+   "card_type": "HND",
+   "keywords": "hnd health & social care",
+   "monthly_label": "or LKR 9,999 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 141,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "HND-Level Study in Health & Social Care",
+   "seo_description": "The HND in Health and Social Care is a comprehensive qualification designed to develop in-depth knowledge, practical skills, and professional competence in healthcare and adult social care.",
+   "fee_label": "from LKR 280,000"
+  },
+  {
+   "slug": "postgraduate-diploma-in-healthcare-management",
+   "design_key": "postgraduate-diploma-in-healthcare-management",
+   "plan_type": "pg",
+   "short_name": "Postgraduate Healthcare Management",
+   "level": "Postgraduate",
+   "school": "Health & Social Care",
+   "body_label": "ATHE",
+   "card_type": "Postgraduate",
+   "keywords": "health & social care postgraduate",
+   "monthly_label": "or LKR 36,000 a month",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 142,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Postgraduate-Level Study in Healthcare Management",
+   "seo_description": "The Postgraduate Diploma in Healthcare Management is a 120-credit postgraduate-level qualification designed to develop advanced strategic, leadership, and management skills within the healthcare sector.",
+   "fee_label": "from LKR 350,000"
+  },
+  {
+   "slug": "ai-for-marketing",
+   "design_key": "c-aimkt",
+   "plan_type": "cpd",
+   "short_name": "AI for Marketing",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": 30000,
+   "featured": false,
+   "sort_order": 144,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "AI For Marketing",
+    "dur": "4 weeks",
+    "fee": 30000,
+    "img": "https://d18ep2e197efjz.cloudfront.net/course-covers/image/3848100268224e4cb5daab6025ea8402-ai-for-marketing-course-banner.png",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "For marketers",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 30,000"
+       ],
+       [
+        "Duration",
+        "4 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "AI For Marketing",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "AI for Marketing is a four-week practical course that helps participants use AI to plan, create and improve marketing campaigns. Learn prompt engineering, copywriting, visual creation and content optimisation using tools such as ChatGPT, Gemini, Claude, Canva AI and AdCreative.ai.",
+    "entry": "No prior experience required · Basic English",
+    "offer": false,
+    "short": "AI for Marketing",
+    "years": [
+     [
+      "Focus",
+      "AI in marketing."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Week 1 – AI Foundations & Ethics",
+     "Week 2 – AI for Content Creation",
+     "Week 3 – AI for Visuals & Ad Creation",
+     "Week 4 – AI-Powered Campaign Capstone"
+    ],
+    "careers": [
+     "- dentify practical AI applications in marketing and apply ethical, transparent data practices.",
+     "- Write effective prompts for marketing copy, campaign ideas and structured content.",
+     "- Create and refine visuals and advertisements using AI tools.",
+     "- Evaluate AI-generated content for accuracy, quality and brand consistency.",
+     "- Combine AI tools to develop a marketing campaign and analyse its performance."
+    ],
+    "feeHead": "LKR 30,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "Through hands-on activities and a final campaign project, participants develop practical skills while learning to evaluate AI outputs, maintain brand consistency and apply ethical data practices.",
+    "startAmt": "LKR 30,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "finalLine": "Join the next cohort.",
+    "startNote": "4 weeks · CPD",
+    "monthTrust": "CPD certificate",
+    "progression": "Apply the skills directly at work, or progress to further CPD short courses or diploma-level study"
+   },
+   "seo_title": "AI For Marketing",
+   "seo_description": "AI for Marketing is a four-week practical course that helps participants use AI to plan, create and improve marketing campaigns. Learn prompt engineering, copywriting, visual creation and content optimisation using tools such as ChatGPT, Gemini, Claude, Canva AI and AdCreative.ai.",
+   "fee_label": "LKR 30,000"
+  },
+  {
+   "slug": "cyber-security-in-the-ai-era-short-course-cpd",
+   "design_key": "c-cyber",
+   "plan_type": "cpd",
+   "short_name": "Cyber Security in the AI Era",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "",
+   "keywords": "",
+   "monthly_label": "",
+   "cpd_addon_fee": 75000,
+   "featured": false,
+   "sort_order": 146,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": {
+    "alt": "Cyber Security in the AI Era",
+    "dur": "12 WEEKS",
+    "fee": 75000,
+    "img": "/assets/75c3ae7cbeac009d12cffb9c3772b324.webp",
+    "lvl": "Short course",
+    "who": [
+     "Working professionals",
+     "Managers and team leads",
+     "Entrepreneurs",
+     "Students adding a skill"
+    ],
+    "body": "CPD",
+    "chip": "Modern threats",
+    "cups": "4 free coffees in your first month",
+    "fees": [
+     {
+      "h": "Programme fee",
+      "rows": [
+       [
+        "Fee",
+        "from LKR 75,000"
+       ],
+       [
+        "Duration",
+        "12 weeks"
+       ],
+       [
+        "Payment plan",
+        "Set with an advisor"
+       ]
+      ]
+     }
+    ],
+    "name": "Cyber Security in the AI Era",
+    "path": [
+     [
+      "Today",
+      "Your current role"
+     ],
+     [
+      "You are here",
+      "CPD short course"
+     ],
+     [
+      "Next",
+      "Apply it at work"
+     ],
+     [
+      "Or",
+      "Stack it with an HND"
+     ]
+    ],
+    "plan": "cpd",
+    "qual": "Short course",
+    "blurb": "The Cyber Security in the Smart Era: Protecting Digital Systems and Data programme is a practical, industry-relevant course designed to equip learners with essential knowledge and skills to understand cyber threats, protect digital systems, and manage security risks in today's technology-driven world.",
+    "entry": "No prior experience required · Basic English",
+    "offer": false,
+    "short": "Cyber Security in the AI Era",
+    "years": [
+     [
+      "Focus",
+      "Cyber security and AI."
+     ],
+     [
+      "Format",
+      "Live online sessions plus the LMS."
+     ]
+    ],
+    "skills": [
+     "Cyber Security Foundations in the Digital Age",
+     "Cyber Threats, Attacks & Vulnerabilities",
+     "Smart Technologies & Security Risks",
+     "IoT & AI Security Risks",
+     "Data Protection, Privacy & Compliance",
+     "Cyber Security Controls & Best Practices"
+    ],
+    "careers": [
+     "Demonstrate a clear understanding of core cyber security concepts, terminology, and principles, and explain their importance in modern digital, cloud, and AI-enabled environments.",
+     "2. Identify and differentiate cyber threats, attack methods, and system vulnerabilities, and assess basic cyber risks affecting organisations.",
+     "3. Analyse cyber security risks associated with smart technologies, IoT, cloud platforms, and AI systems, and apply basic mitigation strategies.",
+     "4. Explain data protection, privacy principles, and compliance requirements, and recognise organisational responsibilities and consequences of non-compliance.",
+     "5. Identify and evaluate common cyber security controls, policies, and best practices used to protect systems, devices, and information assets."
+    ],
+    "feeHead": "LKR 75,000",
+    "feeNote": "Live online sessions plus the LMS. Contact admissions for the next cohort date.",
+    "feeTitle": "One clear fee.",
+    "overview": "The programme explores cyber security fundamentals, ethical hacking, smart technologies, IoT and AI security risks, data protection, cyber risk management, and incident response. Through real-world examples and a practical capstone assessment, learners develop the ability to identify vulnerabilities, evaluate cyber risks, and recommend effective security measures for modern organisations.",
+    "startAmt": "LKR 75,000",
+    "whoTitle": "For professionals who want skills fast.",
+    "finalLine": "Join the next cohort.",
+    "startNote": "12 weeks · CPD",
+    "monthTrust": "CPD certificate",
+    "progression": "Apply the skills directly at work, or progress to further CPD short courses or diploma-level study"
+   },
+   "seo_title": "Cyber Security in the AI Era",
+   "seo_description": "The Cyber Security in the Smart Era: Protecting Digital Systems and Data programme is a practical, industry-relevant course designed to equip learners with essential knowledge and skills to understand cyber threats, protect digital systems, and manage security risks in today's technology-driven worl",
+   "fee_label": "LKR 75,000"
+  },
+  {
+   "slug": "digital-marketing-mastery",
+   "design_key": "digital-marketing-mastery",
+   "plan_type": "cpd",
+   "short_name": "Digital Marketing Mastery",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "short course cpd",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 149,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Digital Marketing Mastery",
+   "seo_description": "Digital Marketing Mastery is a comprehensive 3-month professional programme that integrates Digital Marketing Strategy, Data Analytics, and Artificial Intelligence into one structured learning pathway. This programme moves learners from foundational marketing principles to advanced analytics and AI-",
+   "fee_label": "from LKR 75,000"
+  },
+  {
+   "slug": "english-communication-mastery-cpd",
+   "design_key": "english-communication-mastery-cpd",
+   "plan_type": "cpd",
+   "short_name": "English Communication Mastery",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "short course cpd",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 150,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "English Communication Mastery",
+   "seo_description": "The programme adopts a practical and interactive approach to English language learning, focusing on the development of essential communication skills, including speaking, listening, reading and writing. Participants will develop a strong foundation in English grammar, sentence construction and vocab",
+   "fee_label": "from LKR 75,000"
+  },
+  {
+   "slug": "financial-literacy",
+   "design_key": "financial-literacy",
+   "plan_type": "cpd",
+   "short_name": "Financial Literacy",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "short course cpd",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 151,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Financial Literacy",
+   "seo_description": "The Financial Literacy & Wealth Building Programme is a practical six-session programme designed to help participants understand money, improve their financial behaviour, increase their earning potential, manage expenses, make informed investment decisions, and develop a long-term personal wealth st",
+   "fee_label": "from LKR 50,000"
+  },
+  {
+   "slug": "innovation-and-entrepreneurship-01",
+   "design_key": "innovation-and-entrepreneurship-01",
+   "plan_type": "cpd",
+   "short_name": "Innovation and Entrepreneurship",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "short course cpd",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 152,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Innovation and Entrepreneurship",
+   "seo_description": "This course develops the entrepreneurial mindset and practical innovation skills needed to turn a customer problem into a tested product, launch it, assess product-market fit and prepare for growth and investment. Learners apply each session to one venture or an innovation project within an existing",
+   "fee_label": "from LKR 35,000"
+  },
+  {
+   "slug": "life-skills-course",
+   "design_key": "life-skills-course",
+   "plan_type": "cpd",
+   "short_name": "Life Skills Course",
+   "level": "Short course",
+   "school": "CPD",
+   "body_label": "CPD",
+   "card_type": "Short course",
+   "keywords": "short course cpd",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 153,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Life Skills Course",
+   "seo_description": "This course is designed for anyone at a crossroads in life, seeking clarity, direction, and the skills to navigate their journey with purpose.",
+   "fee_label": "from LKR 45,000"
+  },
+  {
+   "slug": "ai-for-finance-short-course",
+   "design_key": "ai-for-finance-short-course",
+   "plan_type": "cpd",
+   "short_name": "AI for Finance",
+   "level": "Short course",
+   "school": "Inspire College",
+   "body_label": "Inspire College",
+   "card_type": "Short course",
+   "keywords": "short course inspire college",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 154,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "AI for Finance",
+   "seo_description": "Develop practical skills to use AI in financial analysis, forecasting, valuation and risk management. Across four interactive sessions with hands-on labs, you will work with financial data, build AI-assisted models and turn results into clear, professional reports.",
+   "fee_label": "from LKR 35,000"
+  },
+  {
+   "slug": "english-communication-mastery-short-course",
+   "design_key": "english-communication-mastery-short-course",
+   "plan_type": "cpd",
+   "short_name": "English Communication Mastery",
+   "level": "Short course",
+   "school": "Inspire College",
+   "body_label": "Inspire College",
+   "card_type": "Short course",
+   "keywords": "short course inspire college",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 155,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "English Communication Mastery",
+   "seo_description": "English Communication Mastery is a 12-week programme that builds practical English skills for everyday, academic and professional settings. Through interactive activities, participants improve speaking, listening, reading and writing, alongside grammar, vocabulary and pronunciation.",
+   "fee_label": "from LKR 75,000"
+  },
+  {
+   "slug": "innovation-and-entrepreneurship-short-course",
+   "design_key": "innovation-and-entrepreneurship-short-course",
+   "plan_type": "cpd",
+   "short_name": "Innovation and Entrepreneurship",
+   "level": "Short course",
+   "school": "Inspire College",
+   "body_label": "Inspire College",
+   "card_type": "Short course",
+   "keywords": "short course inspire college",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 156,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Innovation and Entrepreneurship",
+   "seo_description": "This course develops the entrepreneurial mindset and practical innovation skills needed to turn a customer problem into a tested product, launch it, assess product-market fit and prepare for growth and investment. Learners apply each session to one venture or an innovation project within an existing",
+   "fee_label": "from LKR 35,000"
+  },
+  {
+   "slug": "bachelor-of-business-administration-bba-digital-marketing",
+   "design_key": "bachelor-of-business-administration-bba-digital-marketing",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Business Administration (BBA) Digital Marketing",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 157,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Business Administration (BBA) Digital Marketing",
+   "seo_description": "The BBA with an Elective in Digital Marketing is a 3-year, UGC-entitled online undergraduate degree programme designed to build a strong foundation in business administration combined with in-demand digital marketing skills.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-business-administration-bba-elective-data-science-analytics",
+   "design_key": "bachelor-of-business-administration-bba-elective-data-science-analytics",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Business Administration (BBA) Elective: Data Science & Analytics",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 158,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Business Administration (BBA) Elective: Data Science & Analytics",
+   "seo_description": "The BBA with an Elective in Data Science & Analytics is a 3-year, UGC-entitled online undergraduate degree programme designed to build strong business fundamentals combined with data science and analytics capabilities.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-business-administration-bba-human-resource-management",
+   "design_key": "bachelor-of-business-administration-bba-human-resource-management",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Business Administration (BBA) Human Resource Management",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 159,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Business Administration (BBA) Human Resource Management",
+   "seo_description": "The Bachelor of Business Administration (BBA) with an Elective in Human Resource Management is a 3-year, UGC-entitled online degree programme designed to develop strong foundations in people management, organizational behaviour, and business operations.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-computer-application-bca-artificial-intelligence",
+   "design_key": "bachelor-of-computer-application-bca-artificial-intelligence",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Computer Application (BCA) Artificial Intelligence",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 160,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Computer Application (BCA) Artificial Intelligence",
+   "seo_description": "The Online BCA in Artificial Intelligence is a 3-year, UGC-entitled online undergraduate degree programme designed to build foundational and advanced skills in computing and artificial intelligence technologies, enabling learners to solve real-world problems and innovate in tech-driven domains.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-computer-application-bca-cloud-computing",
+   "design_key": "bachelor-of-computer-application-bca-cloud-computing",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Computer Application (BCA) Cloud Computing",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 161,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Computer Application (BCA) Cloud Computing",
+   "seo_description": "The Online BCA in Cloud Computing is a 3-year, UGC-entitled online undergraduate degree designed to equip learners with core computing fundamentals and specialised cloud computing knowledge.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-computer-applications-bca",
+   "design_key": "bachelor-of-computer-applications-bca",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Computer Applications (BCA)",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 162,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Computer Applications (BCA)",
+   "seo_description": "The Bachelor of Computer Applications (BCA) with an Elective in Computer Science & IT is a three-year UGC-entitled online degree programme designed to build a strong foundation in computer science, programming, and software development.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-computer-applications-bca-cyber-security",
+   "design_key": "bachelor-of-computer-applications-bca-cyber-security",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Computer Applications (BCA) – Cyber Security",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 163,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Computer Applications (BCA) – Cyber Security",
+   "seo_description": "The Bachelor of Computer Applications (BCA) with an Elective in Cyber Security is a three-year UGC-entitled online degree programme designed to meet the growing global demand for skilled cybersecurity professionals.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "bachelor-of-commerce-b-com-accounting-and-finance",
+   "design_key": "bachelor-of-commerce-b-com-accounting-and-finance",
+   "plan_type": "pg",
+   "short_name": "Bachelor of Commerce (B.Com) Accounting and Finance",
+   "level": "Top-Up",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Top-Up",
+   "keywords": "top-up jain university",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 164,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Bachelor of Commerce (B.Com) Accounting and Finance",
+   "seo_description": "The Bachelor of Commerce (B.Com) with an Elective in Accounting and Finance is a 3-year, UGC-entitled online degree programme designed to build a strong foundation in accounting, finance, management, and economics.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-business-intelligence-analytics",
+   "design_key": "master-of-business-administration-mba-business-intelligence-analytics",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) (Business Intelligence & Analytics)",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 165,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) (Business Intelligence & Analytics)",
+   "seo_description": "The Master of Business Administration (MBA) with an Elective in Business Intelligence and Analytics is a 2-year, UGC-entitled online degree programme designed to prepare students for a data-driven business environment.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-project-management",
+   "design_key": "master-of-business-administration-mba-project-management",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) (Project Management)",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 166,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) (Project Management)",
+   "seo_description": "The Master of Business Administration (MBA) with an Elective in Project Management is a 2-year, UGC-entitled online degree programme designed to develop strong managerial, strategic, and project execution capabilities.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-elective-artificial-intelligence",
+   "design_key": "master-of-business-administration-mba-elective-artificial-intelligence",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) Elective: Artificial Intelligence",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 167,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) Elective: Artificial Intelligence",
+   "seo_description": "The MBA with an Elective in Artificial Intelligence is a 2-year, UGC-entitled online postgraduate degree programme designed to build strong business leadership and managerial capabilities, integrated with artificial intelligence and data-driven decision-making skills.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-finance-business-analytics",
+   "design_key": "master-of-business-administration-mba-finance-business-analytics",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) Finance & Business Analytics",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 168,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) Finance & Business Analytics",
+   "seo_description": "The Online MBA in Finance & Business Analytics is a 2-year, UGC-entitled online postgraduate degree programme designed to develop advanced skills in financial management, analytics, data-driven decision-making, and strategic business leadership.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-human-resource-management-finance",
+   "design_key": "master-of-business-administration-mba-human-resource-management-finance",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) Human Resource Management & Finance",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 169,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) Human Resource Management & Finance",
+   "seo_description": "The Online MBA in Human Resource Management & Finance is a 2-year, UGC-entitled online degree programme designed to develop strategic leaders with expertise across both human resources and corporate finance functions.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-with-dual-specialisation-in-human-resource-business-analytics",
+   "design_key": "master-of-business-administration-mba-with-dual-specialisation-in-human-resource-business-analytics",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) with Dual Specialisation in Human Resour",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 170,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) with Dual Specialisation in Human Resource & Business Analytics",
+   "seo_description": "This online MBA blends human resource management expertise with business analytics skills to prepare graduates for strategic, data-informed HR decision-making roles. It builds both people management competencies and analytical capabilities to support workforce metrics, HR performance modelling, and ",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-with-dual-specialisation-in-marketing-business-analytics",
+   "design_key": "master-of-business-administration-mba-with-dual-specialisation-in-marketing-business-analytics",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) with Dual Specialisation in Marketing & ",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 171,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) with Dual Specialisation in Marketing & Business Analytics",
+   "seo_description": "The Master of Business Administration (MBA) in Marketing & Business Analytics is a 2-year, UGC-entitled online postgraduate degree programme designed to develop professionals who can combine strategic marketing leadership with data-driven decision-making.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-business-administration-mba-with-specialisation-in-supply-chain-production-operations-management",
+   "design_key": "master-of-business-administration-mba-with-specialisation-in-supply-chain-production-operations-management",
+   "plan_type": "pg",
+   "short_name": "Master of Business Administration (MBA) with Specialisation in Supply Chain, Pro",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 172,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Business Administration (MBA) with Specialisation in Supply Chain, Production & Operations Management",
+   "seo_description": "The Online MBA in Supply Chain, Production & Operations Management is a 2-year, UGC-entitled online postgraduate degree programme designed to develop strategic leaders capable of optimizing end-to-end operations, supply chains, logistics, and production systems.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-artificial-intelligence",
+   "design_key": "master-of-computer-application-mca-artificial-intelligence",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) (Artificial Intelligence)",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 173,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) (Artificial Intelligence)",
+   "seo_description": "The Master of Computer Application (MCA) with an Elective in Artificial Intelligence is a 2-year, UGC-entitled online degree programme designed to build a strong foundation in computer systems, software applications, and Artificial Intelligence.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-computer-science-and-it",
+   "design_key": "master-of-computer-application-mca-computer-science-and-it",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) (Computer Science and IT)",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 174,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) (Computer Science and IT)",
+   "seo_description": "The Master of Computer Application (MCA) with an Elective in Computer Science and IT is a 2-year, UGC-entitled online degree programme designed to meet the growing demand for qualified professionals in the field of Computer Science and Information Technology.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-data-science",
+   "design_key": "master-of-computer-application-mca-data-science",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) (Data Science)",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 175,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) (Data Science)",
+   "seo_description": "The Master of Computer Application (MCA) with an Elective in Data Science is a 2-year, UGC-entitled online degree programme designed to build strong foundations in computer applications, software development, and data science.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-cyber-security",
+   "design_key": "master-of-computer-application-mca-cyber-security",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) Cyber Security",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 176,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) Cyber Security",
+   "seo_description": "The Online MCA in Cyber Security is a 2-year, UGC-entitled postgraduate degree programme designed in collaboration with TCS (Tata Consultancy Services) to build strong computing foundations and advanced cyber security capabilities.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-devops",
+   "design_key": "master-of-computer-application-mca-devops",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) DevOps",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 177,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) DevOps",
+   "seo_description": "The Master of Computer Application (MCA) with an Elective in DevOps is a 2-year, UGC-entitled online degree programme designed to prepare learners for modern software development and IT operations environments.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-elective-data-analytics",
+   "design_key": "master-of-computer-application-mca-elective-data-analytics",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) Elective: Data Analytics",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 178,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) Elective: Data Analytics",
+   "seo_description": "The MCA with an Elective in Data Analytics is a 2-year, UGC-entitled online postgraduate degree programme designed to build strong computing foundations alongside advanced analytics and data-driven decision-making skills.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "master-of-computer-application-mca-nlp-llm-development",
+   "design_key": "master-of-computer-application-mca-nlp-llm-development",
+   "plan_type": "pg",
+   "short_name": "Master of Computer Application (MCA) NLP & LLM Development",
+   "level": "Postgraduate",
+   "school": "Jain University",
+   "body_label": "Jain University",
+   "card_type": "Postgraduate",
+   "keywords": "jain university postgraduate",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 179,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Master of Computer Application (MCA) NLP & LLM Development",
+   "seo_description": "The MCA with an Elective in NLP & LLM Development is a 2-year, UGC-entitled online postgraduate degree programme designed to build advanced expertise in Natural Language Processing (NLP), Large Language Models (LLMs), and AI-driven language applications.",
+   "fee_label": "from LKR 480,000"
+  },
+  {
+   "slug": "international-foundation-diploma",
+   "design_key": "international-foundation-diploma",
+   "plan_type": "pg",
+   "short_name": "International Foundation Diploma",
+   "level": "Foundation",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "Foundation",
+   "keywords": "lsbf foundation",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 180,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "International Foundation Diploma",
+   "seo_description": "The General Foundation in Business and ICT is designed to provide students with a solid grounding in both business principles and information and communication technology (ICT). This interdisciplinary program serves as a stepping stone for those aspiring to pursue careers across diverse industries o",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "diploma-in-banking-and-finance",
+   "design_key": "diploma-in-banking-and-finance",
+   "plan_type": "pg",
+   "short_name": "Diploma in Banking and Finance",
+   "level": "Foundation",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "Foundation",
+   "keywords": "lsbf foundation",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 181,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Diploma in Banking and Finance",
+   "seo_description": "The Diploma in Banking and Finance is designed to provide students with a strong foundation in the core areas of banking, finance, and accounting. The program delivers both theoretical knowledge and practical skills essential for success in financial institutions and corporate finance sectors.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "higher-diploma-in-business-studies",
+   "design_key": "higher-diploma-in-business-studies",
+   "plan_type": "hnd",
+   "short_name": "Higher Diploma in Business Studies",
+   "level": "HND",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "HND",
+   "keywords": "hnd lsbf",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 182,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Higher Diploma in Business Studies",
+   "seo_description": "The Higher Diploma in Business Studies is designed to provide students with in-depth knowledge and practical skills across key areas of business, including management, marketing, finance, human resources, and entrepreneurship.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "higher-diploma-in-logistics-supply-chain-management",
+   "design_key": "higher-diploma-in-logistics-supply-chain-management",
+   "plan_type": "hnd",
+   "short_name": "Higher Diploma in Logistics & Supply Chain Management",
+   "level": "HND",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "HND",
+   "keywords": "hnd lsbf",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 183,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Higher Diploma in Logistics & Supply Chain Management",
+   "seo_description": "The Higher Diploma in Logistics & Supply Chain Management is designed to equip students with a comprehensive understanding of the principles, processes, and strategies involved in the efficient flow of goods, services, and information across the supply chain.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "advanced-diploma-in-accounting-finance",
+   "design_key": "advanced-diploma-in-accounting-finance",
+   "plan_type": "hnd",
+   "short_name": "Advanced Diploma in Accounting & Finance",
+   "level": "HND",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "HND",
+   "keywords": "hnd lsbf",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 184,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Advanced Diploma in Accounting & Finance",
+   "seo_description": "The Advanced Diploma in Accounting & Finance is designed to provide students with in-depth theoretical knowledge and practical skills in financial management, accounting principles, and corporate finance. This program prepares students to understand complex financial systems and make informed busine",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "advanced-diploma-in-business-studies",
+   "design_key": "advanced-diploma-in-business-studies",
+   "plan_type": "hnd",
+   "short_name": "Advanced Diploma in Business Studies",
+   "level": "HND",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "HND",
+   "keywords": "hnd lsbf",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 185,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Advanced Diploma in Business Studies",
+   "seo_description": "The Advanced Diploma in Business Studies is a comprehensive program designed to develop advanced knowledge and practical expertise in core business disciplines such as strategic management, marketing, finance, operations, and organizational behavior.",
+   "fee_label": "from LKR 400,000"
+  },
+  {
+   "slug": "advanced-diploma-in-logistics-supply-chain-management",
+   "design_key": "advanced-diploma-in-logistics-supply-chain-management",
+   "plan_type": "hnd",
+   "short_name": "Advanced Diploma in Logistics & Supply Chain Management",
+   "level": "HND",
+   "school": "LSBF",
+   "body_label": "LSBF",
+   "card_type": "HND",
+   "keywords": "hnd lsbf",
+   "monthly_label": "",
+   "cpd_addon_fee": null,
+   "featured": false,
+   "sort_order": 186,
+   "auto_instalments": true,
+   "web_status": "visible",
+   "detail": null,
+   "seo_title": "Advanced Diploma in Logistics & Supply Chain Management",
+   "seo_description": "The Advanced Diploma in Logistics & Supply Chain Management provides students with an in-depth understanding of logistics and supply chain management, helping graduates rise to the future challenges of the industry. The program is ideal for individuals seeking supervisory or management roles in logi",
+   "fee_label": "from LKR 400,000"
+  }
+ ],
+ "faqs": [
+  {
+   "audience": "student",
+   "question": "Is everything online?",
+   "answer": "Yes. Inspire College offers 100% online qualifications and professional courses. Classes, materials and recordings live in Inspire Brain, our student portal.",
+   "sort_order": 0,
+   "status": "published"
+  },
+  {
+   "audience": "parent",
+   "question": "Is this a recognised qualification?",
+   "answer": "Yes. Our HNDs and Foundation programmes are awarded by ATHE, an Ofqual-regulated UK awarding organisation, with routes to UK top-up degrees.",
+   "sort_order": 0,
+   "status": "published"
+  },
+  {
+   "audience": "student",
+   "question": "Are the qualifications recognised?",
+   "answer": "Our HNDs and Foundation programmes are awarded by ATHE, an Ofqual-regulated UK awarding organisation, with routes to UK top-up degrees. We also partner with WINC, LSBF, Jain University and the CPD Certification Service.",
+   "sort_order": 1,
+   "status": "published"
+  },
+  {
+   "audience": "parent",
+   "question": "How will I know how my child is doing?",
+   "answer": "With your child’s consent, a parent view in Inspire Brain shows attendance, grades and upcoming deadlines, and advisors are a WhatsApp message away.",
+   "sort_order": 1,
+   "status": "published"
+  },
+  {
+   "audience": "student",
+   "question": "Can I pay in instalments?",
+   "answer": "Yes. Pay in full, or spread your fee into monthly instalments with secure PayHere payment links. Registration starts from LKR 9,500. Try the fee planner above.",
+   "sort_order": 2,
+   "status": "published"
+  },
+  {
+   "audience": "parent",
+   "question": "Can we pay monthly?",
+   "answer": "Yes. Pay in full or in monthly instalments by PayHere link. Registration starts from LKR 9,500, and the first 20 students receive a LKR 200,000 scholarship.",
+   "sort_order": 2,
+   "status": "published"
+  },
+  {
+   "audience": "student",
+   "question": "How does the free coffee work?",
+   "answer": "Enrolled CPD UK and ATHE students get one free coffee a week at participating Barista cafés during Inspire Hours, Monday to Friday daytime: 4 a month, 48 a year.",
+   "sort_order": 3,
+   "status": "published"
+  },
+  {
+   "audience": "parent",
+   "question": "Who teaches the classes?",
+   "answer": "Live online sessions are led by Sri Lankan lecturers who hold relevant master’s degrees, with recordings in the student portal.",
+   "sort_order": 3,
+   "status": "published"
+  },
+  {
+   "audience": "student",
+   "question": "What happens after I apply?",
+   "answer": "We review your application, an advisor contacts you, we confirm your entry requirements and you complete enrolment.",
+   "sort_order": 4,
+   "status": "published"
+  },
+  {
+   "audience": "parent",
+   "question": "What happens after we apply?",
+   "answer": "We review the application, an advisor contacts you, we confirm entry requirements and you complete enrolment together.",
+   "sort_order": 4,
+   "status": "published"
+  }
+ ],
+ "campaigns": [
+  {
+   "key": "scholarship",
+   "tag": "Scholarship",
+   "text": "The first 20 students receive a LKR 200,000 scholarship.",
+   "short": "First 20 students get a LKR 200,000 scholarship",
+   "perk": "Apply for the LKR 200,000 scholarship (first 20 students)",
+   "sort_order": 0,
+   "status": "published"
+  },
+  {
+   "key": "intake",
+   "tag": "Now enrolling",
+   "text": "New intake open. Reserve your seat with the registration fee.",
+   "short": "New intake open · reserve your seat today",
+   "perk": "Your seat in the next intake is held",
+   "sort_order": 1,
+   "status": "published"
+  },
+  {
+   "key": "referral",
+   "tag": "Bring a friend",
+   "text": "Earn LKR 15,000 for every friend who enrols.",
+   "short": "Bring a friend · earn LKR 15,000 each",
+   "perk": "Share your link and earn LKR 15,000 per friend who enrols",
+   "sort_order": 2,
+   "status": "published"
+  },
+  {
+   "key": "coffee",
+   "tag": "Free coffee",
+   "text": "CPD UK and ATHE students get 48 free Barista coffees a year.",
+   "short": "48 free Barista coffees a year with CPD UK & ATHE",
+   "perk": "Claim your first free Barista coffee this week",
+   "sort_order": 3,
+   "status": "published"
+  }
+ ],
+ "stories": [
+  {
+   "name": "Nidarshana Premkumar",
+   "role": "HND · Inspire College",
+   "image": "/assets/09837c527e84a92316e486e08aac96dc.webp",
+   "image_pos": "66%",
+   "video_url": "/testimonials/nidarshana-premkumar.mp4",
+   "caption": "Get to know Nidarshana’s HND experience at Inspire.",
+   "sort_order": 0,
+   "status": "published"
+  },
+  {
+   "name": "Gimhani Edirisinghe",
+   "role": "HND · Inspire College",
+   "image": "/assets/611c94883ba62d0bd5f4039c934d0719.webp",
+   "image_pos": "70%",
+   "video_url": "/testimonials/gimhani-edirisinghe.mp4",
+   "caption": "An HND journey, in Gimhani’s own words.",
+   "sort_order": 1,
+   "status": "published"
+  },
+  {
+   "name": "Akram Razik",
+   "role": "Foundation + HND · Inspire College",
+   "image": "/assets/306af9da34846d4e9ac72a934dc008df.webp",
+   "image_pos": "63%",
+   "video_url": "/testimonials/akram-razik.mp4",
+   "caption": "From Foundation to HND — hear Akram’s experience.",
+   "sort_order": 2,
+   "status": "published"
+  },
+  {
+   "name": "Keneth Joel",
+   "role": "Level 4 · Inspire College",
+   "image": "/assets/5c091c05f7b949dc153bf80ba9f087d9.webp",
+   "image_pos": "54%",
+   "video_url": "/testimonials/keneth-joel.mp4",
+   "caption": "Keneth shares his Level 4 learning experience at Inspire.",
+   "sort_order": 3,
+   "status": "published"
+  },
+  {
+   "name": "Yara Benjamin",
+   "role": "Foundation · Inspire College",
+   "image": "/assets/975d6324bb39d4835d5e638fe5c2db8f.webp",
+   "image_pos": "68%",
+   "video_url": "/testimonials/yara-benjamin.mp4",
+   "caption": "Starting with Foundation — Yara shares her story.",
+   "sort_order": 4,
+   "status": "published"
+  }
+ ],
+ "settings": {
+  "contact": {
+   "whatsapp_main": "94760974225",
+   "whatsapp_advisor": "94760974225",
+   "phone_display": "+94 76 097 4225",
+   "email": "enrol@inspire.college"
+  },
+  "theme": {
+   "palette": "purple",
+   "shape": "",
+   "font": ""
+  },
+  "tracking": {
+   "gtm": "",
+   "ga4": "",
+   "metaPixel": "",
+   "tiktokPixel": "",
+   "googleAdsId": "",
+   "googleAdsPurchaseLabel": "",
+   "googleAdsLeadLabel": ""
+  },
+  "default_campaign": "scholarship",
+  "home_extra_cards": [
+   {
+    "k": "degree bba bca bcom mba mca bachelor master",
+    "cat": "Degrees",
+    "dur": "BBA · BCA · B.COM · MBA · MCA",
+    "fee": "Talk to an advisor",
+    "hue": "",
+    "img": "/assets/2525607f9303074ff4a330fd63cf1a64.webp",
+    "body": "Jain University",
+    "href": "/programs?school=Jain%20University",
+    "name": "Jain University degrees",
+    "type": "Degree",
+    "blurb": "Bachelor’s and master’s degrees with Jain University, studied online from Sri Lanka.",
+    "school": "Jain University",
+    "monthly": "23 programmes"
+   }
+  ],
+  "seo": {
+   "site_name": "Inspire College",
+   "default_description": "100% online UK-regulated ATHE qualifications, HNDs, Foundations, top-up degrees, postgraduate and CPD courses."
+  },
+  "fee_plans": {}
+ },
+ "billing": {
+  "finance_email": "",
+  "bank": {
+   "account_name": "Inspire College (Pvt) Ltd",
+   "bank": "",
+   "branch": "",
+   "account_no": "",
+   "note": "Use your invoice number as the payment reference."
+  },
+  "year2": {
+   "hnd": {
+    "instalments": 9,
+    "instalment_amount": 9999
+   }
+  }
+ },
+ "demo_classes": [
+  {
+   "code": " B_L3_M5",
+   "title": "Market Research",
+   "awarding_body": "ATHE (UK)",
+   "school": "School of Business",
+   "programme": "ATHE-Foundation-Level-Business",
+   "intake": "September",
+   "study_mode": "Full Time",
+   "start_date": "2026-09-01",
+   "end_date": "2026-11-30",
+   "lecturers": " Leandra",
+   "status": "Active",
+   "image": "https://inspire-web-v2-api.onrender.com/media/f324ed32f7a5-1901c43690da47349ea14be9cc35f15d-images.jpg",
+   "description": "Learn how to identify target markets, understand customer needs, analyze competitors, and gather valuable market insights to make informed business decisions and identify new business opportunities.",
+   "takeaways": "Key Topics Covered:\n\nIntroduction to Market Research\n\nIdentifying Target Markets and Customer Segments\n\nUnderstanding Consumer Behavior\n\nPrimary and Secondary Research Methods\n\nDesigning Surveys and Questionnaires\n\nCompetitor and Industry Analysis\n\nData Collection and Analysis\n\nMarket Trends and Opportunity Identification\n\nInterpreting Research Findings\n\nMaking Data-Driven Business Decisions",
+   "sort_order": 100,
+   "published": "published",
+   "sections": [
+    {
+     "title": "Day 01",
+     "description": "",
+     "status": "active",
+     "position": 1,
+     "items": [
+      {
+       "item_type": "video",
+       "title": "B_L3_M5_S1 Introduction to Market Research",
+       "description": "",
+       "resource_url": "https://vimeo.com/1228686024/ca9a94119f?fl=pl&fe=sh",
+       "text_content": "",
+       "duration_minutes": 21,
+       "status": "published",
+       "is_required": false,
+       "position": 1
+      },
+      {
+       "item_type": "pdf",
+       "title": "research-methods-for-market-research",
+       "description": "",
+       "resource_url": "https://inspire-web-v2-api.onrender.com/media/30ce8763b964--m5-s17-research-methods-for-market-research-primary-secondary-and-data-coll.pdf",
+       "text_content": "",
+       "duration_minutes": null,
+       "status": "published",
+       "is_required": false,
+       "position": 2
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

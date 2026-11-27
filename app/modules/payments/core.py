@@ -23,7 +23,11 @@ CF = {
 DEFAULTS = dict(college_name='Inspire College', display_currency='LKR', fy_start_month=4, registration_fee=5000, invoice_lead_days=5,
                 reminders=dict(before_days=3, on_due=True, after_days=7), late_fee=dict(enabled=False, amount=1000, after_days=7),
                 link_expiry_days=30, ecl_rates=dict(current=.02, d30=.1, d60=.25, d90=.5, d90p=.9),
-                payment_methods=['payhere', 'bank_transfer', 'cash'])
+                payment_methods=['payhere', 'bank_transfer', 'cash'],
+                # New website checkout: bank details on the invoice page, finance alert inbox, Year 2 prefill.
+                web_checkout=dict(bank=dict(account_name='Inspire College (Pvt) Ltd', bank='', branch='', account_no='',
+                                            note='Use your order or invoice number as the payment reference.'),
+                                  finance_email='', year2=dict(instalments=9, instalment_amount=9999)))
 
 
 def money(value, positive=False):
